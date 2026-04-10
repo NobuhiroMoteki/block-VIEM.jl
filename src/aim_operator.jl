@@ -245,6 +245,14 @@ function assemble_precorrection(basis::SWGBasis, proj::AIMProjection,
                                 duffy_rule::DuffyQuadRule = duffy_reference_rule(5))
     pairs = near_pairs(basis)
     N = n_basis(basis)
+
+    # Group near pairs by column n so we can batch the AIM column extraction.
+    col_to_rows = Dict{Int,Vector{Int}}()
+    for (m, n) in pairs
+        push!(get!(Vector{Int}, col_to_rows, n), m)
+    end
+    near_cols = sort!(collect(keys(col_to_rows)))
+
     Is = Int[]
     Js = Int[]
     Vs = ComplexF64[]
@@ -252,17 +260,22 @@ function assemble_precorrection(basis::SWGBasis, proj::AIMProjection,
     sizehint!(Js, length(pairs))
     sizehint!(Vs, length(pairs))
 
-    for (m, n) in pairs
-        # Direct radiation kernel K_direct[m,n] (without mass and prefactors).
-        K_direct_mn = _radiation_kernel(basis, Int(m), Int(n),
-                                        ComplexF64(k0),
-                                        outer_rule, duffy_rule)
-        # AIM approximation of the same radiation kernel.
-        K_aim_mn = aim_radiation_element(proj, G_hat, k0, Int(m), Int(n))
+    # For each near column n, compute the full AIM column via aim_far_mvp
+    # with a unit vector e_n, then extract only the needed rows.
+    e_n = zeros(ComplexF64, N)
+    for n in near_cols
+        e_n[n] = 1.0
+        K_aim_col = aim_far_mvp(proj, G_hat, k0, e_n)
+        e_n[n] = 0.0
 
-        push!(Is, m)
-        push!(Js, n)
-        push!(Vs, K_direct_mn - K_aim_mn)
+        for m in col_to_rows[n]
+            K_direct_mn = _radiation_kernel(basis, m, n,
+                                            ComplexF64(k0),
+                                            outer_rule, duffy_rule)
+            push!(Is, m)
+            push!(Js, n)
+            push!(Vs, K_direct_mn - K_aim_col[m])
+        end
     end
     return sparse(Is, Js, Vs, N, N)
 end
