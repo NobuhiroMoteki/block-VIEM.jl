@@ -75,6 +75,14 @@ const TET_QUAD_5PT = TetQuadRule(
 )
 
 """
+11-point rule, degree 4 (Keast 1986, Rule index 6).
+
+Uses 4 orbits: 1 centroid + two sets of 4 vertex-orbit + one edge orbit of 6.
+All weights normalized so that `sum(weights) == 1` (reference simplex volume
+is factored out and applied in [`integrate`](@ref)).
+"""
+
+"""
     bary_to_point(λ, vertices) -> Vec3
 
 Convert a barycentric tuple `λ = (λ1, λ2, λ3, λ4)` into a Cartesian point

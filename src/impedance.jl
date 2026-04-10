@@ -109,6 +109,21 @@ function _radiation_kernel(basis::SWGBasis, m::Int, n::Int, k0::ComplexF64,
     return s
 end
 
+"""
+    _tets_share_nodes(mesh, t1, t2) -> Bool
+
+True if tetrahedra `t1` and `t2` share at least one vertex (face/edge/vertex
+adjacency). Used to trigger near-singular Duffy quadrature on cross-tet pairs.
+"""
+@inline function _tets_share_nodes(mesh::TetMesh, t1::Int, t2::Int)
+    n1 = mesh.tets[t1]
+    n2 = mesh.tets[t2]
+    @inbounds for a in n1, b in n2
+        a == b && return true
+    end
+    return false
+end
+
 function _radiation_pair(basis::SWGBasis, m::Int, n::Int,
                          m_tet::Int, n_tet::Int, k0::ComplexF64,
                          outer_rule::TetQuadRule, duffy_rule::DuffyQuadRule)
@@ -119,7 +134,17 @@ function _radiation_pair(basis::SWGBasis, m::Int, n::Int,
     div_m = divergence(basis, m, m_tet)
     div_n = divergence(basis, n, n_tet)
     k0_sq = k0 * k0
+    # Use Duffy quadrature only for self-tet pairs (r is inside n_tet by
+    # construction). For cross-tet pairs — including adjacent tets that share
+    # nodes — the observation point r lies outside n_tet, so the 1/R
+    # integrand has no singularity but may be nearly singular. We handle
+    # this via higher-order Gauss quadrature on the inner tet.
     self_pair = (m_tet == n_tet)
+
+    # For adjacent cross-tet pairs, use the Duffy rule's underlying GL
+    # points as a higher-order product rule on the inner tet, giving better
+    # near-singular accuracy than the default 5-point rule.
+    near_cross = !self_pair && _tets_share_nodes(basis.mesh, m_tet, n_tet)
 
     s = zero(ComplexF64)
     for i in 1:outer_rule.n
@@ -129,6 +154,11 @@ function _radiation_pair(basis::SWGBasis, m::Int, n::Int,
 
         if self_pair
             inner_pts, inner_wts = duffy_quadrature_around(verts_n, r, duffy_rule)
+        elseif near_cross
+            # Use Duffy rule as a high-order tet quadrature (singular vertex
+            # at tet vertex 1, but r is outside so no true singularity — we
+            # just need more quadrature points).
+            inner_pts, inner_wts = duffy_quadrature(verts_n, 1, duffy_rule)
         else
             inner_pts, inner_wts = _gauss_pts_wts(outer_rule, verts_n, Vn)
         end

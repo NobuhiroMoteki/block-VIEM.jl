@@ -1,6 +1,6 @@
 using Test
 using StaticArrays
-using LinearAlgebra: norm
+using LinearAlgebra: norm, dot
 using BlockVIEM
 using BlockVIEM: Vec3
 import Gmsh: gmsh
@@ -71,14 +71,19 @@ end
         path = generate_sphere_mesh(radius, 0.7)
         mesh = read_msh(path)
         basis = build_swg_basis(mesh)
-        result = solve_direct(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
-                              k_hat = k_hat, E0 = E0)
-        scat = compute_scattering(basis, result.D_coeffs;
+        dr = duffy_reference_rule(7)
+        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                      eps_bg = eps_bg, duffy_rule = dr,
+                                      symmetrize = true)
+        k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+        b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = k_bg)
+        D = Z \ b
+        residual = norm(Z * D - b) / norm(b)
+        scat = compute_scattering(basis, D;
                                   k_hat = k_hat, E0 = E0,
                                   k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
-        @test result.converged
+        @test residual < 1e-8
         @test scat.C_abs > 0
-        # Coarse mesh: within factor 3 of Mie C_abs.
         @test scat.C_abs / mie.C_abs > 0.3
         @test scat.C_abs / mie.C_abs < 3.0
         @info "VIEM coarse" N=n_basis(basis) C_abs_viem=scat.C_abs C_abs_mie=mie.C_abs
@@ -86,13 +91,19 @@ end
 
     @testset "mesh refinement improves C_abs" begin
         errs = Float64[]
+        # Use higher-order Duffy (order 7) for better near-singular accuracy.
+        dr = duffy_reference_rule(7)
         for lc in (0.7, 0.5)
             path = generate_sphere_mesh(radius, lc)
             mesh = read_msh(path)
             basis = build_swg_basis(mesh)
-            result = solve_direct(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
-                                  k_hat = k_hat, E0 = E0)
-            scat = compute_scattering(basis, result.D_coeffs;
+            Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                          eps_bg = eps_bg, duffy_rule = dr,
+                                          symmetrize = true)
+            k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+            b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = k_bg)
+            D = Z \ b
+            scat = compute_scattering(basis, D;
                                       k_hat = k_hat, E0 = E0,
                                       k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
             push!(errs, abs(scat.C_abs - mie.C_abs) / mie.C_abs)

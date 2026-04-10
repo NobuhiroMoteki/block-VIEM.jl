@@ -44,6 +44,7 @@ exact_monomial(a, b, c) = factorial(a) * factorial(b) * factorial(c) /
         @test integrate(rule, REF_TET, r -> r[1] * r[2] * r[3]) ≈
               exact_monomial(1, 1, 1)
     end
+
 end
 
 @testset "Gauss-Legendre 1D on [0,1]" begin
