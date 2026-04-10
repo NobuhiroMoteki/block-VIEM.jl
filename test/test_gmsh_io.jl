@@ -2,17 +2,17 @@ using Test
 using BlockVIEM
 import Gmsh: gmsh
 
-# Build a tiny .msh on the fly via the Gmsh API and read it back through
-# BlockVIEM.read_msh, then verify counts and consistency.
+include(joinpath(@__DIR__, "meshes", "build.jl"))
 
+# Inline OCC mesh generator (kept for an end-to-end smoke test that does
+# not depend on the .geo files in test/meshes/).
 function generate_unit_cube_msh(path::AbstractString; lc::Float64 = 0.5)
     gmsh.initialize()
     try
         gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("unit_cube")
+        gmsh.model.add("unit_cube_inline")
         gmsh.model.occ.addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1)
         gmsh.model.occ.synchronize()
-        # tag the volume as physical group 42 so we can verify phys_tags
         gmsh.model.addPhysicalGroup(3, [1], 42)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc)
@@ -24,22 +24,42 @@ function generate_unit_cube_msh(path::AbstractString; lc::Float64 = 0.5)
 end
 
 @testset "Gmsh I/O" begin
-    mktempdir() do dir
-        path = joinpath(dir, "unit_cube.msh")
-        generate_unit_cube_msh(path; lc = 0.6)
+    @testset "inline OCC unit cube" begin
+        mktempdir() do dir
+            path = joinpath(dir, "unit_cube.msh")
+            generate_unit_cube_msh(path; lc = 0.6)
+            mesh = read_msh(path)
+            @test n_nodes(mesh) >= 8
+            @test n_tets(mesh) >= 1
+            @test all(>(0), mesh.tet_volumes)
+            @test isapprox(total_volume(mesh), 1.0; atol = 1e-12)
+            @test all(==(42), mesh.tet_phys_tags)
+            basis = build_swg_basis(mesh)
+            @test n_basis(basis) >= 1
+            @test all(>(0), basis.face_areas)
+        end
+    end
+
+    @testset "test/meshes/cube.geo" begin
+        path = ensure_msh("cube")
         mesh = read_msh(path)
-
-        @test n_nodes(mesh) >= 8           # at least the cube corners
         @test n_tets(mesh) >= 1
-        @test all(>(0), mesh.tet_volumes)
-        # The total volume of the unit cube must be 1 to within mesh tolerance.
         @test isapprox(total_volume(mesh), 1.0; atol = 1e-12)
-        # Every tetrahedron should be tagged with physical group 42.
         @test all(==(42), mesh.tet_phys_tags)
+    end
 
-        # And the SWG basis should successfully build on top of it.
+    @testset "test/meshes/sphere.geo" begin
+        path = ensure_msh("sphere")
+        mesh = read_msh(path)
+        @test n_tets(mesh) >= 4
+        @test all(>(0), mesh.tet_volumes)
+        # Coarse mesh: total volume should approximate (4/3)π but not equal
+        # exactly. Allow a generous 20% tolerance for the default lc=0.4.
+        @test isapprox(total_volume(mesh), 4π / 3; rtol = 0.2)
+        @test all(==(1), mesh.tet_phys_tags)
+        # SWG basis must build without errors and contain at least one
+        # internal face.
         basis = build_swg_basis(mesh)
         @test n_basis(basis) >= 1
-        @test all(>(0), basis.face_areas)
     end
 end

@@ -20,6 +20,10 @@ include("mesh.jl")
 include("swg.jl")
 include("gmsh_io.jl")
 
+# Phase 2: Singular volume integration (Duffy)
+include("quadrature.jl")
+include("duffy.jl")
+
 # Public API (Phase 1)
 export Vec3, TetVerts
 export TetMesh, n_nodes, n_tets, total_volume
@@ -27,7 +31,11 @@ export tet_volume, tet_signed_volume, tet_centroid, triangle_area
 export SWGBasis, build_swg_basis, n_basis, evaluate, divergence
 export read_msh
 
-# Phase 2: Singular volume integration (Duffy)        — TODO
+# Public API (Phase 2)
+export TetQuadRule, TET_QUAD_1PT, TET_QUAD_4PT, TET_QUAD_5PT
+export bary_to_point, integrate, gauss_legendre_unit
+export DuffyQuadRule, duffy_reference_rule, duffy_quadrature
+# Phase 2 (cont.): full singular pair Z_mn evaluator  — TODO
 # Phase 3: AIM (FFT-MVP)                              — TODO
 # Phase 4: Block-Krylov solver                        — TODO
 # Phase 5: PostProcess (CAS-v2 observables)           — TODO
