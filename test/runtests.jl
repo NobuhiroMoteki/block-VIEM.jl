@@ -9,4 +9,6 @@ using BlockVIEM
     include("test_duffy.jl")
     include("test_green.jl")
     include("test_impedance.jl")
+    include("test_aim_grid.jl")
+    include("test_aim_projection.jl")
 end

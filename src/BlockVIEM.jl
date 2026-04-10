@@ -26,6 +26,10 @@ include("duffy.jl")
 include("green.jl")
 include("impedance.jl")
 
+# Phase 3: AIM (FFT-MVP)
+include("aim_grid.jl")
+include("aim_projection.jl")
+
 # Public API (Phase 1)
 export Vec3, TetVerts
 export TetMesh, n_nodes, n_tets, total_volume
@@ -41,8 +45,14 @@ export subdivide_around, duffy_quadrature_around
 export helmholtz_green, helmholtz_green_static
 export impedance_element, assemble_impedance_matrix
 
+# Public API (Phase 3)
+export AIMGrid, n_grid_points, grid_point, aim_grid, grid_stencil, grid_point_at_linear
+export AIMProjection, build_aim_projection, basis_centroid, basis_moments
+export multi_indices, n_moments
+
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
-# Phase 3: AIM (FFT-MVP)                              — TODO
+# Phase 3 (cont.): Toeplitz Green tensor + FFT-MVP    — TODO
+# Phase 3 (cont.): AIM precorrection                  — TODO
 # Phase 4: Block-Krylov solver                        — TODO
 # Phase 5: PostProcess (CAS-v2 observables)           — TODO
 
