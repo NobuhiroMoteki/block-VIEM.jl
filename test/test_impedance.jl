@@ -1,5 +1,6 @@
 using Test
 using StaticArrays
+using LinearAlgebra: norm, transpose
 using BlockVIEM
 using BlockVIEM: Vec3, TetVerts
 
@@ -150,5 +151,68 @@ end
             @test real(Z) > 0
             @test isapprox(imag(Z), 0.0; atol = 1e-13)
         end
+    end
+end
+
+@testset "assemble_impedance_matrix" begin
+    @testset "size, type, and scalar consistency (cube mesh)" begin
+        mesh = unit_cube_mesh_z()
+        basis = build_swg_basis(mesh)
+        N = n_basis(basis)
+        k0 = 0.5
+        eps_p = 2.0 + 0.1im
+        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p)
+        @test size(Z) == (N, N)
+        @test Z isa Matrix{ComplexF64}
+        # Every element must agree with the scalar impedance_element call.
+        for m in 1:N, n in 1:N
+            Zmn = impedance_element(basis, m, n; k0 = k0, eps_p = eps_p)
+            @test Z[m, n] == Zmn
+        end
+    end
+
+    @testset "static-limit κ=0 matrix is real symmetric" begin
+        mesh = unit_cube_mesh_z()
+        basis = build_swg_basis(mesh)
+        Z = assemble_impedance_matrix(basis; k0 = 0.0, eps_p = 1.0, eps_bg = 1.0)
+        @test maximum(abs.(imag.(Z))) < 1e-13
+        @test maximum(abs.(Z .- transpose(Z))) < 1e-13
+        # Diagonal entries are positive.
+        for m in 1:n_basis(basis)
+            @test real(Z[m, m]) > 0
+        end
+    end
+
+    @testset "symmetrize keyword absorbs reciprocity gap" begin
+        mesh = unit_cube_mesh_z()
+        basis = build_swg_basis(mesh)
+        Z_raw = assemble_impedance_matrix(basis;
+                                          k0 = 0.5,
+                                          eps_p = 2.0 + 0.1im,
+                                          symmetrize = false)
+        Z_sym = assemble_impedance_matrix(basis;
+                                          k0 = 0.5,
+                                          eps_p = 2.0 + 0.1im,
+                                          symmetrize = true)
+        @test maximum(abs.(Z_sym .- transpose(Z_sym))) < 1e-14
+        # The symmetric matrix differs from the raw one by at most the
+        # reciprocity gap (~few × 1e-6 with default rules).
+        @test maximum(abs.(Z_sym .- Z_raw)) < 1e-5
+    end
+
+    @testset "small linear solve is well-posed (cube mesh)" begin
+        # Sanity check: the assembled matrix should be invertible for a
+        # generic right-hand side. Use a fixed seed-free deterministic RHS.
+        mesh = unit_cube_mesh_z()
+        basis = build_swg_basis(mesh)
+        Z = assemble_impedance_matrix(basis;
+                                      k0 = 0.5,
+                                      eps_p = 2.0 + 0.1im,
+                                      symmetrize = true)
+        N = size(Z, 1)
+        b = ComplexF64[(i + 0.1im) for i in 1:N]
+        x = Z \ b
+        @test all(isfinite, x)
+        @test norm(Z * x - b) / norm(b) < 1e-10
     end
 end

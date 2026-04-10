@@ -163,3 +163,62 @@ end
     end
     return pts, wts
 end
+
+# ---------------------------------------------------------------------------
+# Full Z-matrix assembly
+# ---------------------------------------------------------------------------
+
+"""
+    assemble_impedance_matrix(basis::SWGBasis;
+                              k0::Number,
+                              eps_p::Number = 1,
+                              eps_bg::Number = 1,
+                              outer_rule::TetQuadRule = TET_QUAD_5PT,
+                              duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
+                              symmetrize::Bool = false)
+        -> Matrix{ComplexF64}
+
+Build the dense `N × N` SWG impedance matrix for `basis` by calling
+[`impedance_element`](@ref) on every pair `(m, n)`. The outer loop over
+`m` is parallelized with `Threads.@threads`; set the environment variable
+`JULIA_NUM_THREADS` (or launch Julia with `-t auto`) to obtain a speed-up.
+
+If `symmetrize = true`, the result is replaced by `(Z + transpose(Z)) / 2`
+to absorb the small (`~1e-5`) reciprocity gap introduced by the
+asymmetric outer-Gauss / inner-Duffy quadrature on self-tet pairs. Use
+this for symmetric Krylov solvers; leave it `false` if you want the raw
+quadrature output (e.g., for AIM precorrection comparisons).
+
+Both `outer_rule` and `duffy_rule` are constructed once and reused across
+the entire matrix to avoid repeated allocation.
+"""
+function assemble_impedance_matrix(basis::SWGBasis;
+                                   k0::Number,
+                                   eps_p::Number = 1,
+                                   eps_bg::Number = 1,
+                                   outer_rule::TetQuadRule = TET_QUAD_5PT,
+                                   duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
+                                   symmetrize::Bool = false)
+    N = n_basis(basis)
+    Z = Matrix{ComplexF64}(undef, N, N)
+    Threads.@threads for m in 1:N
+        @inbounds for n in 1:N
+            Z[m, n] = impedance_element(basis, m, n;
+                                        k0 = k0,
+                                        eps_p = eps_p,
+                                        eps_bg = eps_bg,
+                                        outer_rule = outer_rule,
+                                        duffy_rule = duffy_rule)
+        end
+    end
+    if symmetrize
+        @inbounds for m in 1:N
+            for n in (m + 1):N
+                avg = (Z[m, n] + Z[n, m]) / 2
+                Z[m, n] = avg
+                Z[n, m] = avg
+            end
+        end
+    end
+    return Z
+end

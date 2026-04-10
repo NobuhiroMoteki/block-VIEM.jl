@@ -39,7 +39,7 @@ export bary_to_point, integrate, gauss_legendre_unit
 export DuffyQuadRule, duffy_reference_rule, duffy_quadrature
 export subdivide_around, duffy_quadrature_around
 export helmholtz_green, helmholtz_green_static
-export impedance_element
+export impedance_element, assemble_impedance_matrix
 
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
 # Phase 3: AIM (FFT-MVP)                              — TODO
