@@ -142,3 +142,95 @@ the remaining three vertices is preserved.
         throw(ArgumentError("singular_local must be in 1:4, got $s"))
     end
 end
+
+# ---------------------------------------------------------------------------
+# Subdivision around an observation point
+# ---------------------------------------------------------------------------
+
+"""
+    subdivide_around(vertices::NTuple{4,Vec3}, p::Vec3) -> NTuple{4,NTuple{4,Vec3}}
+
+Split a tetrahedron `T = (v1, v2, v3, v4)` into four sub-tetrahedra each
+having `p` as its first vertex. The `k`-th sub-tet pairs `p` with the face
+of `T` opposite vertex `k`:
+
+```text
+sub[1] = (p, v2, v3, v4)
+sub[2] = (p, v1, v3, v4)
+sub[3] = (p, v1, v2, v4)
+sub[4] = (p, v1, v2, v3)
+```
+
+If `p` lies in the strict interior of `T`, all four sub-tets are
+non-degenerate and their volumes sum to `V_T`. If `p` lies on a face,
+edge, or vertex of `T`, the sub-tets corresponding to features that
+contain `p` collapse to zero volume, and the remaining ones still sum to
+`V_T`.
+
+Combined with [`duffy_quadrature`](@ref) at `singular_local = 1`, the
+output of this function is the natural building block for self-term and
+near-singular integration.
+"""
+@inline function subdivide_around(vertices::NTuple{4,Vec3}, p::Vec3)
+    v1, v2, v3, v4 = vertices
+    return (
+        (p, v2, v3, v4),
+        (p, v1, v3, v4),
+        (p, v1, v2, v4),
+        (p, v1, v2, v3),
+    )
+end
+
+"""
+    duffy_quadrature_around(vertices::NTuple{4,Vec3}, p::Vec3, rule::DuffyQuadRule;
+                            zero_volume_tol=eps(Float64)) -> (Vector{Vec3}, Vector{Float64})
+
+Vertex-Duffy quadrature for an integrand with a (possibly singular) feature
+at `p`, where `p` lies in the closure of the tetrahedron `vertices`. The
+tetrahedron is split via [`subdivide_around`](@ref), Duffy is applied to
+every non-degenerate sub-tet with `p` as its singular vertex, and the
+resulting nodes/weights are concatenated.
+
+Sub-tets with volume below `zero_volume_tol * V_T` are discarded; with the
+default tolerance of `eps(Float64)` this only filters sub-tets that are
+exactly degenerate (e.g. when `p` lies on a face of `T`).
+
+The returned weights already include the physical-volume Jacobian, so
+```julia
+∫_T g(r) dV ≈ sum(weights .* g.(points))
+```
+"""
+function duffy_quadrature_around(vertices::NTuple{4,Vec3},
+                                 p::Vec3,
+                                 rule::DuffyQuadRule;
+                                 zero_volume_tol::Float64 = eps(Float64))
+    sub_tets = subdivide_around(vertices, p)
+    n_per_sub = length(rule.bary)
+    pts = Vector{Vec3}(undef, 4 * n_per_sub)
+    wts = Vector{Float64}(undef, 4 * n_per_sub)
+    V_total = tet_volume(vertices...)
+    skip_thresh = zero_volume_tol * V_total
+    npts = 0
+    for sub in sub_tets
+        Vsub = tet_volume(sub...)
+        Vsub <= skip_thresh && continue
+        spts, swts = duffy_quadrature(sub, 1, rule)
+        @inbounds for i in 1:n_per_sub
+            npts += 1
+            pts[npts] = spts[i]
+            wts[npts] = swts[i]
+        end
+    end
+    resize!(pts, npts)
+    resize!(wts, npts)
+    return pts, wts
+end
+
+"""
+    duffy_quadrature_around(vertices, p, n::Integer)
+
+Convenience overload that builds a fresh reference rule of order `n`.
+"""
+function duffy_quadrature_around(vertices::NTuple{4,Vec3}, p::Vec3, n::Integer)
+    return duffy_quadrature_around(vertices, p, duffy_reference_rule(Int(n)))
+end

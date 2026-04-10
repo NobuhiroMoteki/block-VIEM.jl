@@ -103,3 +103,78 @@ const REF_TET_D = (Vec3(0, 0, 0), Vec3(1, 0, 0),
         end
     end
 end
+
+@testset "subdivide_around / duffy_quadrature_around" begin
+    @testset "subdivide_around volume conservation" begin
+        # Interior point: all 4 sub-tets non-degenerate, volumes sum to V_T.
+        p_int = Vec3(0.2, 0.2, 0.2)
+        subs = subdivide_around(REF_TET_D, p_int)
+        @test sum(tet_volume(s...) for s in subs) ≈ 1 / 6
+        @test all(s -> tet_volume(s...) > 0, subs)
+
+        # Face-centroid point: one sub-tet degenerate, others sum to V_T.
+        p_face = (REF_TET_D[2] + REF_TET_D[3] + REF_TET_D[4]) / 3
+        subs = subdivide_around(REF_TET_D, p_face)
+        vols = [tet_volume(s...) for s in subs]
+        @test sum(vols) ≈ 1 / 6
+        @test count(>(1e-15), vols) == 3
+
+        # Edge midpoint: two sub-tets degenerate.
+        p_edge = (REF_TET_D[2] + REF_TET_D[3]) / 2
+        subs = subdivide_around(REF_TET_D, p_edge)
+        vols = [tet_volume(s...) for s in subs]
+        @test sum(vols) ≈ 1 / 6
+        @test count(>(1e-15), vols) == 2
+
+        # Vertex coincident: three sub-tets degenerate.
+        subs = subdivide_around(REF_TET_D, REF_TET_D[1])
+        vols = [tet_volume(s...) for s in subs]
+        @test sum(vols) ≈ 1 / 6
+        @test count(>(1e-15), vols) == 1
+    end
+
+    @testset "constant integration through duffy_quadrature_around" begin
+        rule = duffy_reference_rule(4)
+        # Interior point.
+        for p in (Vec3(0.1, 0.1, 0.1),
+                  Vec3(0.25, 0.25, 0.25),
+                  Vec3(0.4, 0.3, 0.2))
+            _, wts = duffy_quadrature_around(REF_TET_D, p, rule)
+            @test isapprox(sum(wts), 1 / 6; atol = 1e-12)
+        end
+        # Face / edge / vertex.
+        p_face = (REF_TET_D[2] + REF_TET_D[3] + REF_TET_D[4]) / 3
+        p_edge = (REF_TET_D[2] + REF_TET_D[3]) / 2
+        for p in (p_face, p_edge, REF_TET_D[1])
+            _, wts = duffy_quadrature_around(REF_TET_D, p, rule)
+            @test isapprox(sum(wts), 1 / 6; atol = 1e-12)
+        end
+    end
+
+    @testset "cubic integrand: matches 5-point tet rule" begin
+        g(r) = 1 + r[1] + r[1] * r[2] + r[1] * r[2] * r[3]
+        I_exact = integrate(TET_QUAD_5PT, REF_TET_D, g)
+        rule = duffy_reference_rule(5)
+        for p in (Vec3(0.1, 0.1, 0.1),
+                  Vec3(0.25, 0.25, 0.25),
+                  Vec3(0.05, 0.4, 0.3))
+            pts, wts = duffy_quadrature_around(REF_TET_D, p, rule)
+            I = sum(wts[i] * g(pts[i]) for i in eachindex(pts))
+            @test isapprox(I, I_exact; rtol = 1e-12)
+        end
+    end
+
+    @testset "1/|r - p| singular integrand: Cauchy convergence" begin
+        # p strictly interior, integrand singular at p.
+        p = Vec3(0.2, 0.2, 0.2)
+        f(r) = 1 / norm(r - p)
+        Is = Float64[]
+        for n in (3, 5, 7, 9)
+            rule = duffy_reference_rule(n)
+            pts, wts = duffy_quadrature_around(REF_TET_D, p, rule)
+            push!(Is, sum(wts[i] * f(pts[i]) for i in eachindex(pts)))
+        end
+        @test all(isfinite, Is)
+        @test abs(Is[end] - Is[end - 1]) / abs(Is[end]) < 5e-3
+    end
+end

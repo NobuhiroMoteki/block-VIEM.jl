@@ -7,4 +7,5 @@ using BlockVIEM
     include("test_gmsh_io.jl")
     include("test_quadrature.jl")
     include("test_duffy.jl")
+    include("test_green.jl")
 end
