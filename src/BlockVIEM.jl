@@ -64,6 +64,10 @@ include("solver.jl")
 export project_plane_wave, SolveResult
 export solve_direct, solve_iterative
 
-# Phase 5: PostProcess (CAS-v2 observables)           — TODO
+# Phase 5: PostProcess (CAS-v2 observables)
+include("postprocess.jl")
+
+# Public API (Phase 5)
+export far_field_amplitude, ScatteringResult, compute_scattering
 
 end # module BlockVIEM
