@@ -1,0 +1,38 @@
+# Julia build/cache artifacts
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/deps/deps.jl
+/deps/build.log
+
+# Note: Manifest.toml is intentionally tracked for reproducibility.
+
+# Documentation build artifacts
+/docs/build/
+/docs/site/
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.out
+*.toc
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+
+# OS / editor
+*:Zone.Identifier
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Mesh artifacts (regenerable from .geo)
+*.msh
+!test/meshes/reference/*.msh
