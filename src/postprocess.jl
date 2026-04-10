@@ -142,13 +142,16 @@ function compute_scattering(basis::SWGBasis, D_coeffs::AbstractVector;
     S_bak = dot(SVector{3,ComplexF64}(e_s), F_bak)
 
     # --- extinction cross section (optical theorem) ---
-    # With the consistent exp(+jωt) convention where G = exp(-jkR)/(4πR) and
-    # F = (k0²κ/ε_bg)(I−r̂r̂)P, the optical theorem gives:
+    # With the exp(+jωt) engineering convention where G = exp(-jkR)/(4πR),
+    # the Fourier transform in F uses exp(+jk r̂·r'), which conjugates the
+    # phase relative to the exp(-iωt) physics convention. The optical theorem
+    # in the physics convention is C_ext = (4π/k) Im[ê*·f(0)]. Converting
+    # to our convention (f → f*, so Im → −Im) gives:
     #
-    #   C_ext = Im[E0* · F(k̂)] / (k0 |E0|²)
+    #   C_ext = −Im[E0* · F(k̂)] / (k0 |E0|²)
     #
     E0_sq = real(dot(E0, E0))     # |E0|² for unit amplitude
-    C_ext = imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
+    C_ext = -imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
 
     # --- absorption cross section ---
     # C_abs = k0 Im(ε_p) / (ε_bg |ε_p|² |E0|²) D^H M D
