@@ -29,6 +29,7 @@ include("impedance.jl")
 # Phase 3: AIM (FFT-MVP)
 include("aim_grid.jl")
 include("aim_projection.jl")
+include("aim_toeplitz.jl")
 
 # Public API (Phase 1)
 export Vec3, TetVerts
@@ -47,8 +48,9 @@ export impedance_element, assemble_impedance_matrix
 
 # Public API (Phase 3)
 export AIMGrid, n_grid_points, grid_point, aim_grid, grid_stencil, grid_point_at_linear
-export AIMProjection, build_aim_projection, basis_centroid, basis_moments
-export multi_indices, n_moments
+export AIMProjection, build_aim_projection, basis_centroid
+export basis_moments, divergence_moments, multi_indices, n_moments
+export build_green_toeplitz, precompute_green_fft, fft_convolve, fft_convolve!
 
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
 # Phase 3 (cont.): Toeplitz Green tensor + FFT-MVP    — TODO

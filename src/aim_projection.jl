@@ -24,8 +24,10 @@ SWG-to-grid projection matrices for the Adaptive Integral Method.
 
 # Fields
 - `grid::AIMGrid`               — auxiliary Cartesian grid
-- `Wx, Wy, Wz::SparseMatrixCSC` — sparse `N_basis × N_grid` matrices, one
-  per Cartesian component, holding the moment-matching weights
+- `Wx, Wy, Wz::SparseMatrixCSC` — sparse `N_basis × N_grid` matrices for
+  the three Cartesian components of the SWG vector basis
+- `Wdiv::SparseMatrixCSC`       — sparse `N_basis × N_grid` matrix for the
+  scalar divergence `∇·f_n` (needed by the `-(∇·f_m)(∇'·f_n')G` term)
 - `poly_order::Int`             — polynomial order `P` actually used
 - `stencil::Int`                — stencil size `M` per axis
 """
@@ -34,6 +36,7 @@ struct AIMProjection
     Wx::SparseMatrixCSC{Float64,Int}
     Wy::SparseMatrixCSC{Float64,Int}
     Wz::SparseMatrixCSC{Float64,Int}
+    Wdiv::SparseMatrixCSC{Float64,Int}
     poly_order::Int
     stencil::Int
 end
@@ -120,6 +123,32 @@ function basis_moments(basis::SWGBasis, n::Integer, c::Vec3,
 end
 
 """
+    divergence_moments(basis, n, c, indices, rule) -> Vector{Float64}
+
+Target moments for the divergence `∇·f_n` of SWG basis function `n` expanded
+around `c`. Returns a vector of length `n_moments` holding
+`∫ (∇·f_n)(r) (r - c)^{abc} dV` for every `(a, b, c)` in `indices`.
+"""
+function divergence_moments(basis::SWGBasis, n::Integer, c::Vec3,
+                            indices::Vector{NTuple{3,Int}}, rule::TetQuadRule)
+    nmom = length(indices)
+    M = zeros(Float64, nmom)
+    @inbounds for tet in (basis.tet_plus[n], basis.tet_minus[n])
+        verts = _tet_vertices(basis.mesh, tet)
+        V = tet_volume(verts...)
+        div_val = divergence(basis, Int(n), tet)
+        for i in 1:rule.n
+            r = bary_to_point(rule.bary[i], verts)
+            wt = rule.weights[i] * V
+            for k in eachindex(indices)
+                M[k] += wt * div_val * _monomial(r, c, indices[k])
+            end
+        end
+    end
+    return M
+end
+
+"""
     build_aim_projection(basis::SWGBasis, grid::AIMGrid;
                          poly_order::Integer = 2,
                          stencil::Integer = 3,
@@ -164,17 +193,21 @@ function build_aim_projection(basis::SWGBasis, grid::AIMGrid;
     Vx = Float64[]
     Vy = Float64[]
     Vz = Float64[]
-    sizehint!(Is, N * M_sten^3)
-    sizehint!(Js, N * M_sten^3)
-    sizehint!(Vx, N * M_sten^3)
-    sizehint!(Vy, N * M_sten^3)
-    sizehint!(Vz, N * M_sten^3)
+    Vdiv = Float64[]
+    nz_est = N * M_sten^3
+    sizehint!(Is, nz_est)
+    sizehint!(Js, nz_est)
+    sizehint!(Vx, nz_est)
+    sizehint!(Vy, nz_est)
+    sizehint!(Vz, nz_est)
+    sizehint!(Vdiv, nz_est)
 
     Phi = Matrix{Float64}(undef, nmom, M_sten^3)
 
     for n in 1:N
         c = basis_centroid(basis, n)
         M_target = basis_moments(basis, n, c, indices, rule)
+        M_div_target = divergence_moments(basis, n, c, indices, rule)
 
         sten = grid_stencil(grid, c, M_sten)
         n_sten = length(sten)
@@ -190,19 +223,22 @@ function build_aim_projection(basis::SWGBasis, grid::AIMGrid;
         end
 
         # Solve Φ w = M_target for w (n_sten × 3) in the minimum-norm sense.
-        w = Phi_view \ M_target
+        w_vec = Phi_view \ M_target        # (n_sten × 3)
+        w_div = Phi_view \ M_div_target    # (n_sten,)
 
         @inbounds for j in 1:n_sten
             push!(Is, n)
             push!(Js, sten[j])
-            push!(Vx, w[j, 1])
-            push!(Vy, w[j, 2])
-            push!(Vz, w[j, 3])
+            push!(Vx, w_vec[j, 1])
+            push!(Vy, w_vec[j, 2])
+            push!(Vz, w_vec[j, 3])
+            push!(Vdiv, w_div[j])
         end
     end
 
     Wx = sparse(Is, Js, Vx, N, n_grid_total)
     Wy = sparse(Is, Js, Vy, N, n_grid_total)
     Wz = sparse(Is, Js, Vz, N, n_grid_total)
-    return AIMProjection(grid, Wx, Wy, Wz, P, M_sten)
+    Wdiv = sparse(Is, Js, Vdiv, N, n_grid_total)
+    return AIMProjection(grid, Wx, Wy, Wz, Wdiv, P, M_sten)
 end

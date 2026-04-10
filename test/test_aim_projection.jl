@@ -52,10 +52,11 @@ end
         @test size(proj.Wx) == (N, Ng)
         @test size(proj.Wy) == (N, Ng)
         @test size(proj.Wz) == (N, Ng)
+        @test size(proj.Wdiv) == (N, Ng)
         # Each row should hit exactly 27 grid points (full 3³ stencil).
         for n in 1:N
-            row_x = proj.Wx[n, :]
-            @test nnz(row_x) == 27
+            @test nnz(proj.Wx[n, :]) == 27
+            @test nnz(proj.Wdiv[n, :]) == 27
         end
         @test proj.poly_order == 2
         @test proj.stencil == 3
@@ -134,6 +135,39 @@ end
             @test isapprox(sum_y, M_target[1, 2]; atol = 1e-12)
             @test isapprox(sum_z, M_target[1, 3]; atol = 1e-12)
         end
+    end
+
+    @testset "Wdiv moment recovery" begin
+        # Same moment-matching check as for Wx/Wy/Wz, but for the scalar
+        # divergence. The divergence is piecewise constant, so its moments
+        # are exactly reproduced by the TET_QUAD_5PT rule.
+        mesh = unit_cube_mesh_aim()
+        basis = build_swg_basis(mesh)
+        grid = aim_grid(mesh; pitch = 0.25, padding = 3)
+        P = 2
+        rule = TET_QUAD_5PT
+        proj = build_aim_projection(basis, grid; poly_order = P, stencil = 3, rule = rule)
+        indices = multi_indices(P)
+
+        max_err = 0.0
+        for n in 1:n_basis(basis)
+            c = basis_centroid(basis, n)
+            M_div_tgt = divergence_moments(basis, n, c, indices, rule)
+            row_div = proj.Wdiv[n, :]
+            for k in eachindex(indices)
+                abc = indices[k]
+                s = 0.0
+                for (col, wdiv) in zip(findnz(row_div)...)
+                    rj = grid_point_at_linear(grid, col)
+                    m = (rj[1] - c[1])^abc[1] *
+                        (rj[2] - c[2])^abc[2] *
+                        (rj[3] - c[3])^abc[3]
+                    s += wdiv * m
+                end
+                max_err = max(max_err, abs(s - M_div_tgt[k]))
+            end
+        end
+        @test max_err < 1e-10
     end
 
     @testset "argument validation" begin

@@ -11,4 +11,5 @@ using BlockVIEM
     include("test_impedance.jl")
     include("test_aim_grid.jl")
     include("test_aim_projection.jl")
+    include("test_aim_toeplitz.jl")
 end
