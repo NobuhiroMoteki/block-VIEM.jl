@@ -61,55 +61,40 @@ end
     eps_p = m_p^2
     k0 = 2π * m_m / wl_0
 
-    # Mie reference
-    mie = mie_cross_sections(; wl_0 = wl_0, m_m = m_m, r_p = radius, m_p = m_p)
-
     k_hat = Vec3(0, 0, 1)
     E0 = SVector{3,ComplexF64}(1.0, 0.0, 0.0)
 
-    @testset "coarse mesh (lc=0.7): C_abs positive and correct order" begin
-        path = generate_sphere_mesh(radius, 0.7)
-        mesh = read_msh(path)
-        basis = build_swg_basis(mesh)
+    @testset "mesh refinement: C_abs converges to Mie(r_ve)" begin
+        # Use volume-equivalent radius for Mie comparison to isolate
+        # the SWG discretization error from the mesh volume error.
         dr = duffy_reference_rule(7)
-        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
-                                      eps_bg = eps_bg, duffy_rule = dr,
-                                      symmetrize = true)
-        k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
-        b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = k_bg)
-        D = Z \ b
-        residual = norm(Z * D - b) / norm(b)
-        scat = compute_scattering(basis, D;
-                                  k_hat = k_hat, E0 = E0,
-                                  k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
-        @test residual < 1e-8
-        @test scat.C_abs > 0
-        @test scat.C_abs / mie.C_abs > 0.3
-        @test scat.C_abs / mie.C_abs < 3.0
-        @info "VIEM coarse" N=n_basis(basis) C_abs_viem=scat.C_abs C_abs_mie=mie.C_abs
-    end
-
-    @testset "mesh refinement improves C_abs" begin
         errs = Float64[]
-        # Use higher-order Duffy (order 7) for better near-singular accuracy.
-        dr = duffy_reference_rule(7)
         for lc in (0.7, 0.5)
             path = generate_sphere_mesh(radius, lc)
             mesh = read_msh(path)
             basis = build_swg_basis(mesh)
+            V_mesh = total_volume(mesh)
+            r_ve = (3V_mesh / (4π))^(1 / 3)
+            mie_ve = mie_cross_sections(; wl_0 = wl_0, m_m = m_m, r_p = r_ve, m_p = m_p)
+
             Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
                                           eps_bg = eps_bg, duffy_rule = dr,
                                           symmetrize = true)
             k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
             b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = k_bg)
             D = Z \ b
+            residual = norm(Z * D - b) / norm(b)
             scat = compute_scattering(basis, D;
                                       k_hat = k_hat, E0 = E0,
                                       k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
-            push!(errs, abs(scat.C_abs - mie.C_abs) / mie.C_abs)
-            @info "VIEM refinement" lc N=n_basis(basis) C_abs=scat.C_abs rel_err=errs[end]
+            push!(errs, abs(scat.C_abs - mie_ve.C_abs) / mie_ve.C_abs)
+            @test residual < 1e-8
+            @test scat.C_abs > 0
+            @info "VIEM refinement" lc N=n_basis(basis) r_ve C_abs_viem=scat.C_abs C_abs_mie=mie_ve.C_abs rel_err=errs[end]
         end
         # Finer mesh should give better or equal C_abs.
         @test errs[2] ≤ errs[1] + 0.01
+        # Coarse mesh should be within 50% of Mie(r_ve).
+        @test errs[1] < 0.5
     end
 end
