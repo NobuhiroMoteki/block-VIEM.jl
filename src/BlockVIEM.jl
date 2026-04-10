@@ -57,7 +57,13 @@ export aim_far_mvp, aim_radiation_element, assemble_precorrection
 export AIMOperator, build_aim_operator, aim_mvp
 
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
-# Phase 4: Block-Krylov solver                        — TODO
+# Phase 4: Solver
+include("incident.jl")
+include("solver.jl")
+# Public API (Phase 4)
+export project_plane_wave, SolveResult
+export solve_direct, solve_iterative
+
 # Phase 5: PostProcess (CAS-v2 observables)           — TODO
 
 end # module BlockVIEM
