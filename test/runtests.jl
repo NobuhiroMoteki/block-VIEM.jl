@@ -12,4 +12,5 @@ using BlockVIEM
     include("test_aim_grid.jl")
     include("test_aim_projection.jl")
     include("test_aim_toeplitz.jl")
+    include("test_aim_operator.jl")
 end

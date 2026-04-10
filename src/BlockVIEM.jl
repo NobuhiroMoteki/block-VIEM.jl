@@ -30,6 +30,7 @@ include("impedance.jl")
 include("aim_grid.jl")
 include("aim_projection.jl")
 include("aim_toeplitz.jl")
+include("aim_operator.jl")
 
 # Public API (Phase 1)
 export Vec3, TetVerts
@@ -51,10 +52,11 @@ export AIMGrid, n_grid_points, grid_point, aim_grid, grid_stencil, grid_point_at
 export AIMProjection, build_aim_projection, basis_centroid
 export basis_moments, divergence_moments, multi_indices, n_moments
 export build_green_toeplitz, precompute_green_fft, fft_convolve, fft_convolve!
+export assemble_mass_matrix, near_pairs
+export aim_far_mvp, aim_radiation_element, assemble_precorrection
+export AIMOperator, build_aim_operator, aim_mvp
 
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
-# Phase 3 (cont.): Toeplitz Green tensor + FFT-MVP    — TODO
-# Phase 3 (cont.): AIM precorrection                  — TODO
 # Phase 4: Block-Krylov solver                        — TODO
 # Phase 5: PostProcess (CAS-v2 observables)           — TODO
 
