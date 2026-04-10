@@ -24,6 +24,7 @@ include("gmsh_io.jl")
 include("quadrature.jl")
 include("duffy.jl")
 include("green.jl")
+include("impedance.jl")
 
 # Public API (Phase 1)
 export Vec3, TetVerts
@@ -38,7 +39,9 @@ export bary_to_point, integrate, gauss_legendre_unit
 export DuffyQuadRule, duffy_reference_rule, duffy_quadrature
 export subdivide_around, duffy_quadrature_around
 export helmholtz_green, helmholtz_green_static
-# Phase 2 (cont.): full singular pair Z_mn evaluator  — TODO
+export impedance_element
+
+# Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
 # Phase 3: AIM (FFT-MVP)                              — TODO
 # Phase 4: Block-Krylov solver                        — TODO
 # Phase 5: PostProcess (CAS-v2 observables)           — TODO

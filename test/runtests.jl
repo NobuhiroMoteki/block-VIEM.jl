@@ -8,4 +8,5 @@ using BlockVIEM
     include("test_quadrature.jl")
     include("test_duffy.jl")
     include("test_green.jl")
+    include("test_impedance.jl")
 end
