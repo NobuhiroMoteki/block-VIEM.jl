@@ -15,4 +15,5 @@ using BlockVIEM
     include("test_aim_operator.jl")
     include("test_solver.jl")
     include("test_postprocess.jl")
+    include("test_mie_validation.jl")
 end

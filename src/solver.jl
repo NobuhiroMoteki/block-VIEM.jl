@@ -46,7 +46,7 @@ function solve_direct(basis::SWGBasis;
                       E0::SVector{3,ComplexF64})
     k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
     b = project_plane_wave(basis;
-                           k_hat = k_hat, E0 = E0, k_bg = k_bg, eps_p = eps_p)
+                           k_hat = k_hat, E0 = E0, k_bg = k_bg)
     Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
                                   symmetrize = true)
     x = Z \ b
@@ -82,7 +82,7 @@ function solve_iterative(basis::SWGBasis;
                          maxiter::Integer = 200)
     k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
     b = project_plane_wave(basis;
-                           k_hat = k_hat, E0 = E0, k_bg = k_bg, eps_p = eps_p)
+                           k_hat = k_hat, E0 = E0, k_bg = k_bg)
     op = build_aim_operator(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
                             pitch = pitch, padding = padding)
 

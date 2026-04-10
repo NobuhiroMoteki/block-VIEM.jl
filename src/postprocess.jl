@@ -9,7 +9,7 @@
 #
 # where the vector scattering amplitude is
 #
-#   F(r̂) = (-k0² κ / ε_bg) (I − r̂r̂) · P(r̂)
+#   F(r̂) = (k0² κ / ε_bg) (I − r̂r̂) · P(r̂)
 #
 # and P(r̂) = Σ_n D_n ∫ f_n(r') exp(+jk0 r̂·r') dV' is the Fourier-
 # transformed polarization. The transverse projector (I − r̂r̂) removes the
@@ -61,9 +61,11 @@ function far_field_amplitude(basis::SWGBasis, D_coeffs::AbstractVector;
     end
     P = SVector{3,ComplexF64}(Px, Py, Pz)
 
-    # Transverse projection: F = (-k0²κ/ε_bg)(P − (k̂·P)k̂)
+    # Transverse projection: F = (k0²κ/ε_bg)(P − (k̂·P)k̂)
+    # The positive sign follows from E^sca = (κ/ε_bg)(k0²+∇∇·)∫ D' G dV'
+    # → far-field: (κ/ε_bg) k0² (I − r̂r̂) P  (see derivation below).
     P_trans = P - dot(k_hat_sca, P) * SVector{3,ComplexF64}(k_hat_sca)
-    coeff = -k0c^2 * kappa / eps_bg_c
+    coeff = k0c^2 * kappa / eps_bg_c
     return coeff * P_trans
 end
 
@@ -140,15 +142,13 @@ function compute_scattering(basis::SWGBasis, D_coeffs::AbstractVector;
     S_bak = dot(SVector{3,ComplexF64}(e_s), F_bak)
 
     # --- extinction cross section (optical theorem) ---
-    # With the exp(+jωt) engineering convention (outgoing wave ∝ exp(-jkr)),
-    # the optical theorem gives (cf. Bohren & Huffman, sign-flipped):
+    # With the consistent exp(+jωt) convention where G = exp(-jkR)/(4πR) and
+    # F = (k0²κ/ε_bg)(I−r̂r̂)P, the optical theorem gives:
     #
-    #   C_ext = −Im[E0* · F(k̂)] / (k0 |E0|²)
+    #   C_ext = Im[E0* · F(k̂)] / (k0 |E0|²)
     #
-    # The negative sign relative to the exp(−iωt) physics convention arises
-    # because the Green's function phase is conjugated.
     E0_sq = real(dot(E0, E0))     # |E0|² for unit amplitude
-    C_ext = -imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
+    C_ext = imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
 
     # --- absorption cross section ---
     # C_abs = k0 Im(ε_p) / (ε_bg |ε_p|² |E0|²) D^H M D

@@ -13,35 +13,40 @@
 #   E^inc(r) = E0 exp(-j k_bg k̂ · r)
 #
 # where E0 is the complex polarization vector (perpendicular to k̂),
-# k_bg = k0 n_m (the background medium wavenumber), and k̂ is the unit
-# propagation direction.
+# k_bg = k0 (the background medium wavenumber since k0 is already the
+# background wavenumber in our formulation), and k̂ is the unit propagation
+# direction.
 
 """
     project_plane_wave(basis::SWGBasis;
                        k_hat::Vec3,
                        E0::SVector{3,ComplexF64},
                        k_bg::Number,
-                       eps_p::Number = 1,
                        rule::TetQuadRule = TET_QUAD_5PT) -> Vector{ComplexF64}
 
-Compute the RHS vector `b` whose `m`-th entry is
-`ε_p ∫ f_m(r) · E^inc(r) dV`, where `E^inc(r) = E0 exp(-j k_bg k̂·r)`.
+Compute the RHS vector `b` whose `m`-th entry is the Galerkin testing of
+the incident field against the `m`-th SWG basis function:
+
+```
+b_m = ∫ f_m(r) · E^inc(r) dV
+```
+
+where `E^inc(r) = E0 exp(-j k_bg k̂·r)`. No ε prefactor — the EFVIE-D
+formulation has Z D = b with b = ⟨f_m, E^inc⟩ (see technical_note.md §2).
 
 - `k_hat` — unit propagation direction (must satisfy `|k_hat| ≈ 1`)
 - `E0`    — complex electric-field polarization vector (orthogonal to `k_hat`)
-- `k_bg`  — wavenumber in the background medium (`k0 * n_m`)
-- `eps_p` — complex permittivity of the particle
+- `k_bg`  — wavenumber in the background medium (= `k0` since our `k0` is the
+  background wavenumber)
 """
 function project_plane_wave(basis::SWGBasis;
                             k_hat::Vec3,
                             E0::SVector{3,ComplexF64},
                             k_bg::Number,
-                            eps_p::Number = 1,
                             rule::TetQuadRule = TET_QUAD_5PT)
     N = n_basis(basis)
     b = Vector{ComplexF64}(undef, N)
     k_bg_c = ComplexF64(k_bg)
-    eps_p_c = ComplexF64(eps_p)
     @inbounds for n in 1:N
         s = zero(ComplexF64)
         for tet in (basis.tet_plus[n], basis.tet_minus[n])
@@ -54,7 +59,7 @@ function project_plane_wave(basis::SWGBasis;
                 s += rule.weights[i] * V * dot(fn, E_inc)
             end
         end
-        b[n] = eps_p_c * s
+        b[n] = s
     end
     return b
 end

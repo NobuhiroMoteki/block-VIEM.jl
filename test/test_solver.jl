@@ -23,20 +23,19 @@ end
     N = n_basis(basis)
 
     # k_bg = 0 ⇒ E^inc = E0 (constant). The projection becomes
-    # b_m = ε_p ∫ f_m · E0 dV = ε_p E0 · (∫ f_m dV).
+    # b_m = ∫ f_m · E0 dV = E0 · (∫ f_m dV).
     k_hat = Vec3(0, 0, 1)
     E0 = SVector{3,ComplexF64}(1.0, 0.0, 0.0)
-    eps_p = 2.0 + 0.1im
-    b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = 0.0, eps_p = eps_p)
+    b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = 0.0)
     @test length(b) == N
     @test all(isfinite, b)
 
-    # For k_bg = 0 each component should be ε_p * E0_α * (∫ f_m^α dV).
+    # For k_bg = 0 each component should be E0_α * (∫ f_m^α dV).
     # The x-component integral is the zeroth moment.
     for n in 1:N
         c = basis_centroid(basis, n)
         M0 = basis_moments(basis, n, c, multi_indices(0), TET_QUAD_5PT)
-        expected = eps_p * (E0[1] * M0[1, 1] + E0[2] * M0[1, 2] + E0[3] * M0[1, 3])
+        expected = E0[1] * M0[1, 1] + E0[2] * M0[1, 2] + E0[3] * M0[1, 3]
         @test isapprox(b[n], expected; atol = 1e-12)
     end
 end
