@@ -27,7 +27,7 @@ struct SolveResult
 end
 
 """
-    solve_direct(basis::SWGBasis;
+    solve_direct(basis::AbstractDivBasis;
                  k0::Number,
                  eps_p::Number,
                  eps_bg::Number = 1,
@@ -38,7 +38,7 @@ Solve the VIEM system using a direct dense factorization (LU). This is
 `O(N³)` and only practical for small meshes (N ≲ a few hundred). Intended
 as a validation reference for the AIM-accelerated iterative solver.
 """
-function solve_direct(basis::SWGBasis;
+function solve_direct(basis::AbstractDivBasis;
                       k0::Number,
                       eps_p::Number,
                       eps_bg::Number = 1,
@@ -55,7 +55,7 @@ function solve_direct(basis::SWGBasis;
 end
 
 """
-    solve_iterative(basis::SWGBasis;
+    solve_iterative(basis::AbstractDivBasis;
                     k0::Number,
                     eps_p::Number,
                     eps_bg::Number = 1,
@@ -70,7 +70,7 @@ Solve the VIEM system using the AIM-accelerated BiCGSTAB iteration
 (via Krylov.jl). The AIM operator is wrapped as a closure that computes
 `aim_mvp(op, x)`.
 """
-function solve_iterative(basis::SWGBasis;
+function solve_iterative(basis::AbstractDivBasis;
                          k0::Number,
                          eps_p::Number,
                          eps_bg::Number = 1,
