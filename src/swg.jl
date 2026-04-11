@@ -64,6 +64,24 @@ Return the pair of tetrahedra supporting the `n`-th SWG basis function.
 @inline support_tets(basis::SWGBasis, n::Int) = (basis.tet_plus[n], basis.tet_minus[n])
 
 """
+    build_tet_to_dofs(basis::AbstractDivBasis) -> Dict{Int,Vector{Int}}
+
+Build a mapping from tetrahedron index to the list of global DOF indices
+supported in that tet. Useful for mass matrix and AIM assembly.
+Sentinel tets (index 0, from interior DOFs) are skipped.
+"""
+function build_tet_to_dofs(basis::AbstractDivBasis)
+    tet_to_dofs = Dict{Int,Vector{Int}}()
+    for n in 1:n_basis(basis)
+        for tet in support_tets(basis, n)
+            tet == 0 && continue
+            push!(get!(Vector{Int}, tet_to_dofs, tet), n)
+        end
+    end
+    return tet_to_dofs
+end
+
+"""
     build_swg_basis(mesh::TetMesh) -> SWGBasis
 
 Construct the SWG basis on `mesh` by enumerating all faces and pairing those

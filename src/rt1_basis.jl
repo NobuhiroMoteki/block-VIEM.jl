@@ -81,17 +81,18 @@ Total number of RT1 DOFs: 3 × N_internal_faces + 3 × N_tets.
 @inline n_basis(basis::RT1Basis) = basis.n_face_dofs + 3 * length(basis.mesh.tets)
 
 """
-    support_tets(basis::RT1Basis, n::Int)
+    support_tets(basis::RT1Basis, n::Int) -> Tuple{Int,Int}
 
-Return the tetrahedra supporting DOF `n`. Face DOFs return a 2-tuple,
-interior DOFs return a 1-tuple.
+Return the pair of tetrahedra supporting DOF `n`. Face DOFs have two
+supporting tets; interior DOFs have one, with the second entry set to `0`
+(sentinel for "no second tet"). Always returns a 2-tuple for type stability.
 """
 @inline function support_tets(basis::RT1Basis, n::Int)
     if n <= basis.n_face_dofs
         return (basis.face_dof_tet_plus[n], basis.face_dof_tet_minus[n])
     else
         k = n - basis.n_face_dofs
-        return ((k - 1) ÷ 3 + 1,)
+        return ((k - 1) ÷ 3 + 1, 0)
     end
 end
 

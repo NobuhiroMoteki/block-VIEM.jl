@@ -75,19 +75,23 @@ end
 end
 
 """
-    basis_centroid(basis::SWGBasis, n::Integer) -> Vec3
+    basis_centroid(basis::AbstractDivBasis, n::Integer) -> Vec3
 
-Volume-weighted centroid of the union of `T_n^+` and `T_n^-`. This is the
-expansion centre used by [`AIMProjection`](@ref).
+Volume-weighted centroid of the supporting tets. This is the expansion
+centre used by [`AIMProjection`](@ref).
 """
-function basis_centroid(basis::SWGBasis, n::Integer)
+function basis_centroid(basis::AbstractDivBasis, n::Integer)
     mesh = basis.mesh
-    tp = basis.tet_plus[n]
-    tm = basis.tet_minus[n]
-    Vp = mesh.tet_volumes[tp]
-    Vm = mesh.tet_volumes[tm]
-    return (Vp * mesh.tet_centroids[tp] + Vm * mesh.tet_centroids[tm]) /
-           (Vp + Vm)
+    tets = support_tets(basis, Int(n))
+    t1 = tets[1]
+    t2 = tets[2]
+    if t2 == 0
+        return mesh.tet_centroids[t1]
+    end
+    V1 = mesh.tet_volumes[t1]
+    V2 = mesh.tet_volumes[t2]
+    return (V1 * mesh.tet_centroids[t1] + V2 * mesh.tet_centroids[t2]) /
+           (V1 + V2)
 end
 
 """
@@ -99,11 +103,12 @@ Target moments for SWG basis function `n` expanded around `c`. Returns a
 volume integral is evaluated with `rule` on each support tet (the integrand
 is a polynomial, so a sufficiently high-degree tet rule is exact).
 """
-function basis_moments(basis::SWGBasis, n::Integer, c::Vec3,
+function basis_moments(basis::AbstractDivBasis, n::Integer, c::Vec3,
                        indices::Vector{NTuple{3,Int}}, rule::TetQuadRule)
     nmom = length(indices)
     M = zeros(Float64, nmom, 3)
-    @inbounds for tet in (basis.tet_plus[n], basis.tet_minus[n])
+    @inbounds for tet in support_tets(basis, Int(n))
+        tet == 0 && continue
         verts = _tet_vertices(basis.mesh, tet)
         V = tet_volume(verts...)
         for i in 1:rule.n
@@ -129,17 +134,18 @@ Target moments for the divergence `∇·f_n` of SWG basis function `n` expanded
 around `c`. Returns a vector of length `n_moments` holding
 `∫ (∇·f_n)(r) (r - c)^{abc} dV` for every `(a, b, c)` in `indices`.
 """
-function divergence_moments(basis::SWGBasis, n::Integer, c::Vec3,
+function divergence_moments(basis::AbstractDivBasis, n::Integer, c::Vec3,
                             indices::Vector{NTuple{3,Int}}, rule::TetQuadRule)
     nmom = length(indices)
     M = zeros(Float64, nmom)
-    @inbounds for tet in (basis.tet_plus[n], basis.tet_minus[n])
+    @inbounds for tet in support_tets(basis, Int(n))
+        tet == 0 && continue
         verts = _tet_vertices(basis.mesh, tet)
         V = tet_volume(verts...)
-        div_val = divergence(basis, Int(n), tet)
         for i in 1:rule.n
             r = bary_to_point(rule.bary[i], verts)
             wt = rule.weights[i] * V
+            div_val = divergence(basis, Int(n), r, tet)
             for k in eachindex(indices)
                 M[k] += wt * div_val * _monomial(r, c, indices[k])
             end
@@ -149,7 +155,7 @@ function divergence_moments(basis::SWGBasis, n::Integer, c::Vec3,
 end
 
 """
-    build_aim_projection(basis::SWGBasis, grid::AIMGrid;
+    build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
                          poly_order::Integer = 2,
                          stencil::Integer = 3,
                          rule::TetQuadRule = TET_QUAD_5PT)
@@ -175,7 +181,7 @@ The grid `padding` must be large enough that every basis stencil falls
 inside the grid; otherwise the moment system becomes deficient and the
 constructor throws.
 """
-function build_aim_projection(basis::SWGBasis, grid::AIMGrid;
+function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
                               poly_order::Integer = 2,
                               stencil::Integer = 3,
                               rule::TetQuadRule = TET_QUAD_5PT)

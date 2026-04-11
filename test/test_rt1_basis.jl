@@ -88,19 +88,25 @@ end
             @test 2 in st
         end
 
-        # Interior DOFs of tet 1 (DOFs 4,5,6)
+        # Interior DOFs of tet 1 (DOFs 4,5,6): 2-tuple with sentinel 0
         for i in 4:6
             st = support_tets(basis, i)
-            @test length(st) == 1
+            @test length(st) == 2
             @test st[1] == 1
+            @test st[2] == 0
         end
 
         # Interior DOFs of tet 2 (DOFs 7,8,9)
         for i in 7:9
             st = support_tets(basis, i)
-            @test length(st) == 1
+            @test length(st) == 2
             @test st[1] == 2
+            @test st[2] == 0
         end
+
+        # Type stability: always Tuple{Int,Int}
+        @inferred support_tets(basis, 1)
+        @inferred support_tets(basis, 4)
     end
 
     @testset "_rt1_local_info" begin

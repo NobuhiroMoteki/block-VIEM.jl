@@ -36,7 +36,7 @@
 using LinearAlgebra: dot
 
 """
-    impedance_element(basis::SWGBasis, m::Integer, n::Integer;
+    impedance_element(basis::AbstractDivBasis, m::Integer, n::Integer;
                       k0::Number,
                       eps_p::Number = 1,
                       eps_bg::Number = 1,
@@ -44,16 +44,14 @@ using LinearAlgebra: dot
                       duffy_rule::DuffyQuadRule = duffy_reference_rule(5))
         -> ComplexF64
 
-Compute the Galerkin impedance matrix element `Z_mn` between SWG basis
+Compute the Galerkin impedance matrix element `Z_mn` between basis
 functions `m` and `n` for a homogeneous particle of complex permittivity
 `eps_p` immersed in a background of permittivity `eps_bg`. `k0` is the
 background-medium wavenumber.
 
-Returns a `ComplexF64` regardless of the numeric types of `k0`, `eps_p`,
-`eps_bg`. With `eps_p == eps_bg` the contrast `κ` vanishes and the result
-reduces to the geometric mass inner product `(1/eps_bg) ∫ f_m·f_n dV`.
+Works for any `AbstractDivBasis` (SWGBasis, RT1Basis, etc.).
 """
-function impedance_element(basis::SWGBasis, m::Integer, n::Integer;
+function impedance_element(basis::AbstractDivBasis, m::Integer, n::Integer;
                            k0::Number,
                            eps_p::Number = 1,
                            eps_bg::Number = 1,
@@ -77,11 +75,12 @@ end
 # ---------------------------------------------------------------------------
 # Mass term  M_mn = ∫_{T_m ∩ T_n} f_m·f_n dV  (real for real geometry)
 # ---------------------------------------------------------------------------
-function _mass_term(basis::SWGBasis, m::Int, n::Int, rule::TetQuadRule)
-    tets_m = (basis.tet_plus[m], basis.tet_minus[m])
-    tets_n = (basis.tet_plus[n], basis.tet_minus[n])
+function _mass_term(basis::AbstractDivBasis, m::Int, n::Int, rule::TetQuadRule)
+    tets_m = support_tets(basis, m)
+    tets_n = support_tets(basis, n)
     s = 0.0
     @inbounds for tm in tets_m, tn in tets_n
+        (tm == 0 || tn == 0) && continue
         tm == tn || continue
         verts = _tet_vertices(basis.mesh, tm)
         V = tet_volume(verts...)
@@ -98,12 +97,13 @@ end
 # ---------------------------------------------------------------------------
 # Radiation kernel  K_mn  (sum over the four (T_m^σ, T_n^τ) pairs)
 # ---------------------------------------------------------------------------
-function _radiation_kernel(basis::SWGBasis, m::Int, n::Int, k0::ComplexF64,
+function _radiation_kernel(basis::AbstractDivBasis, m::Int, n::Int, k0::ComplexF64,
                            outer_rule::TetQuadRule, duffy_rule::DuffyQuadRule)
-    tets_m = (basis.tet_plus[m], basis.tet_minus[m])
-    tets_n = (basis.tet_plus[n], basis.tet_minus[n])
+    tets_m = support_tets(basis, m)
+    tets_n = support_tets(basis, n)
     s = zero(ComplexF64)
     @inbounds for tm in tets_m, tn in tets_n
+        (tm == 0 || tn == 0) && continue
         s += _radiation_pair(basis, m, n, tm, tn, k0, outer_rule, duffy_rule)
     end
     return s
@@ -124,15 +124,13 @@ adjacency). Used to trigger near-singular Duffy quadrature on cross-tet pairs.
     return false
 end
 
-function _radiation_pair(basis::SWGBasis, m::Int, n::Int,
+function _radiation_pair(basis::AbstractDivBasis, m::Int, n::Int,
                          m_tet::Int, n_tet::Int, k0::ComplexF64,
                          outer_rule::TetQuadRule, duffy_rule::DuffyQuadRule)
     verts_m = _tet_vertices(basis.mesh, m_tet)
     verts_n = _tet_vertices(basis.mesh, n_tet)
     Vm = tet_volume(verts_m...)
     Vn = tet_volume(verts_n...)
-    div_m = divergence(basis, m, m_tet)
-    div_n = divergence(basis, n, n_tet)
     k0_sq = k0 * k0
     # Use Duffy quadrature only for self-tet pairs (r is inside n_tet by
     # construction). For cross-tet pairs — including adjacent tets that share
@@ -151,6 +149,7 @@ function _radiation_pair(basis::SWGBasis, m::Int, n::Int,
         r = bary_to_point(outer_rule.bary[i], verts_m)
         outer_w = outer_rule.weights[i] * Vm
         f_m_r = evaluate(basis, m, r, m_tet)
+        div_m = divergence(basis, m, r, m_tet)
 
         if self_pair
             inner_pts, inner_wts = duffy_quadrature_around(verts_n, r, duffy_rule)
@@ -170,6 +169,7 @@ function _radiation_pair(basis::SWGBasis, m::Int, n::Int,
             R == 0 && continue
             G = helmholtz_green(R, k0)
             f_n_rp = evaluate(basis, n, rp, n_tet)
+            div_n = divergence(basis, n, rp, n_tet)
             kernel = k0_sq * dot(f_m_r, f_n_rp) - div_m * div_n
             inner += inner_wts[j] * kernel * G
         end
@@ -199,7 +199,7 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    assemble_impedance_matrix(basis::SWGBasis;
+    assemble_impedance_matrix(basis::AbstractDivBasis;
                               k0::Number,
                               eps_p::Number = 1,
                               eps_bg::Number = 1,
@@ -208,21 +208,13 @@ end
                               symmetrize::Bool = false)
         -> Matrix{ComplexF64}
 
-Build the dense `N × N` SWG impedance matrix for `basis` by calling
+Build the dense `N × N` impedance matrix for `basis` by calling
 [`impedance_element`](@ref) on every pair `(m, n)`. The outer loop over
-`m` is parallelized with `Threads.@threads`; set the environment variable
-`JULIA_NUM_THREADS` (or launch Julia with `-t auto`) to obtain a speed-up.
+`m` is parallelized with `Threads.@threads`.
 
-If `symmetrize = true`, the result is replaced by `(Z + transpose(Z)) / 2`
-to absorb the small (`~1e-5`) reciprocity gap introduced by the
-asymmetric outer-Gauss / inner-Duffy quadrature on self-tet pairs. Use
-this for symmetric Krylov solvers; leave it `false` if you want the raw
-quadrature output (e.g., for AIM precorrection comparisons).
-
-Both `outer_rule` and `duffy_rule` are constructed once and reused across
-the entire matrix to avoid repeated allocation.
+Works for any `AbstractDivBasis` (SWGBasis, RT1Basis, etc.).
 """
-function assemble_impedance_matrix(basis::SWGBasis;
+function assemble_impedance_matrix(basis::AbstractDivBasis;
                                    k0::Number,
                                    eps_p::Number = 1,
                                    eps_bg::Number = 1,

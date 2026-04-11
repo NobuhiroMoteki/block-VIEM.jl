@@ -18,7 +18,7 @@
 using LinearAlgebra: dot, norm
 
 """
-    far_field_amplitude(basis::SWGBasis, D_coeffs::AbstractVector;
+    far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                         k_hat_sca::Vec3,
                         k0::Number,
                         eps_p::Number,
@@ -27,10 +27,9 @@ using LinearAlgebra: dot, norm
         -> SVector{3,ComplexF64}
 
 Compute the vector scattering amplitude `F(k̂_sca)` at observation direction
-`k_hat_sca` (unit vector) for a particle with permittivity `eps_p` in
-background `eps_bg`, given the solved SWG expansion coefficients `D_coeffs`.
+`k_hat_sca` (unit vector). Works for any `AbstractDivBasis`.
 """
-function far_field_amplitude(basis::SWGBasis, D_coeffs::AbstractVector;
+function far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                              k_hat_sca::Vec3,
                              k0::Number,
                              eps_p::Number,
@@ -45,7 +44,8 @@ function far_field_amplitude(basis::SWGBasis, D_coeffs::AbstractVector;
     @inbounds for n in eachindex(D_coeffs)
         Dn = ComplexF64(D_coeffs[n])
         iszero(Dn) && continue
-        for tet in (basis.tet_plus[n], basis.tet_minus[n])
+        for tet in support_tets(basis, Int(n))
+            tet == 0 && continue
             verts = _tet_vertices(basis.mesh, tet)
             V = tet_volume(verts...)
             for i in 1:rule.n
@@ -91,31 +91,132 @@ struct ScatteringResult
     C_sca::Float64
 end
 
-"""
-    compute_scattering(basis::SWGBasis, D_coeffs::AbstractVector;
-                       k_hat::Vec3,
-                       E0::SVector{3,ComplexF64},
-                       k0::Number,
-                       eps_p::Number,
-                       eps_bg::Number = 1,
-                       rule::TetQuadRule = TET_QUAD_5PT)
-        -> ScatteringResult
+## NOTE: The original compute_scattering with only optical theorem has been
+## replaced by the extended version below that supports both :farfield and
+## :optical_theorem methods via the `csca_method` keyword.
 
-Compute all CAS-v2 scattering observables for a single orientation.
+@inline function _real_unit(E0::SVector{3,ComplexF64})
+    v = Vec3(real(E0[1]), real(E0[2]), real(E0[3]))
+    n = norm(v)
+    return n > 0 ? v / n : Vec3(1, 0, 0)
+end
 
-Arguments:
-- `k_hat`: unit propagation direction of the incident plane wave
-- `E0`: complex polarization vector (`E^inc = E0 exp(-jk₀ k̂·r)`)
-- The s/p decomposition uses `ê_s = Re(E0)/|Re(E0)|` and
-  `ê_p = k̂ × ê_s` (valid for linearly-polarized incidence).
+# ============================================================================
+# Spherical quadrature for C_sca far-field integration
+# ============================================================================
+
 """
-function compute_scattering(basis::SWGBasis, D_coeffs::AbstractVector;
+    SphericalQuadRule
+
+Product Gauss-Legendre (θ) × trapezoid (φ) quadrature on the unit sphere.
+
+# Fields
+- `directions::Vector{Vec3}` — unit observation vectors r̂
+- `weights::Vector{Float64}`  — solid angle weights (sum to 4π)
+"""
+struct SphericalQuadRule
+    directions::Vector{Vec3}
+    weights::Vector{Float64}
+end
+
+"""
+    spherical_product_rule(n_theta::Int) -> SphericalQuadRule
+
+Build a product rule with `n_theta` GL points in θ and `2*n_theta` uniform
+points in φ. The rule integrates spherical harmonics of degree up to
+`2*n_theta - 1` exactly. Total points: `2 * n_theta^2`.
+"""
+function spherical_product_rule(n_theta::Int)
+    n_phi = 2 * n_theta
+    # GL nodes on [0,1] and weights for ∫₀¹ g(t) dt
+    t_nodes, t_weights = gauss_legendre_unit(n_theta)
+    # Map to θ ∈ [0, π]: θ = π t, dθ = π dt
+    # Solid angle element: dΩ = sin θ dθ dφ = sin(πt) π dt dφ
+    dphi = 2π / n_phi
+
+    n_total = n_theta * n_phi
+    dirs = Vector{Vec3}(undef, n_total)
+    wts = Vector{Float64}(undef, n_total)
+
+    idx = 0
+    @inbounds for i in 1:n_theta
+        theta = π * t_nodes[i]
+        st, ct = sincos(theta)
+        w_theta = t_weights[i] * π * st * dphi   # GL weight × π × sin θ × Δφ
+        for j in 1:n_phi
+            phi = dphi * (j - 1)
+            sp, cp = sincos(phi)
+            idx += 1
+            dirs[idx] = Vec3(st * cp, st * sp, ct)
+            wts[idx] = w_theta
+        end
+    end
+    return SphericalQuadRule(dirs, wts)
+end
+
+"""
+    compute_csca_farfield(basis::AbstractDivBasis, D_coeffs::AbstractVector;
+                          k0::Number, eps_p::Number, eps_bg::Number = 1,
+                          E0_sq::Float64,
+                          rule::TetQuadRule = TET_QUAD_5PT,
+                          n_theta::Int = 10) -> Float64
+
+Compute the scattering cross section by integrating the far-field power:
+
+    C_sca = (1 / (16π² |E₀|²)) ∫ |F(r̂)|² dΩ
+
+where `F(r̂)` is the vector scattering amplitude from [`far_field_amplitude`](@ref).
+This integral is always non-negative and avoids the cancellation sensitivity
+of the optical theorem.
+
+The integral is evaluated with a product GL×trapezoid rule of `2 n_theta²`
+directions. Default `n_theta = 10` (200 directions) suffices for size
+parameters up to ~5. Use `n_theta ≥ 20` for larger particles.
+"""
+function compute_csca_farfield(basis::AbstractDivBasis, D_coeffs::AbstractVector;
+                               k0::Number,
+                               eps_p::Number,
+                               eps_bg::Number = 1,
+                               E0_sq::Float64,
+                               rule::TetQuadRule = TET_QUAD_5PT,
+                               n_theta::Int = 10)
+    sq = spherical_product_rule(n_theta)
+    n_dirs = length(sq.directions)
+
+    # Compute |F|² at each direction (threaded)
+    F_sq_vals = Vector{Float64}(undef, n_dirs)
+    Threads.@threads for k in 1:n_dirs
+        F = far_field_amplitude(basis, D_coeffs;
+                                k_hat_sca = sq.directions[k],
+                                k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+                                rule = rule)
+        F_sq_vals[k] = real(F[1] * conj(F[1]) + F[2] * conj(F[2]) + F[3] * conj(F[3]))
+    end
+    integral = sum(sq.weights[k] * F_sq_vals[k] for k in 1:n_dirs)
+
+    # C_sca = ∫|F|² dΩ / (16π² |E₀|²)
+    return integral / (16π^2 * E0_sq)
+end
+
+"""
+    compute_scattering(basis, D_coeffs; ..., csca_method=:farfield, n_theta=10)
+
+Extended version with `csca_method` keyword:
+
+- `:farfield` (default) — compute `C_sca` via far-field power integration,
+  then `C_ext = C_abs + C_sca`. Robust on coarse meshes.
+- `:optical_theorem` — compute `C_ext` via the optical theorem,
+  then `C_sca = C_ext - C_abs`. May be inaccurate on coarse meshes.
+"""
+function compute_scattering(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                             k_hat::Vec3,
                             E0::SVector{3,ComplexF64},
                             k0::Number,
                             eps_p::Number,
                             eps_bg::Number = 1,
-                            rule::TetQuadRule = TET_QUAD_5PT)
+                            rule::TetQuadRule = TET_QUAD_5PT,
+                            csca_method::Symbol = :farfield,
+                            n_theta::Int = 10)
     k0c = ComplexF64(k0)
     eps_p_c = ComplexF64(eps_p)
     eps_bg_c = ComplexF64(eps_bg)
@@ -137,31 +238,31 @@ function compute_scattering(basis::SWGBasis, D_coeffs::AbstractVector;
     F_bak = far_field_amplitude(basis, D_coeffs;
                                 k_hat_sca = -k_hat, k0 = k0,
                                 eps_p = eps_p, eps_bg = eps_bg, rule = rule)
-    # Scalar backward amplitude: project onto the back-scattered s-polarization
-    # (convention: same ê_s basis).
     S_bak = dot(SVector{3,ComplexF64}(e_s), F_bak)
 
-    # --- extinction cross section (optical theorem) ---
-    # C_ext = −Im[E0* · F(k̂)] / (k0 |E0|²)
-    # with our exp(+jωt) convention and F = (k0²κ/ε_bg)(I−r̂r̂)P.
     E0_sq = real(dot(E0, E0))
-    C_ext = -imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
 
-    # --- absorption cross section ---
-    # C_abs = k0 Im(ε_p) / (ε_bg |ε_p|² |E0|²) D^H M D
-    # Derived from P_abs = (ω/2) Im(ε_p) ∫|E|² dV with E = D/ε_p.
+    # --- absorption cross section (always computed this way) ---
     M = assemble_mass_matrix(basis; rule = rule)
     DhMD = real(dot(D_coeffs, M * D_coeffs))
     C_abs = real(k0c) * imag(eps_p_c) / (real(eps_bg_c) * abs2(eps_p_c) * E0_sq) *
             DhMD
 
-    C_sca = C_ext - C_abs
+    if csca_method == :farfield
+        C_sca = compute_csca_farfield(basis, D_coeffs;
+                                      k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+                                      E0_sq = E0_sq, rule = rule,
+                                      n_theta = n_theta)
+        C_ext = C_abs + C_sca
+        # S_fw_s, S_fw_p: kept as direct far-field values (O(h) accuracy).
+        # Cross sections C_ext, C_abs, C_sca are more accurate (O(h²) as
+        # integrated quantities). For S(0) accuracy, refine the mesh.
+    elseif csca_method == :optical_theorem
+        C_ext = -imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
+        C_sca = C_ext - C_abs
+    else
+        throw(ArgumentError("Unknown csca_method: $csca_method. Use :farfield or :optical_theorem"))
+    end
 
     return ScatteringResult(S_fw_s, S_fw_p, S_bak, C_ext, C_abs, C_sca)
-end
-
-@inline function _real_unit(E0::SVector{3,ComplexF64})
-    v = Vec3(real(E0[1]), real(E0[2]), real(E0[3]))
-    n = norm(v)
-    return n > 0 ? v / n : Vec3(1, 0, 0)
 end

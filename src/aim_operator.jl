@@ -29,28 +29,21 @@ using LinearAlgebra: dot
 # ---------------------------------------------------------------------------
 
 """
-    assemble_mass_matrix(basis::SWGBasis; rule::TetQuadRule = TET_QUAD_5PT)
+    assemble_mass_matrix(basis::AbstractDivBasis; rule::TetQuadRule = TET_QUAD_5PT)
         -> SparseMatrixCSC{Float64,Int}
 
-Assemble the SWG mass matrix `M_mn = ∫ f_m · f_n dV` as a sparse matrix.
+Assemble the mass matrix `M_mn = ∫ f_m · f_n dV` as a sparse matrix.
 `M` is non-zero only when `m` and `n` share at least one tetrahedron
-(i.e. the supports overlap). The integrand is degree 2, so the default
-5-point rule (degree 3) is exact.
+(i.e. the supports overlap).
 
-The returned matrix does **not** include the `1/ε` prefactor; the caller
-multiplies by `1/ε_p`.
+Works for any `AbstractDivBasis` (SWGBasis, RT1Basis, etc.).
 """
-function assemble_mass_matrix(basis::SWGBasis; rule::TetQuadRule = TET_QUAD_5PT)
+function assemble_mass_matrix(basis::AbstractDivBasis; rule::TetQuadRule = TET_QUAD_5PT)
     N = n_basis(basis)
     mesh = basis.mesh
 
     # Build tet → basis index map
-    tet_to_basis = Dict{Int,Vector{Int}}()
-    for n in 1:N
-        for tet in (basis.tet_plus[n], basis.tet_minus[n])
-            push!(get!(Vector{Int}, tet_to_basis, tet), n)
-        end
-    end
+    tet_to_basis = build_tet_to_dofs(basis)
 
     Is = Int[]
     Js = Int[]
@@ -80,20 +73,14 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    near_pairs(basis::SWGBasis) -> Vector{Tuple{Int,Int}}
+    near_pairs(basis::AbstractDivBasis) -> Vector{Tuple{Int,Int}}
 
 Return all `(m, n)` pairs of basis functions whose supports overlap
 (share at least one tetrahedron). Includes diagonal `(m, m)` and
 both orderings `(m, n)` and `(n, m)`.
 """
-function near_pairs(basis::SWGBasis)
-    N = n_basis(basis)
-    tet_to_basis = Dict{Int,Vector{Int}}()
-    for n in 1:N
-        for tet in (basis.tet_plus[n], basis.tet_minus[n])
-            push!(get!(Vector{Int}, tet_to_basis, tet), n)
-        end
-    end
+function near_pairs(basis::AbstractDivBasis)
+    tet_to_basis = build_tet_to_dofs(basis)
     pair_set = Set{Tuple{Int,Int}}()
     for blist in values(tet_to_basis)
         for m in blist, n in blist
