@@ -2,6 +2,16 @@
 # Reference: Schaubert, Wilton, Glisson (1984), Eqs. (10), (12).
 # See also `.claude/technical_note.md` §1.
 
+# ---------------------------------------------------------------------------
+# Abstract parent type for divergence-conforming (H(div)) vector bases.
+# All subtypes must implement:
+#   n_basis(basis) -> Int
+#   evaluate(basis, n, r, tet) -> Vec3
+#   divergence(basis, n, r, tet) -> Float64
+#   support_tets(basis, n) -> Tuple of tet indices
+# ---------------------------------------------------------------------------
+abstract type AbstractDivBasis end
+
 # Local-face convention for a tet `(v1, v2, v3, v4)`:
 #   local face k is the face *opposite* vertex k (k = 1..4).
 # Hence the "free vertex" of local face k is v_k itself.
@@ -31,7 +41,7 @@ Per basis index `n` we store the geometric quantities required by
 - `free_vertex_plus::Vector{Int}`       — node index `p_n^+` (free vertex of `T_n^+`)
 - `free_vertex_minus::Vector{Int}`      — node index `p_n^-` (free vertex of `T_n^-`)
 """
-struct SWGBasis
+struct SWGBasis <: AbstractDivBasis
     mesh::TetMesh
     face_nodes::Vector{SVector{3,Int}}
     face_areas::Vector{Float64}
@@ -45,6 +55,13 @@ end
     n_basis(basis::SWGBasis) -> Int
 """
 @inline n_basis(basis::SWGBasis) = length(basis.face_areas)
+
+"""
+    support_tets(basis::SWGBasis, n::Int) -> Tuple{Int,Int}
+
+Return the pair of tetrahedra supporting the `n`-th SWG basis function.
+"""
+@inline support_tets(basis::SWGBasis, n::Int) = (basis.tet_plus[n], basis.tet_minus[n])
 
 """
     build_swg_basis(mesh::TetMesh) -> SWGBasis
@@ -155,3 +172,11 @@ within each support tetrahedron and zero elsewhere (SWG 1984 Eq. (12)):
         return 0.0
     end
 end
+
+"""
+    divergence(basis::SWGBasis, n::Int, r::Vec3, tet::Int) -> Float64
+
+4-argument form (uniform calling convention with RT1Basis).
+For SWG (RT0), the divergence is constant within each tet, so `r` is ignored.
+"""
+@inline divergence(basis::SWGBasis, n::Int, ::Vec3, tet::Int) = divergence(basis, n, tet)

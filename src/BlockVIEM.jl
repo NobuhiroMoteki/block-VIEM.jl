@@ -20,6 +20,10 @@ include("mesh.jl")
 include("swg.jl")
 include("gmsh_io.jl")
 
+# RT1 reference element and physical basis
+include("reference_rt1.jl")
+include("rt1_basis.jl")
+
 # Phase 2: Singular volume integration (Duffy)
 include("quadrature.jl")
 include("duffy.jl")
@@ -36,11 +40,13 @@ include("aim_operator.jl")
 export Vec3, TetVerts
 export TetMesh, n_nodes, n_tets, total_volume
 export tet_volume, tet_signed_volume, tet_centroid, triangle_area
-export SWGBasis, build_swg_basis, n_basis, evaluate, divergence
+export AbstractDivBasis, SWGBasis, build_swg_basis, n_basis, evaluate, divergence, support_tets
+export RT1Basis, build_rt1_basis
 export read_msh
 
 # Public API (Phase 2)
-export TetQuadRule, TET_QUAD_1PT, TET_QUAD_4PT, TET_QUAD_5PT
+export TetQuadRule, TET_QUAD_1PT, TET_QUAD_4PT, TET_QUAD_5PT, TET_QUAD_64PT, TET_QUAD_125PT
+export tet_collapsed_rule
 export bary_to_point, integrate, gauss_legendre_unit
 export DuffyQuadRule, duffy_reference_rule, duffy_quadrature
 export subdivide_around, duffy_quadrature_around
@@ -69,5 +75,6 @@ include("postprocess.jl")
 
 # Public API (Phase 5)
 export far_field_amplitude, ScatteringResult, compute_scattering
+export SphericalQuadRule, spherical_product_rule, compute_csca_farfield
 
 end # module BlockVIEM
