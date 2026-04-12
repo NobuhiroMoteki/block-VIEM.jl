@@ -22,4 +22,5 @@ using BlockVIEM
     include("test_postprocess.jl")
     include("test_mie_validation.jl")
     include("test_cas_v2.jl")
+    include("test_spheroid_sweep_io.jl")
 end

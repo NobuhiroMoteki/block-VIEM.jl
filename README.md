@@ -13,9 +13,11 @@ products.
 
 ## Status
 
-**v0.1.1 — Phase 5.1–5.3 (CAS-v2 observables) complete.** 1663 tests pass.
-All numerical kernels are in place; multi-orientation solves and oblate
-spheroid benchmarks match block-DDA_Py and the Mie reference.
+**v0.1.2 — Phase 5 (CAS-v2 observables + HDF5 output parity) complete.**
+1704 tests pass. All numerical kernels are in place; multi-orientation
+solves and oblate spheroid benchmarks match block-DDA_Py and the Mie
+reference, and sweep results can be written in the HDF5 schema consumed
+by `PCAS_Bayes_APM_Nonspherical/lut_generation/build_spheroid_lut.py`.
 
 | Phase | Module                                         | Status |
 |-------|------------------------------------------------|--------|
@@ -26,7 +28,7 @@ spheroid benchmarks match block-DDA_Py and the Mie reference.
 | 5.1   | CAS-v2 forward / backward scattering observables| done   |
 | 5.2   | Multi-orientation batch solve (shared LU)       | done   |
 | 5.3   | Oblate spheroid benchmark vs block-DDA_Py       | done   |
-| 5.4   | HDF5 output format parity with block-DDA_Py    | not started |
+| 5.4   | HDF5 spheroid-sweep output (block-DDA_Py schema)| done   |
 
 ### Validation
 
