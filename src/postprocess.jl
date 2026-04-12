@@ -488,23 +488,63 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                                    outer_rule::TetQuadRule = TET_QUAD_5PT,
                                    ff_rule::TetQuadRule = TET_QUAD_5PT,
-                                   symmetrize::Bool = true)
-    Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
-                                  eps_bg = eps_bg,
-                                  outer_rule = outer_rule,
-                                  duffy_rule = duffy_rule,
-                                  symmetrize = symmetrize)
-    F = LinearAlgebra.lu(Z)
+                                   symmetrize::Bool = true,
+                                   method::Symbol = :dense,
+                                   pitch::Union{Float64,Nothing} = nothing,
+                                   padding::Integer = 3,
+                                   tol::Float64 = 1e-6,
+                                   maxiter::Integer = 200,
+                                   verbose::Bool = false)
     k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    orientations = [cas_orientation(ea[1], ea[2], ea[3]) for ea in euler_angles]
+    L = length(orientations)
 
-    results = Vector{CASv2Result}(undef, length(euler_angles))
-    for (i, ea) in enumerate(euler_angles)
-        α, β, γ = ea[1], ea[2], ea[3]
-        ori = cas_orientation(α, β, γ)
-        b = project_plane_wave(basis; k_hat = ori.u_inc,
-                               E0 = ori.e0_inc, k_bg = k_bg)
-        D = F \ b
-        results[i] = compute_cas_observables(basis, D; orientation = ori,
+    local D_block::Matrix{ComplexF64}
+
+    if method === :dense
+        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                      eps_bg = eps_bg,
+                                      outer_rule = outer_rule,
+                                      duffy_rule = duffy_rule,
+                                      symmetrize = symmetrize)
+        F = LinearAlgebra.lu(Z)
+        N = size(Z, 1)
+        D_block = Matrix{ComplexF64}(undef, N, L)
+        for (i, ori) in enumerate(orientations)
+            b = project_plane_wave(basis; k_hat = ori.u_inc,
+                                   E0 = ori.e0_inc, k_bg = k_bg)
+            @views D_block[:, i] .= F \ b
+        end
+    elseif method === :aim_bicgstab || method === :aim_gmres
+        pitch === nothing &&
+            throw(ArgumentError("AIM methods require the `pitch` keyword"))
+        N = n_basis(basis)
+        B = Matrix{ComplexF64}(undef, N, L)
+        for (i, ori) in enumerate(orientations)
+            B[:, i] = project_plane_wave(basis; k_hat = ori.u_inc,
+                                         E0 = ori.e0_inc, k_bg = k_bg,
+                                         rule = outer_rule)
+        end
+        op = build_aim_operator(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+                                pitch = pitch, padding = padding,
+                                outer_rule = outer_rule,
+                                duffy_rule = duffy_rule)
+        A = _AIMLinOp(op, N)
+        sub = method === :aim_bicgstab ? :bicgstab : :gmres
+        res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
+                           verbose = verbose)
+        D_block = res.X
+        verbose && @info "solve_cas_v2_orientations (AIM block Krylov)" method =
+            method iterations = res.iterations residual = res.residual_norm
+    else
+        throw(ArgumentError("unknown method: $method " *
+                            "(expected :dense, :aim_bicgstab, or :aim_gmres)"))
+    end
+
+    results = Vector{CASv2Result}(undef, L)
+    for i in 1:L
+        results[i] = compute_cas_observables(basis, @view D_block[:, i];
+                                             orientation = orientations[i],
                                              k0 = k0, eps_p = eps_p,
                                              eps_bg = eps_bg, rule = ff_rule)
     end

@@ -14,7 +14,7 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-04-13 (corresponds to block-VIEM.jl v0.1.2)}
+\date{Last updated: 2026-04-13 (corresponds to block-VIEM.jl v0.2.0)}
 
 \begin{document}
 \maketitle
@@ -1156,6 +1156,110 @@ solves, so only $N_{u_{1/2}}$ independent VIEM solves are required per
 $(D_{ve},\Re(m_p),\text{AR})$ triple.
 
 %======================================================================
+\section{AIM-accelerated block-Krylov multi-orientation solve}
+\label{sec:block-krylov}
+
+For large orientation sweeps --- orientation LUTs typically require
+$L = 10^2$--$10^3$ incidence directions per $(D_{ve},\Re(m_p),
+\text{AR})$ cell --- reusing the same LU factorization of the dense
+impedance matrix (Sec.~\ref{sec:cas-v2} style) becomes infeasible as
+soon as $N \gg 10^3$. For those problems \texttt{block-VIEM.jl} v0.2.0
+exposes an AIM-accelerated \emph{block-Krylov} path that solves
+\begin{equation}
+  \label{eq:block-system}
+  \mathbf{Z}\,\mathbf{X} = \mathbf{B},
+  \qquad
+  \mathbf{X},\mathbf{B}\in\mathbb{C}^{N\times L},
+\end{equation}
+with a single pre-built AIM operator and a single block iteration that
+acts on all $L$ right-hand sides simultaneously.
+
+\paragraph{Block MVP.}
+The AIM operator supports the multi-RHS form
+\[
+  \text{aim\_mvp}(\mathbf{X}) \;=\;
+  \tfrac{1}{\epsilon_p}\mathbf{M}\mathbf{X}
+  \;-\;\tfrac{\kappa}{\epsilon_{\text{bg}}}\bigl[
+  \mathbf{K}_{\text{AIM}}(\mathbf{X}) + \mathbf{K}_{\text{near}}\mathbf{X}\bigr]
+  \;+\;\mathbf{K}_{\text{half-SWG}}\mathbf{X},
+\]
+where $\mathbf{M},\mathbf{K}_{\text{near}},\mathbf{K}_{\text{half-SWG}}$
+are sparse and their matrix--matrix products cost $\mathcal{O}(\text{nnz}\cdot L)$
+in a single BLAS call. The far-field convolution
+$\mathbf{K}_{\text{AIM}}(\mathbf{X})$ is applied column-by-column via
+the same FFT plans, so the FFT setup cost is amortized across all $L$
+columns at no extra memory.
+
+\paragraph{Block BiCGSTAB.}
+The default solver follows Tadano, Sakurai and Kuramashi~\cite{TSK2009}
+and is a direct port of \texttt{block-DDA\_Py}'s
+\texttt{bl\_bicgstab\_jacobi\_mvp\_fft}, sans the Jacobi preconditioner
+(which is cheap for DDA because the dipole self-term is diagonal, but
+would require $\mathcal{O}(N)$ FFT probes for VIEM; the SWG mass matrix
+already normalizes the system adequately). Given $\mathbf{B}\in
+\mathbb{C}^{N\times L}$, set $\mathbf{X}_0=\mathbf{0}$,
+$\mathbf{R}_0=\mathbf{B}$, $\mathbf{P}=\mathbf{R}_0$, and
+$\widetilde{\mathbf{R}}_0=\mathbf{R}_0$, then iterate
+\begin{align}
+  \mathbf{V}_k    &= \mathbf{A}\mathbf{P}_k, \\
+  \boldsymbol{\alpha}_k
+    &= \bigl(\widetilde{\mathbf{R}}_0^{\!H}\mathbf{V}_k\bigr)^{-1}
+       \bigl(\widetilde{\mathbf{R}}_0^{\!H}\mathbf{R}_k\bigr), \\
+  \mathbf{T}_k    &= \mathbf{R}_k - \mathbf{V}_k\boldsymbol{\alpha}_k, \\
+  \mathbf{Z}_k    &= \mathbf{A}\mathbf{T}_k, \\
+  \xi_k &=
+  \frac{\operatorname{tr}\bigl(\mathbf{Z}_k^{\!H}\mathbf{T}_k\bigr)}
+       {\operatorname{tr}\bigl(\mathbf{Z}_k^{\!H}\mathbf{Z}_k\bigr)}, \\
+  \mathbf{X}_{k+1} &= \mathbf{X}_k + \mathbf{P}_k\boldsymbol{\alpha}_k + \xi_k \mathbf{T}_k, \\
+  \mathbf{R}_{k+1} &= \mathbf{T}_k - \xi_k \mathbf{Z}_k, \\
+  \boldsymbol{\beta}_k
+    &= -\bigl(\widetilde{\mathbf{R}}_0^{\!H}\mathbf{V}_k\bigr)^{-1}
+       \bigl(\widetilde{\mathbf{R}}_0^{\!H}\mathbf{Z}_k\bigr), \\
+  \mathbf{P}_{k+1} &=
+    \mathbf{R}_{k+1} + \bigl(\mathbf{P}_k - \xi_k \mathbf{V}_k\bigr)\boldsymbol{\beta}_k,
+\end{align}
+stopping once
+$\|\mathbf{R}_{k+1}\|_F / \|\mathbf{B}\|_F < \mathrm{tol}$.
+Each outer iteration performs exactly two block MVPs
+($\mathbf{A}\mathbf{P}$ and $\mathbf{A}\mathbf{T}$) and four $L\times L$
+Gram matrices, so the per-iteration cost is
+$\mathcal{O}\!\bigl(T_{\text{MVP}} \cdot L + NL^2\bigr)$. Block BiCGSTAB
+can break down when the columns of $\mathbf{R}_k$ lose numerical
+independence; in practice this is rare for the physically distinct
+incidence directions of a CAS-v2 LUT, but the fallback below exists.
+
+\paragraph{Block GMRES.}
+The fallback is unrestarted Block GMRES~\cite{SimoncSzyld1996}: a
+block-Arnoldi recurrence with thin QR factorization of each new block
+Krylov vector builds an orthonormal basis
+$\mathbf{V}_1,\mathbf{V}_2,\ldots$ of the block Krylov space
+$\mathcal{K}_k(\mathbf{A};\mathbf{B})$, together with an upper
+block-Hessenberg matrix $\underline{\mathbf{H}}_k$. At iteration $k$
+the approximate solution is
+$\mathbf{X}_k = \mathbf{X}_0
++ [\mathbf{V}_1|\cdots|\mathbf{V}_k]\mathbf{Y}_k$,
+where $\mathbf{Y}_k$ minimizes
+$\|\underline{\mathbf{H}}_k\mathbf{Y} - \mathbf{E}_1\boldsymbol{\Lambda}\|_F$
+with $\boldsymbol{\Lambda}$ the thin-QR factor of the initial
+residual. Unlike BiCGSTAB the memory grows linearly in the iteration
+count ($k$ blocks of shape $N\times L$ are retained), so in practice
+Block GMRES is used as a robust fallback rather than a default.
+
+\paragraph{Numerical verification.}
+On an oblate AR$=3$ spheroid
+($D_{ve} = 0.40\,\si{\micro\meter}$, $m_p=1.5$,
+$\lambda_0=0.638\,\si{\micro\meter}$, $N=2009$ half-SWG DoFs) the two
+block solvers reach tolerance $10^{-8}$ in roughly $50$ block
+iterations on $L=5$ orientations, and their CAS-v2 forward amplitudes
+agree to $\sim 10^{-10}$ relative. Compared to the dense LU
+reference, the AIM block-Krylov observables agree to $\sim 0.8\%$,
+which is the AIM discretization error at the chosen pitch and not a
+Krylov convergence issue. The analytical $+2j\alpha$ spheroid symmetry
+(Sec.~\ref{sec:cas-v2}) on the AIM block-BiCGSTAB solution holds at
+$\sim 5\times 10^{-10}$, confirming that the block iteration preserves
+orientation symmetry to the solver tolerance.
+
+%======================================================================
 \begin{thebibliography}{99}
 
 \bibitem{SWG1984}
@@ -1214,6 +1318,17 @@ $(D_{ve},\Re(m_p),\text{AR})$ triple.
   ``Krylov.jl: A Julia basket of hand-picked Krylov methods,''
   \textit{J.\ Open Source Softw.} \textbf{8}(89), 5187 (2023).
   \url{https://doi.org/10.21105/joss.05187}.
+
+\bibitem{TSK2009}
+  H.~Tadano, T.~Sakurai, and Y.~Kuramashi,
+  ``Block BiCGSTAB algorithms for solving linear systems with multiple
+  right-hand sides,''
+  \textit{JSIAM Letters} \textbf{1}, 44--47 (2009).
+
+\bibitem{SimoncSzyld1996}
+  V.~Simoncini and D.~B.~Szyld,
+  ``Flexible inner-outer Krylov subspace methods'' / ``Block GMRES,''
+  \textit{Numer.\ Linear Algebra Appl.} \textbf{2}(6), 539--560 (1996).
 
 \end{thebibliography}
 

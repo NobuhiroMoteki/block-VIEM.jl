@@ -506,7 +506,7 @@ y = (1/ε_p) M x  −  (κ/ε_bg) [ K_AIM(x) + K_near x ]
 ```
 """
 function aim_mvp(op::AIMOperator, x::AbstractVector)
-    y = op.inv_eps .* (op.mass * x)
+    y = ComplexF64.(op.inv_eps .* (op.mass * x))
     if !iszero(op.kappa)
         K_aim_x = aim_far_mvp(op.projection, op.G_hat, op.k0, x)
         K_near_x = op.precorrection * x
@@ -519,4 +519,33 @@ function aim_mvp(op::AIMOperator, x::AbstractVector)
         y .+= op.half_swg_extra * x
     end
     return y
+end
+
+"""
+    aim_mvp(op::AIMOperator, X::AbstractMatrix) -> Matrix{ComplexF64}
+
+Block (multi-RHS) form of [`aim_mvp`](@ref). For `X` of shape `(N, L)`,
+returns `Y = Z * X` of shape `(N, L)`, where `Z` is the AIM-accelerated
+impedance operator. Used by [`block_bicgstab`](@ref) for multi-orientation
+batch solves. The mass and precorrection terms are applied as sparse
+matrix–matrix products; the far-field FFT kernel is applied column-wise.
+"""
+function aim_mvp(op::AIMOperator, X::AbstractMatrix)
+    N, L = size(X)
+    Y = Matrix{ComplexF64}(undef, N, L)
+    mul!(Y, op.mass, X)
+    Y .*= op.inv_eps
+    if !iszero(op.kappa)
+        scale = op.kappa / op.eps_bg
+        for j in 1:L
+            xj = @view X[:, j]
+            Kf = aim_far_mvp(op.projection, op.G_hat, op.k0, xj)
+            @views Y[:, j] .-= scale .* Kf
+        end
+        Y .-= scale .* (op.precorrection * X)
+    end
+    if nnz(op.half_swg_extra) > 0
+        Y .+= op.half_swg_extra * X
+    end
+    return Y
 end

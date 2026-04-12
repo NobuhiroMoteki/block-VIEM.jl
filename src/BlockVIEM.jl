@@ -72,10 +72,12 @@ export AIMOperator, build_aim_operator, aim_mvp
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
 # Phase 4: Solver
 include("incident.jl")
+include("block_krylov.jl")
 include("solver.jl")
 # Public API (Phase 4)
 export project_plane_wave, SolveResult
-export solve_direct, solve_iterative
+export solve_direct, solve_iterative, solve_iterative_block
+export BlockSolveResult, block_bicgstab, block_gmres
 
 # Phase 5: PostProcess (CAS-v2 observables)
 include("postprocess.jl")

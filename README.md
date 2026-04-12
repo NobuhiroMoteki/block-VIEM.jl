@@ -13,22 +13,24 @@ products.
 
 ## Status
 
-**v0.1.2 — Phase 5 (CAS-v2 observables + HDF5 output parity) complete.**
-1704 tests pass. All numerical kernels are in place; multi-orientation
-solves and oblate spheroid benchmarks match block-DDA_Py and the Mie
-reference, and sweep results can be written in the HDF5 schema consumed
-by `PCAS_Bayes_APM_Nonspherical/lut_generation/build_spheroid_lut.py`.
+**v0.2.0 — Phase 5.5 (AIM-accelerated block-Krylov multi-orientation
+solve) complete.** 1746 tests pass. All numerical kernels are in place;
+multi-orientation solves and oblate spheroid benchmarks match
+block-DDA_Py and the Mie reference, and large problems can now be
+solved for many incident directions at once via Block BiCGSTAB or
+Block GMRES on top of the AIM FFT MVP.
 
-| Phase | Module                                         | Status |
-|-------|------------------------------------------------|--------|
-| 1     | Mesh & SWG / half-SWG / RT1 bases              | done   |
-| 2     | Duffy-transform singular integration           | done   |
-| 3     | AIM (FFT-MVP) with precorrection                | done   |
-| 4     | Direct and iterative (Krylov) solvers           | done   |
-| 5.1   | CAS-v2 forward / backward scattering observables| done   |
-| 5.2   | Multi-orientation batch solve (shared LU)       | done   |
-| 5.3   | Oblate spheroid benchmark vs block-DDA_Py       | done   |
-| 5.4   | HDF5 spheroid-sweep output (block-DDA_Py schema)| done   |
+| Phase | Module                                          | Status |
+|-------|-------------------------------------------------|--------|
+| 1     | Mesh & SWG / half-SWG / RT1 bases               | done   |
+| 2     | Duffy-transform singular integration            | done   |
+| 3     | AIM (FFT-MVP) with precorrection                 | done   |
+| 4     | Direct and iterative (Krylov) solvers            | done   |
+| 5.1   | CAS-v2 forward / backward scattering observables | done   |
+| 5.2   | Multi-orientation batch solve (shared LU)        | done   |
+| 5.3   | Oblate spheroid benchmark vs block-DDA_Py        | done   |
+| 5.4   | HDF5 spheroid-sweep output (block-DDA_Py schema) | done   |
+| 5.5   | **AIM + Block-Krylov multi-orientation solve**   | done   |
 
 ### Validation
 
@@ -91,6 +93,38 @@ cas  = compute_cas_observables(basis, D; orientation = ori,
 For multi-orientation sweeps (assemble Z once, reuse LU), see
 [`solve_cas_v2_orientations`](src/postprocess.jl) and
 [`benchmarks/cas_v2/spheroid_ar3.jl`](benchmarks/cas_v2/spheroid_ar3.jl).
+
+### Multi-orientation via AIM + Block Krylov (large problems)
+
+For larger problems where dense `Z` no longer fits, use the AIM-
+accelerated block-Krylov path. All orientations are solved at once
+against a single pre-built AIM operator, sharing FFT plans and the
+sparse precorrection matrix across right-hand sides.
+
+```julia
+euler_list = [(0.0, 0.0, 0.0), (0.3, 0.7, 0.5), (0.0, π/2, 0.0), ...]
+
+results = solve_cas_v2_orientations(
+    basis, euler_list;
+    k0, eps_p, eps_bg = 1,
+    method = :aim_bicgstab,    # or :aim_gmres  (or :dense — default)
+    pitch   = 0.5 * mean_edge_length,
+    padding = 4,
+    tol     = 1e-8,
+    maxiter = 400,
+)
+```
+
+The two block solvers follow
+- **`:aim_bicgstab`** — Block BiCGSTAB, Tadano–Sakurai–Kuramashi 2009
+  (port of block-DDA_Py's `bl_bicgstab_jacobi_mvp_fft`).
+- **`:aim_gmres`**    — unrestarted Block GMRES, Simoncini–Szyld 1996.
+  Slower per iteration (full block Krylov basis retained) but robust
+  against BiCGSTAB breakdowns on rank-deficient RHS blocks.
+
+Both are also exposed directly as `block_bicgstab(A, B; tol, maxiter)`
+and `block_gmres(A, B; tol, maxiter)` for any linear operator `A`
+supporting `A * X::AbstractMatrix`.
 
 ## Conventions
 
