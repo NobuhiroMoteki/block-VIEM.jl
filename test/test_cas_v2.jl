@@ -172,3 +172,39 @@ end
     end
     @test im_errs[end] < im_errs[1]
 end
+
+@testset "solve_cas_v2_orientations: sphere rotation invariance" begin
+    radius = 0.5
+    wl_0 = 4.0
+    m_m = 1.0
+    m_p = 1.5 + 0.01im
+    eps_p = m_p^2; eps_bg = m_m^2
+    k0 = 2π * m_m / wl_0
+
+    path = generate_sphere_mesh(radius, 0.30)
+    mesh = read_msh(path)
+    basis = build_swg_basis(mesh; include_boundary_faces = true)
+
+    euler_list = [
+        (0.0, 0.0, 0.0),
+        (0.3, 0.7, 0.5),
+        (1.1, 1.9, -0.4),
+        (0.0, π/2, 0.0),
+        (-0.5, 2.3, 1.7),
+    ]
+    results = solve_cas_v2_orientations(basis, euler_list;
+                                         k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+                                         duffy_rule = duffy_reference_rule(7))
+    @test length(results) == length(euler_list)
+
+    # Sphere is rotation-invariant: all S_fw should agree across orientations.
+    S_fw_0 = results[1].S_fw
+    S_bk_0 = results[1].S_bk
+    @info "sphere multi-orientation S_fw" S_fw_0
+    # Coarse mesh (lc=0.30, ~400 DOFs) is not perfectly spherically symmetric,
+    # so the rotation invariance is limited by mesh asymmetry. ~2% tolerance.
+    for r in results[2:end]
+        @test isapprox(r.S_fw, S_fw_0; rtol = 0.02)
+        @test isapprox(r.S_bk, S_bk_0; rtol = 0.02)
+    end
+end

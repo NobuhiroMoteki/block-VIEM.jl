@@ -84,5 +84,6 @@ include("postprocess.jl")
 export far_field_amplitude, ScatteringResult, compute_scattering
 export SphericalQuadRule, spherical_product_rule, compute_csca_farfield
 export CASOrientation, cas_orientation, CASv2Result, compute_cas_observables
+export solve_cas_v2_orientations
 
 end # module BlockVIEM

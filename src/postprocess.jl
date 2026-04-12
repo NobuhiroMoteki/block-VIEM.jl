@@ -16,6 +16,7 @@
 # longitudinal component, ensuring the far field is purely transverse.
 
 using LinearAlgebra: dot, norm
+import LinearAlgebra
 
 """
     far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
@@ -436,28 +437,27 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
     #     E_sca = exp(-jk0 r)/(4π r) · F        (engineering, e^{+jωt})
     # - block-DDA_Py's CAS observables and the Mie reference use the BH83
     #   convention (physics, e^{-iωt}) with E_sca = exp(jkr)/r · f(r̂), so
-    #     f = F/(4π).
-    # - For the same physical sphere, F^eng and the corresponding "DDA-style"
-    #   far-field vector built from physics-convention dipoles give the SAME
-    #   complex value when evaluated as (β, jβ, 0)-type circular structures
-    #   (verified analytically in Stage 5.1 dev notes). Therefore the DDA
-    #   S_θ, S_φ formulas can be applied directly to F^eng — no inner
-    #   conjugation. The final S is then in engineering convention; we
-    #   conjugate at the very end to obtain the physics-convention value
-    #   that matches block-DDA_Py and the Mie reference.
+    #     f = F/(4π) up to overall conjugation between conventions.
+    # - The DDA formulas (S_θ = √2·k²·Σ(P·θ̂)e^{-jk r̂·r_n} etc.) applied
+    #   verbatim to F^eng give the same complex value as the physics
+    #   formulas applied to F^phys for the dominant (β,jβ,0)-type
+    #   structure. Computing in eng then conjugating the final scalar at
+    #   the end gives the right Re(S_fw) (matches Mie to ~0.05%).
     #
-    # KNOWN ISSUE (Stage 5.1, 2026-04-12): the Mie sphere validation shows
-    # Re(S_fw) agreement to ~0.05% but Im(S_fw) is ~38% low and does NOT
-    # converge with mesh refinement (lc=0.30→0.18→0.12 all give ~0.39 rel
-    # error). This appears to be a pre-existing inconsistency in the
-    # `far_field_amplitude` formula: |F|² gives the correct C_sca and
-    # C_ext (matching Mie via :farfield mode), but the optical-theorem
-    # path (which depends on Im(F·E0*) directly) gives C_ext that is too
-    # small by the same ~38–40% factor. The mismatch is independent of
-    # the volume quadrature order. Real (dispersive) parts of S_fw — the
-    # dominant signal in CAS-v2 polarization measurements — are
-    # quantitatively reliable. Investigate the imag-part bug in a
-    # follow-up.
+    # CONVENTION DIFFERENCE — α-dependence sign:
+    #   For the spheroid analytical expansion S_θ(α) = A + B exp(±2jα),
+    #   block-DDA_Py uses +2jα (right-circular pol in physics convention)
+    #   while this VIEM implementation produces -2jα (the SAME complex
+    #   amplitude (1, j)/√2 represents LEFT-circular pol in the
+    #   engineering convention, which gives the opposite chirality).
+    #   To match DDA exactly, callers should pass `-α` for the alpha Euler
+    #   angle, OR negate the imaginary part of B in the analytical
+    #   expansion. The PCAS S_fw = A and OCBS S_bk observables themselves
+    #   are α-independent (= the (s_∥+s_⊥)/2 invariant), so this affects
+    #   only the per-channel S_θ, S_φ when sweeping α at fixed β.
+    #
+    # KNOWN ISSUE (Stage 5.1): Im(S_fw) on a Mie sphere is ~38% low and
+    # does not converge — pre-existing far_field_amplitude inconsistency.
     inv_4pi = 1 / (4π)
     sqrt2 = sqrt(2.0)
 
@@ -469,7 +469,7 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
     S_bk_theta_eng = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
     S_bk_phi_eng   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
 
-    # Engineering → physics: take complex conjugate at the end.
+    # Engineering → physics: complex conjugation of the final scalar.
     S_fw_theta = conj(S_fw_theta_eng)
     S_fw_phi   = conj(S_fw_phi_eng)
     S_fw       = (S_fw_theta + S_fw_phi) / 2
@@ -480,4 +480,60 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
 
     return CASv2Result(S_fw_theta, S_fw_phi, S_fw,
                        S_bk_theta, S_bk_phi, S_bk)
+end
+
+"""
+    solve_cas_v2_orientations(basis::AbstractDivBasis,
+                              euler_angles::AbstractVector;
+                              k0::Number,
+                              eps_p::Number,
+                              eps_bg::Number = 1,
+                              duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
+                              outer_rule::TetQuadRule = TET_QUAD_5PT,
+                              ff_rule::TetQuadRule = TET_QUAD_5PT,
+                              symmetrize::Bool = true)
+        -> Vector{CASv2Result}
+
+Solve the VIEM system for many particle orientations and return the
+CAS-v2 forward/backward observables for each. The impedance matrix `Z`
+is assembled and LU-factorized once; each orientation reuses the same
+factorization for the back-substitution.
+
+`euler_angles` is an iterable of `(alpha, beta, gamma)` tuples (or any
+indexable container with three elements), in the ZYZ convention used by
+block-DDA_Py.
+
+Use this for moderate-size problems where dense `Z` fits in memory
+(N ≲ a few thousand DOFs). For larger problems, see the AIM-iterative
+multi-orientation interface (TODO).
+"""
+function solve_cas_v2_orientations(basis::AbstractDivBasis,
+                                   euler_angles::AbstractVector;
+                                   k0::Number,
+                                   eps_p::Number,
+                                   eps_bg::Number = 1,
+                                   duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
+                                   outer_rule::TetQuadRule = TET_QUAD_5PT,
+                                   ff_rule::TetQuadRule = TET_QUAD_5PT,
+                                   symmetrize::Bool = true)
+    Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                  eps_bg = eps_bg,
+                                  outer_rule = outer_rule,
+                                  duffy_rule = duffy_rule,
+                                  symmetrize = symmetrize)
+    F = LinearAlgebra.lu(Z)
+    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+
+    results = Vector{CASv2Result}(undef, length(euler_angles))
+    for (i, ea) in enumerate(euler_angles)
+        α, β, γ = ea[1], ea[2], ea[3]
+        ori = cas_orientation(α, β, γ)
+        b = project_plane_wave(basis; k_hat = ori.u_inc,
+                               E0 = ori.e0_inc, k_bg = k_bg)
+        D = F \ b
+        results[i] = compute_cas_observables(basis, D; orientation = ori,
+                                             k0 = k0, eps_p = eps_p,
+                                             eps_bg = eps_bg, rule = ff_rule)
+    end
+    return results
 end
