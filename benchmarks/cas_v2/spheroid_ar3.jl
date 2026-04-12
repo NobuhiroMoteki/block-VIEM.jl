@@ -14,12 +14,8 @@
 # about its symmetry axis. Verifying it for VIEM is a strong correctness
 # test for the multi-orientation CAS pipeline.
 #
-# CONVENTION NOTE: block-DDA_Py uses `+2j·α` because it works in the
-# physics convention (e^{-iωt}). VIEM internally uses the engineering
-# convention (e^{+jωt}) and `compute_cas_observables` converts the final
-# S to physics convention via complex conjugation. After that conversion,
-# the spheroid identity should hold with the SAME sign as DDA. Below we
-# verify both signs and report which holds.
+# After the 2026-04-13 physics-convention switch (green.jl, incident.jl,
+# postprocess.jl), VIEM uses the same sign as block-DDA_Py: `+2j·α`.
 #
 # Run with:
 #     julia --project=. benchmarks/cas_v2/spheroid_ar3.jl
@@ -122,35 +118,24 @@ B = (S_theta_0 - S_phi_0) / 2
 println("\n  Spheroid symmetry test: S_θ(α) ?= A + B exp(2jα)")
 println("  " * "-" ^ 65)
 @printf("  %-10s %-22s %-22s %-10s\n", "α", "S_θ_observed", "S_θ_predicted", "rel.err")
-global err_pos = 0.0
-global err_neg = 0.0
+global err_max = 0.0
 for (k, α) in enumerate(ALPHAS)
     obs_θ = results[k].S_fw_theta
     obs_φ = results[k].S_fw_phi
-    pred_θ_pos = A + B * exp(+2im * α)
-    pred_φ_pos = A - B * exp(+2im * α)
-    pred_θ_neg = A + B * exp(-2im * α)
-    pred_φ_neg = A - B * exp(-2im * α)
-    e_pos = max(abs(obs_θ - pred_θ_pos)/abs(obs_θ), abs(obs_φ - pred_φ_pos)/abs(obs_φ))
-    e_neg = max(abs(obs_θ - pred_θ_neg)/abs(obs_θ), abs(obs_φ - pred_φ_neg)/abs(obs_φ))
-    global err_pos = max(err_pos, e_pos)
-    global err_neg = max(err_neg, e_neg)
-    pred_θ = e_neg < e_pos ? pred_θ_neg : pred_θ_pos
-    pred_φ = e_neg < e_pos ? pred_φ_neg : pred_φ_pos
+    pred_θ = A + B * exp(+2im * α)
+    pred_φ = A - B * exp(+2im * α)
     err_θ = abs(obs_θ - pred_θ) / abs(obs_θ)
     err_φ = abs(obs_φ - pred_φ) / abs(obs_φ)
+    global err_max = max(err_max, err_θ, err_φ)
     @printf("  α=%-6.4f  θ: %-+7.4f%+7.4fim   pred %-+7.4f%+7.4fim   %.2e\n",
             α, real(obs_θ), imag(obs_θ), real(pred_θ), imag(pred_θ), err_θ)
     @printf("           φ: %-+7.4f%+7.4fim   pred %-+7.4f%+7.4fim   %.2e\n",
             real(obs_φ), imag(obs_φ), real(pred_φ), imag(pred_φ), err_φ)
 end
-@printf("\n  Max symmetry-test relative error:\n")
-@printf("    DDA-style  S_θ(α) = A + B exp(+2jα): %.3e\n", err_pos)
-@printf("    VIEM-style S_θ(α) = A + B exp(-2jα): %.3e\n", err_neg)
-err_min = min(err_pos, err_neg)
-if err_min < 1e-3
+@printf("\n  Max symmetry-test relative error: %.3e   (DDA-style +2jα)\n", err_max)
+if err_max < 1e-3
     println("  ✓ PASS (< 1e-3)")
-elseif err_min < 1e-2
+elseif err_max < 1e-2
     println("  ~ MARGINAL (< 1e-2, likely mesh-error-limited)")
 else
     println("  ✗ FAIL (> 1e-2)")

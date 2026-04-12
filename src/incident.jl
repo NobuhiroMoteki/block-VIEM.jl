@@ -50,7 +50,8 @@ function project_plane_wave(basis::AbstractDivBasis;
             for i in 1:rule.n
                 r = bary_to_point(rule.bary[i], verts)
                 fn = evaluate(basis, n, r, tet)
-                E_inc = E0 * exp(-im * k_bg_c * dot(k_hat, r))
+                # PHYSICS convention: E_inc(r) = E0 exp(+ik·r)
+                E_inc = E0 * exp(im * k_bg_c * dot(k_hat, r))
                 s += rule.weights[i] * V * dot(fn, E_inc)
             end
         end

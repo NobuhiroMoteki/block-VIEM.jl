@@ -3,17 +3,18 @@
 # Phase 5 of BlockVIEM.jl.
 #
 # The scattered far field from a homogeneous particle with solved D-field
-# expansion coefficients D_n is
+# expansion coefficients D_n is (physics convention, e^{-iωt}):
 #
-#   E^sca(r) ≈ [exp(-jk0 r) / (4π r)] F(r̂)
+#   E^sca(r) ≈ [exp(+ik0 r) / (4π r)] F(r̂)
 #
 # where the vector scattering amplitude is
 #
 #   F(r̂) = (k0² κ / ε_bg) (I − r̂r̂) · P(r̂)
 #
-# and P(r̂) = Σ_n D_n ∫ f_n(r') exp(+jk0 r̂·r') dV' is the Fourier-
+# and P(r̂) = Σ_n D_n ∫ f_n(r') exp(-ik0 r̂·r') dV' is the Fourier-
 # transformed polarization. The transverse projector (I − r̂r̂) removes the
-# longitudinal component, ensuring the far field is purely transverse.
+# longitudinal component, ensuring the far field is purely transverse. The
+# standard scattering amplitude is f(r̂) = F(r̂) / (4π).
 
 using LinearAlgebra: dot, norm
 import LinearAlgebra
@@ -40,7 +41,8 @@ function far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
     kappa = (ComplexF64(eps_p) - ComplexF64(eps_bg)) / ComplexF64(eps_p)
     eps_bg_c = ComplexF64(eps_bg)
 
-    # P(r̂) = Σ_n D_n ∫ f_n(r') exp(+jk0 r̂·r') dV'
+    # PHYSICS CONVENTION: P(r̂) = Σ_n D_n ∫ f_n(r') exp(-ik0 r̂·r') dV'
+    # (Far-field expansion of exp(+ik0|r-r'|)/(4π|r-r'|) for r→∞.)
     Px, Py, Pz = zero(ComplexF64), zero(ComplexF64), zero(ComplexF64)
     @inbounds for n in eachindex(D_coeffs)
         Dn = ComplexF64(D_coeffs[n])
@@ -52,7 +54,7 @@ function far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
             for i in 1:rule.n
                 r = bary_to_point(rule.bary[i], verts)
                 fn = evaluate(basis, Int(n), r, tet)
-                phase = exp(im * k0c * dot(k_hat_sca, r))
+                phase = exp(-im * k0c * dot(k_hat_sca, r))
                 w = rule.weights[i] * V * Dn * phase
                 Px += w * fn[1]
                 Py += w * fn[2]
@@ -259,7 +261,8 @@ function compute_scattering(basis::AbstractDivBasis, D_coeffs::AbstractVector;
         # Cross sections C_ext, C_abs, C_sca are more accurate (O(h²) as
         # integrated quantities). For S(0) accuracy, refine the mesh.
     elseif csca_method == :optical_theorem
-        C_ext = -imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
+        # PHYSICS convention: C_ext = +Im(E0*·F)/k (was -Im in eng convention).
+        C_ext = imag(dot(conj.(E0), F_fw)) / (real(k0c) * E0_sq)
         C_sca = C_ext - C_abs
     else
         throw(ArgumentError("Unknown csca_method: $csca_method. Use :farfield or :optical_theorem"))
@@ -286,14 +289,11 @@ end
 # Incident circular polarization:
 #   E0 = (theta_inc + j phi_inc) / sqrt(2)
 #
-# Sign convention note: VIEM internally uses the engineering convention
-# (e^{+jωt}, outgoing wave exp(-jk0R)/(4πR)), so `far_field_amplitude` returns
-# F^eng with integrand exp(+jk r̂·r'). block-DDA_Py and the Mie reference use
-# the physics convention (e^{-iωt}). For the same physical system one has
-# F^phys = conj(F^eng), and the CAS observables below are returned in the
-# **physics convention** so they can be compared directly to block-DDA_Py and
-# to the Mie reference (S_fw = (S11(0)+S22(0))/2 from
-# `analytical_scattering_theories/homogeneous_sphere.py`).
+# Sign convention: VIEM uses the physics convention (e^{-iωt}) consistently
+# in green.jl, incident.jl, and far_field_amplitude after the 2026-04-13
+# convention switch. The CAS-v2 observables returned here are directly
+# comparable to block-DDA_Py and to the Mie reference (S_fw = (S11(0)+S22(0))/2
+# from `analytical_scattering_theories/homogeneous_sphere.py`).
 
 """
     CASOrientation
@@ -413,9 +413,9 @@ orientation. The result is returned in the physics convention (matching
 block-DDA_Py and Mie reference).
 
 The DDA observable formulas (block-DDA_Py `compute_PCAS_observable_S_fw`,
-`compute_OCBS_observable_S_bk`) are reproduced verbatim with VIEM's
-`far_field_amplitude` after taking its complex conjugate to convert from
-VIEM's engineering convention (e^{+jωt}) to the physics convention.
+`compute_OCBS_observable_S_bk`) are reproduced directly using VIEM's
+`far_field_amplitude`, which is in physics convention since the
+2026-04-13 convention switch.
 """
 function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                                  orientation::CASOrientation,
@@ -432,50 +432,23 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
                                k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
                                rule = rule)
 
-    # Convention reconciliation:
-    # - VIEM's `far_field_amplitude` returns F defined by
-    #     E_sca = exp(-jk0 r)/(4π r) · F        (engineering, e^{+jωt})
-    # - block-DDA_Py's CAS observables and the Mie reference use the BH83
-    #   convention (physics, e^{-iωt}) with E_sca = exp(jkr)/r · f(r̂), so
-    #     f = F/(4π) up to overall conjugation between conventions.
-    # - The DDA formulas (S_θ = √2·k²·Σ(P·θ̂)e^{-jk r̂·r_n} etc.) applied
-    #   verbatim to F^eng give the same complex value as the physics
-    #   formulas applied to F^phys for the dominant (β,jβ,0)-type
-    #   structure. Computing in eng then conjugating the final scalar at
-    #   the end gives the right Re(S_fw) (matches Mie to ~0.05%).
-    #
-    # CONVENTION DIFFERENCE — α-dependence sign:
-    #   For the spheroid analytical expansion S_θ(α) = A + B exp(±2jα),
-    #   block-DDA_Py uses +2jα (right-circular pol in physics convention)
-    #   while this VIEM implementation produces -2jα (the SAME complex
-    #   amplitude (1, j)/√2 represents LEFT-circular pol in the
-    #   engineering convention, which gives the opposite chirality).
-    #   To match DDA exactly, callers should pass `-α` for the alpha Euler
-    #   angle, OR negate the imaginary part of B in the analytical
-    #   expansion. The PCAS S_fw = A and OCBS S_bk observables themselves
-    #   are α-independent (= the (s_∥+s_⊥)/2 invariant), so this affects
-    #   only the per-channel S_θ, S_φ when sweeping α at fixed β.
-    #
-    # KNOWN ISSUE (Stage 5.1): Im(S_fw) on a Mie sphere is ~38% low and
-    # does not converge — pre-existing far_field_amplitude inconsistency.
+    # PHYSICS CONVENTION (e^{-iωt}, matching block-DDA_Py and Mie reference):
+    # `far_field_amplitude` returns F defined by E_sca = exp(+ik0 r)/(4π r)·F
+    # with integrand exp(-ik0 r̂·r'). The physics scattering amplitude is
+    # f = F/(4π), and the DDA observable formulas apply directly:
+    #     S_θ = √2 · (f · θ̂)
+    #     S_φ = -j · √2 · (f · φ̂)
     inv_4pi = 1 / (4π)
     sqrt2 = sqrt(2.0)
 
-    # Forward (PCAS) — engineering convention
-    S_fw_theta_eng = inv_4pi * sqrt2 * _project_far_field(F_fw, orientation.theta_sca_fw)
-    S_fw_phi_eng   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_fw, orientation.phi_sca_fw)
-
-    # Backward (OCBS) — engineering convention
-    S_bk_theta_eng = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
-    S_bk_phi_eng   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
-
-    # Engineering → physics: complex conjugation of the final scalar.
-    S_fw_theta = conj(S_fw_theta_eng)
-    S_fw_phi   = conj(S_fw_phi_eng)
+    # Forward (PCAS)
+    S_fw_theta = inv_4pi * sqrt2 * _project_far_field(F_fw, orientation.theta_sca_fw)
+    S_fw_phi   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_fw, orientation.phi_sca_fw)
     S_fw       = (S_fw_theta + S_fw_phi) / 2
 
-    S_bk_theta = conj(S_bk_theta_eng)
-    S_bk_phi   = conj(S_bk_phi_eng)
+    # Backward (OCBS)
+    S_bk_theta = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
+    S_bk_phi   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
     S_bk       = (-S_bk_theta + S_bk_phi) / sqrt2
 
     return CASv2Result(S_fw_theta, S_fw_phi, S_fw,

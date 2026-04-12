@@ -58,7 +58,7 @@ end
         r = Vec3(0.0, 0.0, dist)
         I_num = surface_integral_G(basis, n_bnd, r, k0; mode = :far)
         R_c = norm(r - centroid)
-        I_approx = a * exp(-im * k0 * R_c) / (4π * R_c)
+        I_approx = a * exp(+im * k0 * R_c) / (4π * R_c)
         @test isapprox(I_num, I_approx; rtol = 1e-3)
     end
 end
@@ -80,7 +80,7 @@ end
     # digits at any large distance.
     k0 = 1e-6
     r = Vec3(0.0, 0.0, 1e4)
-    I_ref = a * exp(-im * k0 * norm(r - centroid)) / (4π * norm(r - centroid))
+    I_ref = a * exp(+im * k0 * norm(r - centroid)) / (4π * norm(r - centroid))
     for order in (2, 3, 4)
         rule = tri_collapsed_rule(order)
         I_num = surface_integral_G(basis, n_bnd, r, k0;

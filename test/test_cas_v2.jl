@@ -119,14 +119,13 @@ end
     # For a sphere with circular illumination at θ=0, S_θ ≈ S_φ.
     @test isapprox(cas.S_fw_theta, cas.S_fw_phi; rtol = 0.01)
 
-    # Re(S_fw) is the dominant scattering amplitude and converges quickly.
-    # Im(S_fw) (the radiative-damping/extinction part) is O(h)-limited per
-    # the existing postprocess.jl docstring, so we use a loose imag tolerance.
+    # After the 2026-04-13 physics-convention switch in green.jl/incident.jl/
+    # postprocess.jl, both Re and Im of S_fw converge with mesh refinement.
     re_err_fw = abs(real(cas.S_fw) - real(mie.S_fw)) / abs(real(mie.S_fw))
     im_err_fw = abs(imag(cas.S_fw) - imag(mie.S_fw)) / abs(imag(mie.S_fw))
     @info "  S_fw relative error" re_err_fw im_err_fw
     @test re_err_fw < 0.01
-    @test im_err_fw < 0.5
+    @test im_err_fw < 0.01
 
     re_err_bk = abs(real(cas.S_bk) - real(mie.S_bk)) / abs(real(mie.S_bk))
     @info "  S_bk Re relative error" re_err_bk
