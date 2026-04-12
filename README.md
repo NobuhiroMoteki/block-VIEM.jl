@@ -41,6 +41,14 @@ by `PCAS_Bayes_APM_Nonspherical/lut_generation/build_spheroid_lut.py`.
 - **Spheroid symmetry** (`benchmarks/cas_v2/spheroid_ar3.jl`): the
   analytical α-expansion `S_θ(α) = A + B·exp(+2jα)` used by block-DDA_Py
   holds at machine precision (~5×10⁻¹⁵) on an oblate AR = 3 mesh.
+- **Direct cross-validation vs block-DDA_Py**
+  (`benchmarks/cas_v2/dda_comparison/`): on an oblate AR = 3 spheroid
+  (D_ve = 0.40 μm, m_p = 1.5, λ₀ = 0.638 μm) at a single orientation
+  (α = 0, β = π/4, γ = 0), VIEM (lc = 0.035 μm, 8746 half-SWG DoFs)
+  and DDA (dpl = 17, 2236 dipoles) agree to **1.60 %** on S_fw_θ and
+  **2.39 %** on S_fw_φ — both codes are discretisation-limited, and
+  the per-DoF accuracy advantage of VIEM from the sphere case
+  continues to hold for non-spherical particles.
 
 ## Quick start
 

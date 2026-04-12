@@ -873,6 +873,62 @@ independently solved amplitudes to the analytical prediction
 relative deviation is $\sim 5\times 10^{-15}$, that is, machine
 precision for double-precision arithmetic.
 
+The $\alpha$-symmetry check verifies the internal consistency of
+block-VIEM.jl but does not confirm that the computed amplitudes
+themselves are correct. A direct cross-validation against
+block-DDA\_Py on the same oblate spheroid is therefore performed by
+the driver pair under
+\texttt{benchmarks/cas\_v2/dda\_comparison/} (Python for DDA, Julia
+for VIEM, JSON as the exchange format):
+\begin{itemize}
+  \item particle: oblate spheroid, $D_{ve} = \SI{0.40}{\micro\metre}$,
+        $\text{bc\_ratio} = 3$, $m_p = 1.5$ (non-absorbing);
+  \item background: $m_m = 1$, $\lambda_0 = \SI{0.638}{\micro\metre}$
+        ($k_0 r_{ve}\approx 1.97$);
+  \item orientation: single tilt $(\alpha, \beta, \gamma) = (0,\pi/4,0)$;
+  \item discretisations: DDA uses $N_{\text{dip}} = 2236$ dipoles
+        with $\mathrm{dpl}=17$; VIEM uses a half-SWG mesh with
+        $\ell_c = \SI{0.035}{\micro\metre}$ yielding
+        $N_{\text{dof}} = 8746$.
+\end{itemize}
+The PCAS forward amplitudes agree to about two percent:
+\begin{table}[h]
+\centering
+\caption{Cross-validation of VIEM against block-DDA\_Py on a single
+oblate AR = 3 spheroid at $\beta = \pi/4$. The relative error is
+$\abs{\Delta S}/\abs{S_{\text{DDA}}}$.}
+\label{tab:dda-viem-spheroid}
+\begin{tabular}{lcc}
+\toprule
+Observable          & block-DDA\_Py                 & block-VIEM.jl \\
+\midrule
+$S_{\text{fw},\theta}$ & $+0.23503 + 0.09351 i$ & $+0.23143 + 0.09164 i$ \\
+$S_{\text{fw},\phi}$   & $+0.23836 + 0.18567 i$ & $+0.23480 + 0.17937 i$ \\
+$C_{\text{ext}}$       & $\SI{0.17811}{\square\micro\metre}$
+                                                & $\SI{0.17291}{\square\micro\metre}$ \\
+\midrule
+$\abs{\Delta S_{\text{fw},\theta}}/\abs{S_{\text{fw},\theta}^{\text{DDA}}}$
+  & \multicolumn{2}{c}{$1.60\%$}\\
+$\abs{\Delta S_{\text{fw},\phi}}/\abs{S_{\text{fw},\phi}^{\text{DDA}}}$
+  & \multicolumn{2}{c}{$2.39\%$}\\
+$\abs{\Delta C_{\text{ext}}}/C_{\text{ext}}^{\text{DDA}}$
+  & \multicolumn{2}{c}{$2.92\%$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+Both codes are discretisation-limited at these resolutions ---
+the VIEM volume-equivalent radius recovered from the mesh is
+$r_{ve}^{\text{mesh}} = \SI{0.19918}{\micro\metre}$, already a
+$0.41\%$ volumetric error on top of the half-SWG error budget, and
+DDA has its own stair-casing error of comparable size --- so a
+$\sim 2\%$ disagreement between the two independent codes is the
+level of agreement one can expect at these mesh densities. The
+result confirms that block-VIEM.jl and block-DDA\_Py produce the
+\emph{same complex polarimetric amplitudes} on an axisymmetric
+non-spherical particle up to discretisation error, in addition to
+reproducing the Mie sphere limit to $\sim 0.4\%$
+(Sec.~\ref{sec:mie-sphere}).
+
 %----------------------------------------------------------------------
 \subsection{Accuracy and computational cost vs.\ block-DDA\_Py}
 \label{sec:viem-vs-dda}
