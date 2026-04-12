@@ -43,12 +43,18 @@ by `PCAS_Bayes_APM_Nonspherical/lut_generation/build_spheroid_lut.py`.
   holds at machine precision (~5×10⁻¹⁵) on an oblate AR = 3 mesh.
 - **Direct cross-validation vs block-DDA_Py**
   (`benchmarks/cas_v2/dda_comparison/`): on an oblate AR = 3 spheroid
-  (D_ve = 0.40 μm, m_p = 1.5, λ₀ = 0.638 μm) at a single orientation
-  (α = 0, β = π/4, γ = 0), VIEM (lc = 0.035 μm, 8746 half-SWG DoFs)
-  and DDA (dpl = 17, 2236 dipoles) agree to **1.60 %** on S_fw_θ and
-  **2.39 %** on S_fw_φ — both codes are discretisation-limited, and
-  the per-DoF accuracy advantage of VIEM from the sphere case
-  continues to hold for non-spherical particles.
+  (D_ve = 0.40 μm, m_p = 1.5, λ₀ = 0.638 μm) at two tilt angles, VIEM
+  (lc = 0.035 μm, 8746 half-SWG DoFs) and DDA (dpl = 17, 2236 dipoles)
+  agree to ~2 % on the complex polarimetric forward amplitudes:
+
+  | β    | \|ΔS_θ\|/\|S_θ\| | \|ΔS_φ\|/\|S_φ\| | \|ΔC_ext\|/C_ext |
+  |------|------------------|------------------|-----------------|
+  | π/4  | 1.67 %           | 2.46 %           | 2.96 %          |
+  | π/2  | 2.08 %           | 2.75 %           | 3.34 %          |
+
+  Both codes are discretisation-limited at these mesh densities (the
+  VIEM mesh r_ve is itself 0.41 % short of the target), so a few-percent
+  disagreement between the two independent codes is the expected level.
 
 ## Quick start
 

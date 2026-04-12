@@ -38,7 +38,7 @@ AB_RATIO  = 1.0             # a / b — axisymmetric spheroid
 DPL       = 17              # dipoles per wavelength inside particle
 
 # Orientation grid (match VIEM):  alpha=0, gamma=0, single beta.
-BETA_LIST = [np.pi/4]       # single tilt
+BETA_LIST = [np.pi/4, np.pi/2]   # tilt angles to compare against VIEM
 EULER_NP  = np.column_stack([
     np.zeros(len(BETA_LIST)), np.array(BETA_LIST), np.zeros(len(BETA_LIST))
 ])                           # shape (L, 3)

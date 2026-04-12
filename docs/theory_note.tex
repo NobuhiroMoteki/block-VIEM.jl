@@ -885,37 +885,60 @@ for VIEM, JSON as the exchange format):
         $\text{bc\_ratio} = 3$, $m_p = 1.5$ (non-absorbing);
   \item background: $m_m = 1$, $\lambda_0 = \SI{0.638}{\micro\metre}$
         ($k_0 r_{ve}\approx 1.97$);
-  \item orientation: single tilt $(\alpha, \beta, \gamma) = (0,\pi/4,0)$;
+  \item orientations: two tilt angles, $(\alpha, \beta, \gamma)
+        = (0,\pi/4,0)$ and $(0,\pi/2,0)$;
   \item discretisations: DDA uses $N_{\text{dip}} = 2236$ dipoles
         with $\mathrm{dpl}=17$; VIEM uses a half-SWG mesh with
         $\ell_c = \SI{0.035}{\micro\metre}$ yielding
         $N_{\text{dof}} = 8746$.
 \end{itemize}
-The PCAS forward amplitudes agree to about two percent:
+The PCAS forward amplitudes agree to within $\sim 3\%$ at both tilt
+angles:
 \begin{table}[h]
 \centering
 \caption{Cross-validation of VIEM against block-DDA\_Py on a single
-oblate AR = 3 spheroid at $\beta = \pi/4$. The relative error is
+oblate AR = 3 spheroid at two tilt angles. The relative error is
 $\abs{\Delta S}/\abs{S_{\text{DDA}}}$.}
 \label{tab:dda-viem-spheroid}
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-Observable          & block-DDA\_Py                 & block-VIEM.jl \\
+Observable                           & block-DDA\_Py
+                                     & block-VIEM.jl
+                                     & rel.\ err.\ \\
 \midrule
-$S_{\text{fw},\theta}$ & $+0.23503 + 0.09351 i$ & $+0.23143 + 0.09164 i$ \\
-$S_{\text{fw},\phi}$   & $+0.23836 + 0.18567 i$ & $+0.23480 + 0.17937 i$ \\
-$C_{\text{ext}}$       & $\SI{0.17811}{\square\micro\metre}$
-                                                & $\SI{0.17291}{\square\micro\metre}$ \\
+\multicolumn{4}{l}{$\beta = \pi/4$}\\
+\quad $S_{\text{fw},\theta}$
+  & $+0.23514 + 0.09368 i$ & $+0.23143 + 0.09164 i$ & $1.67\%$ \\
+\quad $S_{\text{fw},\phi}$
+  & $+0.23884 + 0.18561 i$ & $+0.23480 + 0.17937 i$ & $2.46\%$ \\
+\quad $C_{\text{ext}}$
+  & $\SI{0.17819}{\square\micro\metre}$
+  & $\SI{0.17291}{\square\micro\metre}$ & $2.96\%$ \\
 \midrule
-$\abs{\Delta S_{\text{fw},\theta}}/\abs{S_{\text{fw},\theta}^{\text{DDA}}}$
-  & \multicolumn{2}{c}{$1.60\%$}\\
-$\abs{\Delta S_{\text{fw},\phi}}/\abs{S_{\text{fw},\phi}^{\text{DDA}}}$
-  & \multicolumn{2}{c}{$2.39\%$}\\
-$\abs{\Delta C_{\text{ext}}}/C_{\text{ext}}^{\text{DDA}}$
-  & \multicolumn{2}{c}{$2.92\%$}\\
+\multicolumn{4}{l}{$\beta = \pi/2$}\\
+\quad $S_{\text{fw},\theta}$
+  & $+0.23703 + 0.08742 i$ & $+0.23221 + 0.08536 i$ & $2.08\%$ \\
+\quad $S_{\text{fw},\phi}$
+  & $+0.29578 + 0.21695 i$ & $+0.28980 + 0.20883 i$ & $2.75\%$ \\
+\quad $C_{\text{ext}}$
+  & $\SI{0.19419}{\square\micro\metre}$
+  & $\SI{0.18769}{\square\micro\metre}$ & $3.34\%$ \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+The two tilt angles cover qualitatively different illumination
+geometries: at $\beta = \pi/4$ the spheroid is intermediate between
+flat-on and edge-on; at $\beta = \pi/2$ the figure axis is exactly
+perpendicular to $\hat{\bm{u}}_{\text{inc}}$ (edge-on), so the
+incident wave sees the largest geometrical cross section and the
+$C_{\text{ext}}$ value is roughly $9\%$ larger than at $\pi/4$. The
+fact that VIEM and DDA agree to the same few-percent level at both
+tilts --- not just on the magnitude but on both the real and
+imaginary parts of $S_{\text{fw},\theta}$ and $S_{\text{fw},\phi}$
+independently --- demonstrates that the agreement is not an
+accidental near-coincidence at one orientation but a genuine
+convergence to the same physical scattering amplitudes.
 Both codes are discretisation-limited at these resolutions ---
 the VIEM volume-equivalent radius recovered from the mesh is
 $r_{ve}^{\text{mesh}} = \SI{0.19918}{\micro\metre}$, already a

@@ -21,7 +21,7 @@ const M_P      = 1.5 + 0.0im        # particle refractive index
 const R_VE     = 0.20               # volume-equivalent radius [um]
 const BC_RATIO = 3.0                # b / c  (> 1 ⇒ oblate)
 const LC       = 0.035              # target mesh size [um]   (≈ r_ve/6)
-const BETA_LIST = [π/4]              # single β (intrinsic ZYZ second angle)
+const BETA_LIST = [π/4, π/2]         # tilt angles to compare against DDA
 
 const OUTPUT = joinpath(@__DIR__, "viem_result.json")
 
@@ -114,29 +114,31 @@ r_ve_mesh = (3 * V_mesh / (4π))^(1/3)
         100*abs(r_ve_mesh - R_VE)/R_VE)
 
 euler_list = [(0.0, β, 0.0) for β in BETA_LIST]
-@printf("  Solving at %d orientations…\n", length(euler_list))
-t = @elapsed results = solve_cas_v2_orientations(
-    basis, euler_list;
-    k0 = K0, eps_p = EPS_P, eps_bg = EPS_BG,
-    duffy_rule = duffy_reference_rule(7))
-@printf("  elapsed: %.1fs\n\n", t)
-
-# ---------------------------------------------------------------------------
-# Also compute C_ext via the :farfield route for a full comparison
-# ---------------------------------------------------------------------------
-# For the single-orientation case, reuse one of the orientation solutions.
-# Re-solve the direct linear system so we have D_coeffs available.
-ori1 = cas_orientation(euler_list[1]...)
-Z = assemble_impedance_matrix(basis; k0 = K0, eps_p = EPS_P, eps_bg = EPS_BG,
+@printf("  Assembling Z and factorising…\n")
+t_asm = @elapsed Z = assemble_impedance_matrix(basis; k0 = K0,
+                              eps_p = EPS_P, eps_bg = EPS_BG,
                               duffy_rule = duffy_reference_rule(7),
                               symmetrize = true)
-b = project_plane_wave(basis; k_hat = ori1.u_inc,
-                       E0 = ori1.e0_inc,
-                       k_bg = ComplexF64(K0))
-D = Z \ b
-scat = compute_scattering(basis, D;
-                           k_hat = ori1.u_inc, E0 = ori1.e0_inc,
-                           k0 = K0, eps_p = EPS_P, eps_bg = EPS_BG)
+@printf("  Z assembly: %.1fs\n", t_asm)
+import LinearAlgebra
+t_lu = @elapsed F = LinearAlgebra.lu(Z)
+@printf("  LU       : %.1fs\n", t_lu)
+
+@printf("  Solving %d orientations + computing CAS + far-field…\n", length(euler_list))
+results = []
+scats   = []
+t_solve = @elapsed for ea in euler_list
+    ori = cas_orientation(ea...)
+    bvec = project_plane_wave(basis; k_hat = ori.u_inc,
+                              E0 = ori.e0_inc, k_bg = ComplexF64(K0))
+    D = F \ bvec
+    push!(results, compute_cas_observables(basis, D; orientation = ori,
+                              k0 = K0, eps_p = EPS_P, eps_bg = EPS_BG))
+    push!(scats, compute_scattering(basis, D;
+                              k_hat = ori.u_inc, E0 = ori.e0_inc,
+                              k0 = K0, eps_p = EPS_P, eps_bg = EPS_BG))
+end
+@printf("  per-orientation solve+observables: %.1fs (total)\n\n", t_solve)
 
 params = [
     "wl_0"      => WL_0,
@@ -165,9 +167,9 @@ for (k, ea) in enumerate(euler_list)
         "S_fw_im"        => imag(results[k].S_fw),
         "S_bk_re"        => real(results[k].S_bk),
         "S_bk_im"        => imag(results[k].S_bk),
-        "C_ext"          => scat.C_ext,
-        "C_abs"          => scat.C_abs,
-        "C_sca"          => scat.C_sca,
+        "C_ext"          => scats[k].C_ext,
+        "C_abs"          => scats[k].C_abs,
+        "C_sca"          => scats[k].C_sca,
     ]
     push!(orientations, o)
     @printf("  (α=%.4f β=%.4f γ=%.4f)\n", ea...)
@@ -175,9 +177,9 @@ for (k, ea) in enumerate(euler_list)
             real(results[k].S_fw_theta), imag(results[k].S_fw_theta))
     @printf("    S_fw_φ  = %+.6e %+.6ej\n",
             real(results[k].S_fw_phi), imag(results[k].S_fw_phi))
-    @printf("    C_ext   = %.6e\n", scat.C_ext)
-    @printf("    C_abs   = %.6e\n", scat.C_abs)
-    @printf("    C_sca   = %.6e\n", scat.C_sca)
+    @printf("    C_ext   = %.6e\n", scats[k].C_ext)
+    @printf("    C_abs   = %.6e\n", scats[k].C_abs)
+    @printf("    C_sca   = %.6e\n", scats[k].C_sca)
 end
 
 write_json(OUTPUT, Dict(params), orientations)
