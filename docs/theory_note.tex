@@ -1,0 +1,1146 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{physics}
+\usepackage{bm}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[margin=25mm]{geometry}
+\usepackage{hyperref}
+
+\title{Technical Note: block-VIEM.jl\\[4pt]
+\large Volume Integral Equation Method with SWG/half-SWG Basis,\\
+Duffy Singular Integration, and AIM-FFT Acceleration\\
+for Light Scattering by Arbitrary Dielectric Particles}
+\author{N.\ Moteki}
+\date{Last updated: 2026-04-13 (corresponds to block-VIEM.jl v0.1.2)}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction}
+\label{sec:introduction}
+%======================================================================
+
+The volume integral equation method (VIEM) computes the electromagnetic
+field scattered by an inhomogeneous dielectric particle of arbitrary
+shape by solving an integral equation on the particle volume rather
+than on its surface~\cite{SWG1984,VolakisSertel}. Compared with the
+discrete dipole approximation (DDA)~\cite{Purcell1973,Draine1988,Goodman1991}
+implemented in the companion package
+\texttt{block-DDA\_Py}~\cite{Moteki2024}, a volumetric formulation with
+conforming vector basis functions on a tetrahedral mesh offers two
+practical advantages: (i)~shapes with curved or faceted surfaces are
+represented without stair-casing, and (ii)~the number of degrees of
+freedom per wavelength required for a given accuracy is considerably
+smaller than for a cubic-lattice DDA, especially for high refractive
+index contrast.
+
+This document describes the theoretical background and the algorithms
+implemented in \texttt{block-VIEM.jl} v0.1.2, covering:
+\begin{enumerate}
+  \item the EFVIE-D formulation with Schaubert--Wilton--Glisson (SWG)
+        and half-SWG basis functions
+        (Sec.~\ref{sec:formulation}),
+  \item weakening the $1/R^3$ singularity to $1/R$ via integration by
+        parts, including the boundary-face surface-correction terms
+        $K^{B}$, $K^{C}$, $K^{D}$ required to restore charge neutrality
+        (Sec.~\ref{sec:weakening}),
+  \item evaluation of the remaining $1/R$ singular and near-singular
+        volume integrals via the generalized Duffy transform
+        (Sec.~\ref{sec:duffy}),
+  \item FFT-accelerated matrix--vector products through the Adaptive
+        Integral Method (AIM) with moment matching and precorrection
+        (Sec.~\ref{sec:aim}),
+  \item the direct and Krylov iterative solvers and the
+        multi-orientation batch solve
+        (Sec.~\ref{sec:solver}),
+  \item the CAS-v2 compatible scattering observables computed from the
+        solution (Sec.~\ref{sec:observables}),
+  \item validation against Mie theory and the oblate-spheroid symmetry
+        identity (Sec.~\ref{sec:validation}),
+  \item the HDF5 output format for spheroid parameter sweeps, bit
+        compatible with the \texttt{block-DDA\_Py} schema consumed by
+        \texttt{build\_spheroid\_lut.py}
+        (Sec.~\ref{sec:spheroid-sweep-io}).
+\end{enumerate}
+
+Throughout this note the electromagnetic equations are written in the
+physics (BH83~\cite{Bohren1983}) time convention $\mathrm{e}^{-i\omega t}$,
+so that an outgoing scalar Helmholtz Green's function carries the factor
+$\mathrm{e}^{+ik_0 R}/(4\pi R)$. Absorbing materials have
+$\Im(\epsilon_p) > 0$. Lengths are expressed in micrometres
+(\si{\micro\metre}). Vectors are set in bold italic
+($\bm{E}$, $\bm{k}$, $\bm{r}$), matrices and second-rank tensors in
+upright bold ($\mathbf{A}$, $\mathbf{G}$), and unit vectors carry a hat
+($\hat{\bm{e}}$, $\hat{\bm{n}}$).
+
+%======================================================================
+\section{VIEM Formulation}
+\label{sec:formulation}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{EFVIE-D strong form}
+\label{sec:efvie-d}
+%----------------------------------------------------------------------
+
+Consider a non-magnetic ($\mu = \mu_0$) inhomogeneous dielectric particle
+occupying the volume $\Omega$ with complex permittivity
+$\epsilon_p(\bm{r})$, embedded in a homogeneous background of real
+permittivity $\epsilon_{\text{bg}}$. The wavenumber in the background is
+\begin{equation}
+  k_0 = \omega\,\sqrt{\mu_0\,\epsilon_{\text{bg}}}
+      = \frac{2\pi\,m_m}{\lambda_0},
+  \label{eq:wavenumber}
+\end{equation}
+where $m_m = \sqrt{\epsilon_{\text{bg}}/\epsilon_0}$ is the refractive
+index of the background medium.
+
+We use the electric flux volume integral equation in the
+\emph{D-form}~\cite{SWG1984}: the unknown field is the electric flux
+density $\bm{D}(\bm{r}) = \epsilon_p(\bm{r})\,\bm{E}(\bm{r})$, whose
+normal component is continuous across material interfaces, so the
+scheme places all dielectric jumps inside the basis functions and not
+in the expansion coefficients. Define the dielectric contrast
+\begin{equation}
+  \kappa(\bm{r})
+    = \frac{\epsilon_p(\bm{r}) - \epsilon_{\text{bg}}}{\epsilon_p(\bm{r})}.
+  \label{eq:kappa}
+\end{equation}
+The equivalent volume polarisation current is
+$\bm{J}_v = -i\omega\,\kappa\,\bm{D}$, and the EFVIE-D strong form
+reads~\cite{SWG1984,VolakisSertel}
+\begin{equation}
+  \bm{E}_{\text{inc}}(\bm{r})
+    = \frac{\bm{D}(\bm{r})}{\epsilon_p(\bm{r})}
+      \;-\;
+      \frac{1}{\epsilon_{\text{bg}}}
+      \bigl(k_0^{2} + \grad\div\bigr)
+      \int_{\Omega} \kappa(\bm{r}')\,\bm{D}(\bm{r}')\,
+                    G(\bm{r},\bm{r}')\;\dd^{3}r',
+  \label{eq:efvie-strong}
+\end{equation}
+where $G(\bm{r},\bm{r}')$ is the free-space scalar Helmholtz Green's
+function
+\begin{equation}
+  G(\bm{r},\bm{r}')
+    = \frac{\mathrm{e}^{+i k_0 R}}{4\pi R},
+  \qquad R = \abs{\bm{r}-\bm{r}'}.
+  \label{eq:green-scalar}
+\end{equation}
+
+%----------------------------------------------------------------------
+\subsection{Incident plane wave}
+\label{sec:incident-wave}
+%----------------------------------------------------------------------
+
+The incident field is a monochromatic plane wave
+\begin{equation}
+  \bm{E}_{\text{inc}}(\bm{r})
+    = \bm{E}_0\,\exp\!\bigl(+i k_0\,\hat{\bm{k}}_{\text{inc}}\cdot\bm{r}\bigr),
+  \label{eq:incident-wave}
+\end{equation}
+with $\hat{\bm{k}}_{\text{inc}}$ the unit propagation direction and
+$\bm{E}_0$ a complex polarisation vector perpendicular to
+$\hat{\bm{k}}_{\text{inc}}$. For CAS-v2 observables the incident
+polarisation is left-handed circular (matching
+\texttt{block-DDA\_Py}~\cite{Moteki2024}):
+\begin{equation}
+  \bm{E}_0
+    = \frac{1}{\sqrt{2}}\,\hat{\bm{e}}_{\theta,\text{inc}}
+      + \frac{i}{\sqrt{2}}\,\hat{\bm{e}}_{\phi,\text{inc}},
+  \label{eq:circular-pol}
+\end{equation}
+where $\hat{\bm{e}}_{\theta,\text{inc}},\,\hat{\bm{e}}_{\phi,\text{inc}}$
+are the polar and azimuthal unit vectors of the incident direction in
+the particle frame. Particle orientation is parameterised by intrinsic
+ZYZ Euler angles $(\alpha,\beta,\gamma)$, as in
+\texttt{block-DDA\_Py}; the laboratory-frame triad
+$\{\hat{\bm{u}}_{\text{inc},L},\hat{\bm{e}}_{\theta,L},\hat{\bm{e}}_{\phi,L}\}$
+is transformed into the particle frame via the inverse rotation
+$\mathbf{R}(\alpha,\beta,\gamma)^{-1}$.
+
+%----------------------------------------------------------------------
+\subsection{SWG and half-SWG basis functions}
+\label{sec:swg}
+%----------------------------------------------------------------------
+
+The particle volume $\Omega$ is discretised into a conforming
+tetrahedral mesh $\mathcal{T}_h$ with $N_{\text{tet}}$ elements. On each
+internal face $S_n$ shared by two tetrahedra $T_n^{+}$ and $T_n^{-}$, an
+SWG basis function~\cite[Eqs.~(10), (12)]{SWG1984} is defined by
+\begin{equation}
+  \bm{f}_n(\bm{r})
+  =
+  \begin{cases}
+    \displaystyle\frac{a_n}{3\,V_n^{+}}\,\bigl(\bm{r} - \bm{p}_n^{+}\bigr),
+      & \bm{r}\in T_n^{+},\\[6pt]
+    -\displaystyle\frac{a_n}{3\,V_n^{-}}\,\bigl(\bm{r} - \bm{p}_n^{-}\bigr),
+      & \bm{r}\in T_n^{-},\\[6pt]
+    \bm{0}, & \text{otherwise},
+  \end{cases}
+  \label{eq:swg-def}
+\end{equation}
+where $a_n$ is the face area, $V_n^{\pm}$ the volumes of the two
+supporting tetrahedra, and $\bm{p}_n^{\pm}$ the free vertex (the
+vertex of $T_n^{\pm}$ not on $S_n$). The normalisation in
+\eqref{eq:swg-def} enforces $\bm{f}_n\!\cdot\!\hat{\bm{n}} = 1$ on
+$S_n$ (oriented from $T_n^{+}$ to $T_n^{-}$) and zero on the other
+five faces of $T_n^{+} \cup T_n^{-}$. The divergence is piecewise
+constant,
+\begin{equation}
+  \div\bm{f}_n(\bm{r})
+  =
+  \begin{cases}
+    \displaystyle +\frac{a_n}{V_n^{+}}, & \bm{r}\in T_n^{+},\\[6pt]
+    \displaystyle -\frac{a_n}{V_n^{-}}, & \bm{r}\in T_n^{-},\\[6pt]
+    0, & \text{otherwise}.
+  \end{cases}
+  \label{eq:swg-div}
+\end{equation}
+
+A naive SWG expansion that uses only internal faces implicitly imposes
+$\bm{D}\!\cdot\!\hat{\bm{n}} = 0$ on the particle boundary
+$\partial\Omega$, leaving the surface polarisation charge unrepresented
+and producing systematic cross-section errors of order
+$10$--$30\%$ on Mie tests. To restore charge neutrality, the
+original~\cite{SWG1984} formulation adds one half-SWG basis function per
+boundary face. On a boundary face $S_n$ with a single supporting
+tetrahedron $T_n^{+}$, the half-SWG function is the first branch of
+\eqref{eq:swg-def} alone:
+\begin{equation}
+  \bm{f}_n^{\text{half}}(\bm{r})
+    = \frac{a_n}{3\,V_n^{+}}\,\bigl(\bm{r} - \bm{p}_n^{+}\bigr),
+  \qquad \bm{r} \in T_n^{+},
+  \label{eq:half-swg}
+\end{equation}
+with $\bm{f}_n\!\cdot\!\hat{\bm{n}} = 1$ on $S_n$ and zero on the other
+three faces of $T_n^{+}$. For a half-SWG function the normal flux does
+\emph{not} vanish on $\partial\Omega$, so it carries an induced surface
+polarisation charge $\sigma = \kappa\,\bm{D}\!\cdot\!\hat{\bm{n}}$ whose
+integral over $S_n$ exactly cancels the bulk bound charge of the same
+basis (Sec.~\ref{sec:charge-neutrality}). The electric flux density is
+expanded as
+\begin{equation}
+  \bm{D}(\bm{r})
+    \approx \sum_{n=1}^{N_{\text{dof}}} D_n\,\bm{f}_n(\bm{r}),
+  \qquad
+  N_{\text{dof}} = N_{\text{int. faces}} + N_{\text{bdy. faces}}.
+  \label{eq:D-expansion}
+\end{equation}
+
+%----------------------------------------------------------------------
+\subsection{Galerkin weak form}
+\label{sec:galerkin}
+%----------------------------------------------------------------------
+
+Testing \eqref{eq:efvie-strong} with a basis function $\bm{f}_m$ and
+substituting \eqref{eq:D-expansion} yields the $N_{\text{dof}} \times
+N_{\text{dof}}$ linear system
+\begin{equation}
+  \sum_{n=1}^{N_{\text{dof}}} Z_{mn}\,D_n = b_m,
+  \qquad
+  b_m = \int_{\Omega} \bm{f}_m(\bm{r})\cdot\bm{E}_{\text{inc}}(\bm{r})\,\dd^{3}r,
+  \label{eq:linear-system}
+\end{equation}
+with the Galerkin impedance matrix element
+\begin{equation}
+\begin{aligned}
+  Z_{mn}
+    &= \int_{\Omega}
+         \frac{\bm{f}_m(\bm{r})\cdot\bm{f}_n(\bm{r})}{\epsilon_p(\bm{r})}\,
+         \dd^{3}r \\
+    &\quad- \frac{1}{\epsilon_{\text{bg}}}
+       \int_{\Omega}\bm{f}_m(\bm{r})\cdot
+         \Bigl[
+           \bigl(k_0^{2} + \grad\div\bigr)
+           \int_{\Omega}\kappa(\bm{r}')\,\bm{f}_n(\bm{r}')\,
+                        G(\bm{r},\bm{r}')\,\dd^{3}r'
+         \Bigr]\dd^{3}r.
+\end{aligned}
+  \label{eq:Z-strong}
+\end{equation}
+For a homogeneous particle, $\kappa$ and $\epsilon_p$ are constants and
+factor out of the inner integral, giving the compact decomposition
+\begin{equation}
+  Z_{mn} = \frac{1}{\epsilon_p}\,M_{mn}
+           - \frac{\kappa}{\epsilon_{\text{bg}}}\,K_{mn},
+  \label{eq:Z-decomposition}
+\end{equation}
+where $M_{mn} = \int \bm{f}_m\!\cdot\!\bm{f}_n\,\dd^{3}r$ is the mass
+matrix and $K_{mn}$ is the radiation kernel defined below.
+
+%======================================================================
+\section{Weakening the Singularity via Integration by Parts}
+\label{sec:weakening}
+%======================================================================
+
+As written in \eqref{eq:Z-strong}, the radiation kernel
+$(k_0^{2}+\grad\div) G$ contains a hyper-singular term $1/R^{3}$ coming
+from $\grad\div G$. Moving the two derivatives off $G$ onto
+$\bm{f}_m$ and $\bm{f}_n$ by successive integrations by parts reduces
+the singularity to the weakly singular $1/R$ kernel that Duffy
+quadrature can handle. Because SWG and half-SWG functions are only
+piecewise smooth and only half-SWG functions have nonzero
+$\bm{f}_n\!\cdot\!\hat{\bm{n}}$ on $\partial\Omega$, the by-parts
+procedure generates three boundary-face contributions in addition to
+the standard bulk term.
+
+%----------------------------------------------------------------------
+\subsection{Bulk--bulk term $K^{A}$}
+\label{sec:K-A}
+%----------------------------------------------------------------------
+
+Apply $\grad\div$ to the inner integral and move the inner divergence
+onto $\bm{f}_n$ using the divergence theorem; do the same for the outer
+divergence and $\bm{f}_m$. For internal SWG basis functions
+(vanishing normal flux on $\partial\Omega$) the boundary terms are
+identically zero and the resulting bulk kernel is
+\begin{equation}
+  K_{mn}^{A}
+    = \int_{\Omega}\!\int_{\Omega}
+      \bigl[
+        k_0^{2}\,\bm{f}_m(\bm{r})\cdot\bm{f}_n(\bm{r}')
+        - (\div\bm{f}_m)(\bm{r})\,(\div'\bm{f}_n)(\bm{r}')
+      \bigr]\,
+      G(\bm{r},\bm{r}')\,\dd^{3}r'\,\dd^{3}r.
+  \label{eq:K-A}
+\end{equation}
+The integrand now contains only the weakly singular $1/R$ kernel and is
+evaluated tetrahedron pair by tetrahedron pair.
+
+%----------------------------------------------------------------------
+\subsection{Surface correction terms $K^{B}$, $K^{C}$, $K^{D}$}
+\label{sec:K-BCD}
+%----------------------------------------------------------------------
+
+When the source basis $\bm{f}_n$ is a half-SWG function attached to a
+boundary face $S_n$, the inner integration by parts leaves a surface
+term from the boundary $\partial\Omega$:
+\begin{equation}
+  \Phi_n(\bm{r})
+    \equiv \div\!\int_{\Omega} G(\bm{r},\bm{r}')\,\bm{f}_n(\bm{r}')\,\dd^{3}r'
+    = \int_{\Omega} G\,\div'\bm{f}_n\,\dd^{3}r'
+      \;-\;\oint_{\partial\Omega}
+          G(\bm{r},\bm{r}')\,\bigl(\bm{f}_n\!\cdot\!\hat{\bm{n}}'\bigr)\,
+          \dd^{2}r'.
+  \label{eq:scalar-potential}
+\end{equation}
+Similarly, the outer integration by parts against $\bm{f}_m$ produces a
+surface term if $\bm{f}_m$ is a half-SWG function on a boundary face
+$S_m$. The complete kernel is
+\begin{equation}
+  K_{mn} = K_{mn}^{A} + K_{mn}^{B} + K_{mn}^{C} + K_{mn}^{D},
+  \label{eq:K-full}
+\end{equation}
+with the three boundary contributions
+\begin{align}
+  K_{mn}^{B}
+    &= \int_{\Omega}\!\oint_{\partial\Omega}
+       (\div\bm{f}_m)(\bm{r})\,\bigl(\bm{f}_n\!\cdot\!\hat{\bm{n}}'\bigr)\,
+       G(\bm{r},\bm{r}')\,\dd^{2}r'\,\dd^{3}r,
+  \label{eq:K-B} \\
+  K_{mn}^{C}
+    &= \oint_{\partial\Omega}\!\int_{\Omega}
+       \bigl(\bm{f}_m\!\cdot\!\hat{\bm{n}}\bigr)\,(\div'\bm{f}_n)(\bm{r}')\,
+       G(\bm{r},\bm{r}')\,\dd^{3}r'\,\dd^{2}r,
+  \label{eq:K-C} \\
+  K_{mn}^{D}
+    &= -\oint_{\partial\Omega}\!\oint_{\partial\Omega}
+       \bigl(\bm{f}_m\!\cdot\!\hat{\bm{n}}\bigr)\,
+       \bigl(\bm{f}_n\!\cdot\!\hat{\bm{n}}'\bigr)\,
+       G(\bm{r},\bm{r}')\,\dd^{2}r'\,\dd^{2}r.
+  \label{eq:K-D}
+\end{align}
+By the half-SWG property $\bm{f}_n\!\cdot\!\hat{\bm{n}} = 1$ on $S_n$
+and zero on the remaining boundary faces, the surface integrals in
+\eqref{eq:K-B}--\eqref{eq:K-D} collapse to integrals over the specific
+faces $S_m$ and $S_n$:
+$K^{B}_{mn}$ is non-zero only when $n$ is a boundary face,
+$K^{C}_{mn}$ only when $m$ is a boundary face, and $K^{D}_{mn}$ only
+when both $m$ and $n$ are boundary faces.
+
+%----------------------------------------------------------------------
+\subsection{Charge neutrality}
+\label{sec:charge-neutrality}
+%----------------------------------------------------------------------
+
+The induced bound charge associated with a single half-SWG basis on a
+boundary face $S_n$ is the sum of a bulk contribution
+$\rho_{\text{vol}} = -\kappa\,\div\bm{D}$ and a surface contribution
+$\sigma_{\text{surf}} = \kappa\,\bm{D}\!\cdot\!\hat{\bm{n}}$. Using
+\eqref{eq:swg-div} and the unit-flux property on $S_n$,
+\begin{align}
+  Q_{\text{vol}}
+    &= -\int_{T_n^{+}} \kappa\,\div\bm{f}_n\,\dd^{3}r
+     = -\kappa\,\frac{a_n}{V_n^{+}}\cdot V_n^{+}
+     = -\kappa\,a_n,
+  \label{eq:Q-vol} \\
+  Q_{\text{surf}}
+    &= \int_{S_n} \kappa\,(\bm{f}_n\!\cdot\!\hat{\bm{n}})\,\dd^{2}r
+     = \kappa\,a_n.
+  \label{eq:Q-surf}
+\end{align}
+The sum $Q_{\text{vol}} + Q_{\text{surf}} = 0$ holds exactly
+\emph{only} when the surface contributions
+$K^{B}, K^{C}, K^{D}$ are retained. Dropping them, as an
+internal-only SWG expansion does, leaves the particle with a spurious
+net bound charge $-\kappa\,a_n$ per boundary face and produces
+cross-section errors of order $10$--$30\%$ on Mie tests. With the full
+decomposition \eqref{eq:K-full}, block-VIEM.jl reproduces the Mie sphere
+absorption cross section to $\sim 0.2\%$ at $\ell_c = 0.5$ (589~DoFs),
+an order-of-magnitude improvement per DoF over cubic-lattice DDA.
+
+%----------------------------------------------------------------------
+\subsection{Mass matrix}
+\label{sec:mass}
+%----------------------------------------------------------------------
+
+The first term in \eqref{eq:Z-decomposition} is the sparse mass matrix
+\begin{equation}
+  M_{mn}
+    = \int_{T_m\cap T_n} \bm{f}_m(\bm{r})\cdot\bm{f}_n(\bm{r})\,\dd^{3}r.
+  \label{eq:mass}
+\end{equation}
+The integrand is a degree-$2$ polynomial in each tetrahedron, so the
+5-point Gauss rule on the tetrahedron (degree~3 exact) evaluates
+$M_{mn}$ without quadrature error.
+
+%======================================================================
+\section{Singular and Near-Singular Volume Integration}
+\label{sec:duffy}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Generalised vertex Duffy transform}
+\label{sec:duffy-vertex}
+%----------------------------------------------------------------------
+
+The weakly singular kernel $1/R$ in \eqref{eq:K-A}--\eqref{eq:K-D}
+remains integrable but standard Gauss quadrature fails when the source
+and test tetrahedra share a vertex, edge, or face, or when the outer
+Gauss point approaches a face of the inner element. Following
+Mousavi--Sukumar~\cite{MousaviSukumar2010}, all such cases are handled
+uniformly by a \emph{vertex-only} Duffy transform applied to sub-tetrahedra
+obtained by projecting the singular point onto the inner element.
+
+For $\alpha = 1$ (a $1/R$ singularity at a single vertex), the
+optimised transform from the unit cube
+$\bm{u}=(u_1,u_2,u_3)\in[0,1]^{3}$ to barycentric coordinates
+$(\lambda_1,\lambda_2,\lambda_3,\lambda_4)$ with $\lambda_1 = 1$ at the
+singular vertex is~\cite[Eq.~(1) with $\beta=1$]{MousaviSukumar2010}
+\begin{equation}
+  \lambda_1 = 1 - u_1,\quad
+  \lambda_2 = u_1(1-u_2),\quad
+  \lambda_3 = u_1 u_2 (1-u_3),\quad
+  \lambda_4 = u_1 u_2 u_3.
+  \label{eq:duffy-map}
+\end{equation}
+The face $u_1 = 0$ of the cube collapses entirely to the singular
+vertex, and $R \propto u_1$ to leading order along any ray departing
+from it. The total Jacobian combining \eqref{eq:duffy-map} with the
+affine map from reference to physical coordinates is
+\begin{equation}
+  J_{D}(\bm{u}) = 6\,\abs{V_{\text{tet}}}\,u_1^{2}\,u_2.
+  \label{eq:duffy-jacobian}
+\end{equation}
+The factor $u_1^{2}$ exactly cancels the $1/R$ singularity, leaving a
+smooth integrand on the unit cube that is integrated by a tensor-product
+Gauss--Legendre rule. For the $K^{A}$ kernel
+\eqref{eq:K-A} the recommended order is $5\times 5\times 5$
+(125~points) for self and face-adjacent pairs, and a $4\times 4\times 4$
+rule for edge- and vertex-adjacent pairs; a $5$-point Gauss rule on the
+source tetrahedron is sufficient for all pairs that are not near the
+observation point.
+
+%----------------------------------------------------------------------
+\subsection{Pair classification}
+\label{sec:pair-class}
+%----------------------------------------------------------------------
+
+Given an outer quadrature point $\bm{r}$ inside the test tetrahedron
+$T_m$, the source element $T_n$ is classified and integrated according
+to the minimum distance:
+\begin{itemize}
+  \item \emph{self} ($T_n = T_m$): the outer Gauss point is the singular
+        vertex. The source tetrahedron is subdivided into four
+        sub-tetrahedra with the outer Gauss point as a common vertex,
+        and each is integrated by the Duffy transform
+        \eqref{eq:duffy-map}.
+  \item \emph{face-/edge-/vertex-adjacent}: the singular point is the
+        nearest vertex, the nearest point on the shared edge, or the
+        shared face. Sub-tetrahedra are generated as above around that
+        singular point and integrated by the same Duffy rule.
+  \item \emph{far} ($R$ larger than a chosen threshold): the inner
+        integral is evaluated with a plain tetrahedron Gauss rule
+        (5~points). Pairs further than the AIM near-field radius are
+        never integrated directly (Sec.~\ref{sec:aim}).
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Surface integrals for $K^{B}, K^{C}, K^{D}$}
+\label{sec:surface-int}
+%----------------------------------------------------------------------
+
+The surface contributions in Sec.~\ref{sec:K-BCD} require the
+integration of $G$ over a triangle, optionally combined with an inner
+tetrahedron integral ($K^{B}, K^{C}$) or an outer triangle integral
+($K^{D}$). We adopt a two-dimensional version of the Duffy transform on
+the reference triangle: from $(u_1, u_2)\in[0,1]^{2}$ to barycentric
+coordinates $(\eta_1, \eta_2, \eta_3)$,
+\begin{equation}
+  \eta_1 = 1 - u_1,\quad
+  \eta_2 = u_1(1-u_2),\quad
+  \eta_3 = u_1 u_2,
+  \label{eq:duffy-2d}
+\end{equation}
+with Jacobian $J_{D,2}(\bm{u}) = 2\abs{A_{\text{tri}}}\,u_1$. The
+linear factor $u_1$ cancels the $1/R$ singularity at the vertex $\eta_1
+= 1$, and the face $u_1 = 0$ collapses to that vertex just as in the
+three-dimensional case. For the $K^{D}$ self/edge/vertex branches, the
+outer triangle is first subdivided into sub-triangles at the singular
+feature and the 2D Duffy rule is applied to each.
+
+The near-singular sub-cases of $K^{B}$ and $K^{C}$ (for example, the
+outer tetrahedron $T_m$ having a face coincident with the inner
+boundary face $S_n$) are handled by projecting the outer Gauss point
+onto the inner triangle and applying the 2D Duffy rule around that
+projection.
+
+%======================================================================
+\section{FFT-Accelerated MVP: Adaptive Integral Method}
+\label{sec:aim}
+%======================================================================
+
+Direct computation and storage of the dense impedance matrix $Z$ scales
+as $\mathcal{O}(N_{\text{dof}}^{2})$ in memory and
+$\mathcal{O}(N_{\text{dof}}^{3})$ in operations for direct factorisation,
+quickly becoming prohibitive. The Adaptive Integral Method
+(AIM)~\cite{ShengSong} accelerates the matrix--vector product by
+representing the far-field part of the kernel on an auxiliary cubic
+grid and evaluating the resulting block-Toeplitz sum with a
+three-dimensional FFT, mirroring the Goodman--Draine--Flatau
+construction~\cite{Goodman1991} used by
+\texttt{block-DDA\_Py}.
+
+%----------------------------------------------------------------------
+\subsection{Auxiliary grid and stencil}
+\label{sec:aim-grid}
+%----------------------------------------------------------------------
+
+A Cartesian grid of spacing $h_g$ is overlaid on the bounding box of
+the particle. Let $\bm{g}_p$ denote the position of grid point $p$.
+Each basis function $\bm{f}_n$ is associated with a stencil
+$\mathcal{S}_n$ of $M_{\text{st}} = (n_{\text{st}}+1)^3$ nearby grid
+points surrounding its centroid. For a moment matching order
+$n_{\text{st}}$, the stencil is a cube with
+$n_{\text{st}}+1$ grid points on each side.
+
+%----------------------------------------------------------------------
+\subsection{Moment matching}
+\label{sec:aim-moments}
+%----------------------------------------------------------------------
+
+For each basis function $\bm{f}_n$ and each stencil point
+$p\in\mathcal{S}_n$ we construct a projection weight
+$W_{np}\in\mathbb{C}^{3}$ so that the multipole moments of the point
+source at $p$ match those of the continuous source $\bm{f}_n$ up to
+order $n_{\text{st}}$. The moments are defined with respect to the
+basis centroid $\bm{c}_n$:
+\begin{equation}
+  \mu_n^{\bm{\alpha}}
+    = \int_{\Omega}\bm{f}_n(\bm{r})\,(\bm{r}-\bm{c}_n)^{\bm{\alpha}}\,
+      \dd^{3}r,
+  \qquad
+  \abs{\bm{\alpha}}=\alpha_x+\alpha_y+\alpha_z \le n_{\text{st}},
+  \label{eq:aim-moments}
+\end{equation}
+and the weights $\{W_{np}\}_{p\in\mathcal{S}_n}$ are defined by the
+linear constraint
+\begin{equation}
+  \sum_{p\in\mathcal{S}_n} W_{np}\,(\bm{g}_p - \bm{c}_n)^{\bm{\alpha}}
+    = \mu_n^{\bm{\alpha}},
+  \qquad \forall\,\abs{\bm{\alpha}}\le n_{\text{st}}.
+  \label{eq:aim-matching}
+\end{equation}
+A companion set of weights matches the divergence moments
+$\int (\div\bm{f}_n)(\bm{r}-\bm{c}_n)^{\bm{\alpha}}\,\dd^{3}r$ for the
+scalar potential part of the kernel. The linear system
+\eqref{eq:aim-matching} is small ($M_{\text{st}}$ unknowns per basis
+function, $\tbinom{n_{\text{st}}+3}{3}$ equations) and is solved once,
+during matrix setup, per basis function.
+
+%----------------------------------------------------------------------
+\subsection{Far-field product via FFT}
+\label{sec:aim-fft}
+%----------------------------------------------------------------------
+
+With the moment matching complete, the far-field part of the
+matrix--vector product $\bm{y}^{\text{far}} = K^{\text{far}}\,\bm{x}$ is
+evaluated in three steps:
+\begin{enumerate}
+  \item \emph{Projection.} For each basis function $n$ and each stencil
+        point $p$, accumulate
+        $q_p = \sum_n W_{np}\,x_n$ onto the grid.
+  \item \emph{Convolution.} Compute
+        $Q_p = \sum_{p'} G(\bm{g}_p - \bm{g}_{p'})\,q_{p'}$ via a
+        three-dimensional FFT of $q$, pointwise multiplication by the
+        precomputed FFT of $G$ on the doubled grid, and an inverse FFT.
+  \item \emph{Interpolation.} For each test function $m$,
+        $y_m^{\text{far}} = \sum_{p\in\mathcal{S}_m} W_{mp}^{\top}\,Q_p$.
+\end{enumerate}
+Because $G$ depends only on the grid-point separation, its convolution
+matrix is block-Toeplitz and is computed with the $3$D FFT of the same
+construction used in \texttt{block-DDA\_Py}~\cite{Goodman1991}. The cost
+is $\mathcal{O}(N_g \log N_g)$ per MVP, where $N_g$ is the number of
+grid points. Memory for the grid Green function is also
+$\mathcal{O}(N_g)$ on the doubled domain.
+
+%----------------------------------------------------------------------
+\subsection{Precorrection of near-field pairs}
+\label{sec:aim-precorrection}
+%----------------------------------------------------------------------
+
+The FFT sum above is accurate only in the far field; for pairs with
+$\norm{\bm{c}_m - \bm{c}_n} \le r_{\text{near}}$ it is replaced by the
+exact integrals of Sec.~\ref{sec:duffy}. The construction is a
+\emph{difference} of two quantities: for each near pair $(m,n)$ we
+compute the exact $K_{mn}$ and subtract from it the contribution that
+the FFT would have produced through the grid projection, storing the
+difference in a sparse precorrection matrix $K^{\text{pc}}$. The
+complete MVP is
+\begin{equation}
+  \bm{y} = \bigl(D_M - \tfrac{\kappa}{\epsilon_{\text{bg}}}
+              (K^{\text{far}} + K^{\text{pc}})\bigr)\,\bm{x},
+  \label{eq:aim-mvp}
+\end{equation}
+where $D_M$ is the sparse diagonal mass contribution
+$M/\epsilon_p$ and $K^{\text{pc}}$ has
+$\mathcal{O}(N_{\text{dof}})$ non-zero entries. The default near radius
+is $r_{\text{near}} = 2 \times (\text{stencil extent})$, verified in
+Phase-3 benchmarks to produce $<0.5\%$ relative error between the
+AIM-accelerated and the dense matrix--vector products.
+
+%======================================================================
+\section{Solvers}
+\label{sec:solver}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Direct and Krylov solvers}
+\label{sec:direct-krylov}
+%----------------------------------------------------------------------
+
+For small problems ($N_{\text{dof}} \lesssim$ a few~thousand), the
+dense assembly of $Z$ and its LU factorisation is practical and serves
+as a validation reference for the AIM path. For larger problems we use
+a Krylov iterative method (BiCGSTAB from
+\texttt{Krylov.jl}~\cite{KrylovJl}) applied to the AIM operator
+\eqref{eq:aim-mvp}. A Jacobi preconditioner formed from the diagonal of
+the sparse mass and precorrection contributions suffices in our tests.
+
+%----------------------------------------------------------------------
+\subsection{Multi-orientation batch solve}
+\label{sec:multi-orient}
+%----------------------------------------------------------------------
+
+Because the impedance matrix $Z$ depends only on the particle geometry
+and permittivity, it can be assembled and factorised once and then
+reused across many orientations: each orientation changes only the
+right-hand side $\bm{b}$. The function
+\texttt{solve\_cas\_v2\_orientations} assembles $Z$, computes its LU
+factorisation, and then back-substitutes for every
+$(\alpha_\ell,\beta_\ell,\gamma_\ell)$ in the input list, returning one
+\texttt{CASv2Result} per orientation. For spheroids this is particularly
+efficient: only the $\alpha = 0$ orientation needs an independent solve
+for each $\beta$, and the remaining $\alpha$ values are obtained by the
+analytical expansion of Sec.~\ref{sec:alpha-expansion}.
+
+%======================================================================
+\section{Scattering Observables}
+\label{sec:observables}
+%======================================================================
+
+Let $D_n$ ($n = 1,\ldots,N_{\text{dof}}$) denote the solution of
+\eqref{eq:linear-system} and $\bm{D}(\bm{r}) = \sum D_n\,\bm{f}_n(\bm{r})$
+the reconstructed electric flux density. This section collects the
+observables computed from $D_n$ that correspond to the CAS-v2 detector
+protocol~\cite{Moteki2024} and can be compared directly with
+\texttt{block-DDA\_Py}.
+
+%----------------------------------------------------------------------
+\subsection{Far-field scattering amplitude}
+\label{sec:far-field}
+%----------------------------------------------------------------------
+
+The scattered far field in the physics convention reads
+\begin{equation}
+  \bm{E}^{\text{sca}}(\bm{r}) \;\sim\;
+    \frac{\mathrm{e}^{+i k_0 r}}{4\pi\,r}\,\bm{F}(\hat{\bm{r}}),
+  \qquad r\to\infty,
+  \label{eq:far-field}
+\end{equation}
+where the vector scattering amplitude is obtained by transverse
+projection of the Fourier transform of $\bm{D}$:
+\begin{equation}
+  \bm{F}(\hat{\bm{r}})
+    = \frac{k_0^{2}\,\kappa}{\epsilon_{\text{bg}}}
+      \bigl(\mathbf{I}_3 - \hat{\bm{r}}\otimes\hat{\bm{r}}\bigr)\cdot
+      \sum_{n=1}^{N_{\text{dof}}} D_n
+      \int_{\Omega}\bm{f}_n(\bm{r}')\,
+                    \mathrm{e}^{-i k_0\,\hat{\bm{r}}\cdot\bm{r}'}\,
+      \dd^{3}r'.
+  \label{eq:F-viem}
+\end{equation}
+The standard scattering amplitude used in Bohren--Huffman
+\cite{Bohren1983} is $\bm{f}(\hat{\bm{r}}) = \bm{F}(\hat{\bm{r}})/(4\pi)$.
+
+%----------------------------------------------------------------------
+\subsection{Absorption cross section}
+\label{sec:C-abs}
+%----------------------------------------------------------------------
+
+The absorption cross section is evaluated directly from the volumetric
+Joule-loss formula, which is bilinear in $\bm{D}$ and hence reduces to
+a quadratic form in the expansion coefficients:
+\begin{equation}
+  C_{\text{abs}}
+    = \frac{k_0\,\Im(\epsilon_p)}
+           {\epsilon_{\text{bg}}\,\abs{\epsilon_p}^{2}\,\abs{\bm{E}_0}^{2}}\,
+      \Re\!\bigl(\bm{D}^{\dagger}\mathbf{M}\,\bm{D}\bigr),
+  \label{eq:C-abs}
+\end{equation}
+where $\mathbf{M}$ is the mass matrix \eqref{eq:mass}. For real
+$\epsilon_p$ this identically vanishes.
+
+%----------------------------------------------------------------------
+\subsection{Scattering cross section by far-field integration}
+\label{sec:C-sca}
+%----------------------------------------------------------------------
+
+The scattering cross section is computed as the integral of the
+radiated flux density over the unit sphere,
+\begin{equation}
+  C_{\text{sca}}
+    = \frac{1}{16\pi^{2}\,\abs{\bm{E}_0}^{2}}
+      \int_{S^{2}} \abs{\bm{F}(\hat{\bm{r}})}^{2}\,\dd\Omega,
+  \label{eq:C-sca}
+\end{equation}
+using a product Gauss--Legendre (in $\cos\theta$) times trapezoid (in
+$\phi$) rule with $2 n_{\theta}^{2}$ directions. The default
+$n_{\theta} = 10$ is sufficient for size parameters
+$k_0\,r_{ve}\lesssim 5$; larger targets use $n_\theta\ge 20$. The
+quadratic functional $\abs{\bm{F}}^{2}$ is nonnegative and insensitive
+to the sign-convention subtleties that plague forward-direction
+optical-theorem estimates of $C_{\text{ext}}$, so in practice we obtain
+$C_{\text{ext}}$ from
+\begin{equation}
+  C_{\text{ext}} = C_{\text{abs}} + C_{\text{sca}}.
+  \label{eq:C-ext}
+\end{equation}
+
+%----------------------------------------------------------------------
+\subsection{PCAS forward amplitude}
+\label{sec:S-fw}
+%----------------------------------------------------------------------
+
+The CAS-v2 forward scattering observable is defined with a circular
+incident polarisation~\cite{Moteki2024}. Let
+$\hat{\bm{u}}_{\text{fw}}$ be the forward scattering direction (equal
+to the incident propagation direction) and
+$\hat{\bm{e}}_{\theta,\text{fw}},\hat{\bm{e}}_{\phi,\text{fw}}$ the
+associated polar and azimuthal unit vectors in the particle frame. The
+$s$- and $p$-channel CAS observables are
+\begin{align}
+  S_{\text{fw},\theta}^{\text{PCAS}}\;[=S_s(0)]
+    &= \frac{\sqrt{2}}{4\pi}\,
+       \bm{F}(\hat{\bm{u}}_{\text{fw}})\cdot\hat{\bm{e}}_{\theta,\text{fw}},
+  \label{eq:S-fw-theta} \\
+  S_{\text{fw},\phi}^{\text{PCAS}}\;[=S_p(0)]
+    &= -\,\frac{i\,\sqrt{2}}{4\pi}\,
+       \bm{F}(\hat{\bm{u}}_{\text{fw}})\cdot\hat{\bm{e}}_{\phi,\text{fw}},
+  \label{eq:S-fw-phi}
+\end{align}
+where the $\sqrt{2}$ and $i\sqrt{2}$ factors are inherited from the
+circular polarisation decomposition \eqref{eq:circular-pol}, and the
+$1/(4\pi)$ factor converts from $\bm{F}$ to the BH83-normalised
+scattering amplitude $\bm{f}=\bm{F}/(4\pi)$. The PCAS forward
+observable reported to the downstream CAS-v2 analyser is
+\begin{equation}
+  S_{\text{fw}}^{\text{PCAS}}
+    = \frac{S_{\text{fw},\theta}^{\text{PCAS}}
+            + S_{\text{fw},\phi}^{\text{PCAS}}}{2}.
+  \label{eq:S-fw-combined}
+\end{equation}
+
+%----------------------------------------------------------------------
+\subsection{OCBS backward amplitude}
+\label{sec:S-bk}
+%----------------------------------------------------------------------
+
+For the exact backward scattering direction
+$\hat{\bm{u}}_{\text{bk}} = -\hat{\bm{u}}_{\text{inc}}$, the laboratory
+basis is
+$\hat{\bm{e}}_{\theta,\text{bk}} = -\hat{\bm{e}}_{\theta,\text{inc}}$
+and $\hat{\bm{e}}_{\phi,\text{bk}} = +\hat{\bm{e}}_{\phi,\text{inc}}$.
+The $\theta$- and $\phi$-channel backward amplitudes are defined in
+direct analogy with \eqref{eq:S-fw-theta}--\eqref{eq:S-fw-phi} at
+$\hat{\bm{r}} = \hat{\bm{u}}_{\text{bk}}$, and the OCBS
+(Opposite-Circular-Basis Scattering) observable~\cite{Moteki2024} is
+\begin{equation}
+  S_{\text{bk}}^{\text{OCBS}}
+    = \frac{-\,S_{\text{bk},\theta}^{\text{OCBS}}
+            + S_{\text{bk},\phi}^{\text{OCBS}}}{\sqrt{2}}.
+  \label{eq:S-bk}
+\end{equation}
+As shown in~\cite{Moteki2024}, combining the two channels with this
+sign pattern cancels the off-diagonal Mishchenko elements
+$S_{12}(\pi)+S_{21}(\pi)=0$ and produces a single, orientation-stable
+scalar observable.
+
+%======================================================================
+\section{Validation}
+\label{sec:validation}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Mie sphere}
+\label{sec:mie-sphere}
+%----------------------------------------------------------------------
+
+For a homogeneous sphere the exact analytical solution is the Mie
+series~\cite{Bohren1983}. The reference implementation in
+\texttt{test/mie\_reference.jl} provides $C_{\text{ext}}$,
+$C_{\text{sca}}$, $C_{\text{abs}}$, and the full complex amplitude
+matrix elements $S_{11}, S_{22}$ at $\theta=0,\pi$. The Phase-5
+validation tests compare the VIEM solution to this Mie reference on a
+volume-equivalent sphere with $\lambda_0 = \SI{4}{\micro\metre}$,
+$m_m = 1$, $m_p = 1.5 + 0.01 i$, $r = \SI{0.5}{\micro\metre}$ and
+mesh sizes $\ell_c \in\{0.30, 0.18, 0.12\}$. After the 2026-04-13
+physics-convention switch (Sec.~\ref{sec:far-field}), both real and
+imaginary parts of the PCAS forward amplitude
+\eqref{eq:S-fw-combined} agree with the Mie reference to
+$\sim 0.4\%$ at the coarsest mesh and
+$\sim 0.1\%$ at $\ell_c = 0.12$. All 1704 tests in the unit-test
+suite pass.
+
+%----------------------------------------------------------------------
+\subsection{Oblate spheroid $\alpha$-symmetry}
+\label{sec:alpha-expansion}
+%----------------------------------------------------------------------
+
+A prolate or oblate spheroid has a continuous $C_\infty$ rotation
+symmetry about its figure axis. When the orientation is parameterised
+by intrinsic ZYZ Euler angles with $\gamma = 0$, rotating the first
+angle $\alpha$ does not change the physical orientation of an
+axisymmetric particle in the particle frame; it only rotates the
+incident polarisation basis by $\alpha$ about
+$\hat{\bm{u}}_{\text{inc}}$. For the CAS-v2 observables this implies
+the analytical $\alpha$-expansion~\cite{Moteki2024}
+\begin{align}
+  S_\theta(\alpha,\beta,\gamma{=}0)
+    &= A(\beta) + B(\beta)\,\mathrm{e}^{+2 i \alpha},
+  \label{eq:alpha-exp-theta}\\
+  S_\phi(\alpha,\beta,\gamma{=}0)
+    &= A(\beta) - B(\beta)\,\mathrm{e}^{+2 i \alpha},
+  \label{eq:alpha-exp-phi}
+\end{align}
+with
+\begin{equation}
+  A(\beta) = \tfrac{1}{2}\bigl[S_\theta(0,\beta,0)+S_\phi(0,\beta,0)\bigr],
+  \quad
+  B(\beta) = \tfrac{1}{2}\bigl[S_\theta(0,\beta,0)-S_\phi(0,\beta,0)\bigr].
+  \label{eq:AB}
+\end{equation}
+The identity \eqref{eq:alpha-exp-theta}--\eqref{eq:alpha-exp-phi} is the
+exact basis of the $\alpha$-analytical expansion that
+\texttt{block-DDA\_Py} uses to reduce the orientation sweep to solves at
+$\alpha = 0$ only. Because VIEM after the physics-convention switch
+lives in the same time-convention as block-DDA\_Py, the sign of the
+exponent is $+2i\alpha$ --- identical to block-DDA\_Py.
+
+The benchmark script
+\texttt{benchmarks/cas\_v2/spheroid\_ar3.jl} builds an oblate spheroid
+with $\text{bc\_ratio}=b/c=3$, solves at $\beta = \pi/4$ for
+$\alpha\in\{0, \pi/8, \pi/4, 3\pi/8, \pi/2\}$, and compares the
+independently solved amplitudes to the analytical prediction
+\eqref{eq:alpha-exp-theta}--\eqref{eq:alpha-exp-phi}. The maximum
+relative deviation is $\sim 5\times 10^{-15}$, that is, machine
+precision for double-precision arithmetic.
+
+%----------------------------------------------------------------------
+\subsection{Accuracy and computational cost vs.\ block-DDA\_Py}
+\label{sec:viem-vs-dda}
+%----------------------------------------------------------------------
+
+Table~\ref{tab:viem-vs-dda-accuracy} compares the $C_{\text{abs}}$
+error produced by block-VIEM.jl (half-SWG on a tetrahedral mesh) and
+block-DDA\_Py (cubic-lattice DDA with the Chaumet--Rahmani dynamic
+polarisability) on the same homogeneous Mie sphere,
+$m_p = 1.5 + 0.01 i$, $r = \SI{1}{\micro\metre}$,
+$\lambda_0 = \SI{10}{\micro\metre}$ (size parameter $x \approx 0.63$).
+
+\begin{table}[h]
+\centering
+\caption{Per-DoF accuracy comparison on a Mie sphere ($m_p=1.5+0.01 i$,
+$x\approx 0.63$). The VIEM solves use the half-SWG basis and Duffy
+volumetric quadrature; the DDA solves use block-BiCGSTAB on the
+Goodman--Draine--Flatau FFT operator.}
+\label{tab:viem-vs-dda-accuracy}
+\begin{tabular}{lrr}
+\toprule
+Method                                   & $N_{\text{dof}}$ &
+$C_{\text{abs}}$ rel.\ error \\
+\midrule
+DDA, spacing $d = \SI{0.14}{\micro\metre}$
+  & $4488$  & $1.25\%$ \\
+half-SWG VIEM, $\ell_c = \SI{0.50}{\micro\metre}$
+  &  $589$  & $0.21\%$ \\
+half-SWG VIEM, $\ell_c = \SI{0.18}{\micro\metre}$
+  & $7868$  & $0.15\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For this test block-VIEM.jl is roughly \textbf{10--12$\times$ more
+accurate per DoF} than block-DDA\_Py: matching the $1.25\%$ DDA error
+requires only $\sim 400$ half-SWG DoFs (versus $\sim 4500$ DDA dipoles),
+and at the same DoF count ($\sim 8000$) the VIEM error is an order of
+magnitude smaller.
+
+There are four mutually reinforcing reasons.
+\begin{enumerate}
+  \item \emph{Conforming geometry.} A tetrahedral mesh represents
+        curved boundaries to $O(\ell_c^{2})$, whereas a cubic lattice
+        stair-cases them to $O(d)$. For Mie spheres this alone removes
+        a geometric contribution to $C_{\text{abs}}$ and
+        $C_{\text{sca}}$ that scales as $d$ rather than $d^{2}$.
+  \item \emph{Conforming vector space.} The SWG/half-SWG basis is
+        $H(\mathrm{div})$-conforming, so the normal component of
+        $\bm{D}$ is automatically continuous across tetrahedron faces
+        --- the physically correct boundary condition at a dielectric
+        interface. Expanding $\bm{D}$ instead of
+        $\bm{E}$~\cite[Sec.~II.B]{SWG1984} further ensures that the
+        polarisation jump at $\partial\Omega$ is represented exactly
+        by the half-SWG functions on the boundary faces, with the
+        charge-neutrality identity of Sec.~\ref{sec:charge-neutrality}.
+        In DDA the induced polarisation is piecewise constant at the
+        dipole centres, so the interface condition is only recovered
+        in the limit $d\to 0$.
+  \item \emph{Linear vector basis vs point dipoles.} Within each
+        tetrahedron $\bm{D}$ is represented by up to four SWG
+        functions, each linear in position and with a piecewise-constant
+        divergence. DDA represents the polarisation by a single point
+        dipole per element, i.e.\ a delta distribution localised at
+        the lattice node. The tetrahedral moment approximation is
+        therefore intrinsically one order higher, and in the far field
+        the error per element scales as $k_0 h$ rather than
+        $(k_0 d)^{0}$.
+  \item \emph{Physical polarisability.} DDA requires a dynamic
+        polarisability prescription (Clausius--Mossotti plus the
+        $(2/3)(ka)^{3}$ radiative correction~\cite{Draine1988}) to
+        cancel leading-order interaction errors, and the choice of
+        prescription feeds back into the error. VIEM solves the
+        integral equation directly; $\bm{D}$ is the physical variable,
+        and no such tuning is required.
+\end{enumerate}
+
+Against these accuracy advantages, block-VIEM.jl pays a higher
+per-DoF setup cost. Table~\ref{tab:viem-vs-dda-cost} summarises the
+asymptotic cost and memory for a matrix-free MVP:
+
+\begin{table}[h]
+\centering
+\caption{Asymptotic cost model. $N$ is the number of unknowns,
+$N_g$ the number of AIM or FFT grid points (typically $N_g \sim 2N$
+for AIM), $n_{\text{st}}$ the AIM moment matching order, $n_{\text{it}}$
+the number of Krylov iterations, and $L$ the number of particle
+orientations in a batch solve.}
+\label{tab:viem-vs-dda-cost}
+\begin{tabular}{lll}
+\toprule
+Quantity                      & block-DDA\_Py
+                              & block-VIEM.jl (half-SWG + AIM) \\
+\midrule
+Element geometry               & cubic lattice
+                              & unstructured tetrahedra \\
+Green kernel on grid           & analytic dyadic, $\mathcal{O}(N_g)$
+                              & scalar + moment-matched dyadic,
+                                $\mathcal{O}(N_g)$ \\
+Near-field ``precorrection''   & none (exact on the lattice)
+                              & Duffy volumetric, $\mathcal{O}(N\,n_{\text{near}})$ \\
+MVP cost                       & $\mathcal{O}(N_g \log N_g)$
+                              & $\mathcal{O}(N_g \log N_g + N\,n_{\text{near}})$ \\
+Multi-orientation batch        & block-BiCGSTAB on $L$ RHS
+                              & shared LU (small $N$) or
+                                $L$ independent BiCGSTAB \\
+Dominant memory                & $\mathcal{O}(N_g)$ FFT kernel
+                              & $\mathcal{O}(N_g)$ FFT kernel
+                                $+ \mathcal{O}(N\,n_{\text{near}})$ precorr. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The central difference is that DDA has a strictly translation-invariant
+interaction matrix, so a single FFT on the doubled lattice captures the
+entire MVP exactly. VIEM has no such property: each basis function sees
+a different discrete support of neighbouring tetrahedra, and the AIM
+moment matching is only accurate for pairs whose separation is large
+compared with the element size. Near pairs must therefore be computed
+directly via Duffy quadrature and stored as a sparse precorrection
+matrix (Sec.~\ref{sec:aim-precorrection}). For typical settings, this
+near-field work dominates both the matrix assembly time and the
+per-iteration MVP cost at small to moderate $N$; only for very large
+meshes does the $N_g \log N_g$ FFT cost become comparable.
+
+The overall trade-off is therefore: \textbf{VIEM spends more work per
+unknown (near-field Duffy integrals and precorrection), but uses an
+order of magnitude fewer unknowns to reach a given accuracy for
+high-contrast particles with curved boundaries.} For sphere-like,
+low-contrast problems DDA's simplicity wins on wall-clock time; for
+the high-contrast iron-oxide aggregates and faceted gold nanoparticles
+targeted by this project, VIEM is the clear winner and the
+block-VIEM.jl $\ell_c = 0.50$ line of
+Table~\ref{tab:viem-vs-dda-accuracy} is representative of production
+use.
+
+%======================================================================
+\section{Spheroid Sweep HDF5 Output}
+\label{sec:spheroid-sweep-io}
+%======================================================================
+
+For parameter-sweep applications the forward scattering amplitudes on a
+five-dimensional grid are written to an HDF5 file whose layout is
+deliberately identical to that produced by
+\texttt{block-DDA\_Py}~\cite{Moteki2024}, so the downstream consumer
+\texttt{PCAS\_Bayes\_APM\_Nonspherical/lut\_generation/build\_spheroid\_lut.py}
+reads VIEM output without modification. The schema is documented in
+\texttt{block-DDA\_Py/.claude/spheroid\_h5\_schema\_spec.md} and
+summarised here for completeness.
+
+%----------------------------------------------------------------------
+\subsection{Parameter grid}
+\label{sec:sweep-grid}
+%----------------------------------------------------------------------
+
+The five grid axes are stored at the root level of the file and shared
+across wavelength groups:
+\begin{itemize}
+  \item \texttt{D\_ve\_grid} --- volume-equivalent diameter $D_{ve}$
+        [\si{\micro\metre}];
+  \item \texttt{RI\_real\_grid} --- real part of the particle refractive
+        index, $\Re(m_p)$;
+  \item \texttt{log\_AR\_grid} --- base-10 logarithm of
+        $\text{bc\_ratio} = b/c$, following the
+        \texttt{block-DDA\_Py} convention where $\text{bc\_ratio}>1$ is
+        oblate, $<1$ is prolate, and $=1$ is a sphere;
+  \item \texttt{cos\_theta\_o\_half\_grid} --- $\cos\theta_o$ on
+        $[0,1]$ (half-domain, extended to $[-1,1]$ by the consumer
+        using the $\theta_o\to\pi-\theta_o$ mirror symmetry);
+  \item \texttt{phi\_o\_grid} --- $\phi_o$ on $[0,\pi]$ (half-domain,
+        extended to $[0,2\pi]$ by the consumer using the
+        $\phi_o$-periodicity $S(\theta_o,\phi_o+\pi)=S(\theta_o,\phi_o)$).
+\end{itemize}
+All axes must be equidistant; \texttt{write\_spheroid\_sweep\_h5}
+enforces this constraint and raises an error otherwise, because the
+downstream \texttt{NdimSpline\_JAX} consumer assumes uniform grids.
+
+%----------------------------------------------------------------------
+\subsection{Per-wavelength datasets}
+\label{sec:sweep-data}
+%----------------------------------------------------------------------
+
+Results for each wavelength $\lambda_0$ are stored under a group
+\texttt{wl\_<value>} (e.g.\ \texttt{wl\_0p638} for
+$\lambda_0 = \SI{0.638}{\micro\metre}$), with the attributes
+\texttt{wl\_0} and \texttt{m\_m}. Each group contains
+\begin{itemize}
+  \item \texttt{S\_fw\_theta\_re}, \texttt{S\_fw\_theta\_im},
+        \texttt{S\_fw\_phi\_re}, \texttt{S\_fw\_phi\_im}: the real and
+        imaginary parts of $S_{\text{fw},\theta}$ and
+        $S_{\text{fw},\phi}$ on the shape
+        $(N_{D_{ve}}, N_{RI}, N_{AR}, N_{u_{1/2}}, N_{\phi_o})$;
+  \item \texttt{converged}: a boolean array of shape
+        $(N_{D_{ve}}, N_{RI}, N_{AR})$ indicating successful solves.
+        Non-converged cells carry \texttt{NaN+NaN$i$} in the four
+        amplitude arrays across all $(N_{u_{1/2}},N_{\phi_o})$ entries.
+\end{itemize}
+The $\phi_o$ axis corresponds exactly to the Euler angle $\alpha$, and
+the populating code applies the analytical $\alpha$-expansion
+\eqref{eq:alpha-exp-theta}--\eqref{eq:alpha-exp-phi} to the $\alpha = 0$
+solves, so only $N_{u_{1/2}}$ independent VIEM solves are required per
+$(D_{ve},\Re(m_p),\text{AR})$ triple.
+
+%======================================================================
+\begin{thebibliography}{99}
+
+\bibitem{SWG1984}
+  D.~H.~Schaubert, D.~R.~Wilton, and A.~W.~Glisson,
+  ``A tetrahedral modeling method for electromagnetic scattering by
+  arbitrarily shaped inhomogeneous dielectric bodies,''
+  \textit{IEEE Trans.\ Antennas Propag.} \textbf{32}(1), 77--85 (1984).
+
+\bibitem{VolakisSertel}
+  J.~L.~Volakis and K.~Sertel,
+  \textit{Integral Equation Methods for Electromagnetics}
+  (SciTech Publishing, 2012).
+
+\bibitem{ShengSong}
+  X.-Q.~Sheng and W.~Song,
+  \textit{Essentials of Computational Electromagnetics}
+  (Wiley-IEEE, 2012).
+
+\bibitem{MousaviSukumar2010}
+  S.~E.~Mousavi and N.~Sukumar,
+  ``Generalized Duffy transformation for integrating vertex singularities,''
+  \textit{Comput.\ Mech.} \textbf{45}(2-3), 127--140 (2010).
+  \url{https://doi.org/10.1007/s00466-009-0424-1}.
+
+\bibitem{Purcell1973}
+  E.~M.~Purcell and C.~R.~Pennypacker,
+  ``Scattering and absorption of light by nonspherical dielectric grains,''
+  \textit{Astrophys.\ J.} \textbf{186}, 705--714 (1973).
+
+\bibitem{Draine1988}
+  B.~T.~Draine,
+  ``The discrete-dipole approximation and its application to interstellar
+  graphite grains,''
+  \textit{Astrophys.\ J.} \textbf{333}, 848--872 (1988).
+
+\bibitem{Goodman1991}
+  J.~J.~Goodman, B.~T.~Draine, and P.~J.~Flatau,
+  ``Application of fast-Fourier-transform techniques to the discrete-dipole
+  approximation,''
+  \textit{Opt.\ Lett.} \textbf{16}(15), 1198--1200 (1991).
+
+\bibitem{Bohren1983}
+  C.~F.~Bohren and D.~R.~Huffman,
+  \textit{Absorption and Scattering of Light by Small Particles}
+  (Wiley, New York, 1983).
+
+\bibitem{Moteki2024}
+  N.~Moteki and K.~Adachi,
+  ``Measuring the polarized complex forward-scattering amplitudes of
+  single particles in unbounded fluid flow: CAS-v2 protocol,''
+  \textit{Opt.\ Express} \textbf{32}(21), 36500--36522 (2024).
+  \url{https://doi.org/10.1364/OE.533776}.
+
+\bibitem{KrylovJl}
+  A.~Montoison and D.~Orban,
+  ``Krylov.jl: A Julia basket of hand-picked Krylov methods,''
+  \textit{J.\ Open Source Softw.} \textbf{8}(89), 5187 (2023).
+  \url{https://doi.org/10.21105/joss.05187}.
+
+\end{thebibliography}
+
+\section*{Acknowledgment}
+
+This document was prepared with the assistance of Claude (Anthropic).
+The author assumes full responsibility for the content.
+
+\end{document}
