@@ -25,21 +25,29 @@ const TET_LOCAL_FACES = (
 """
     SWGBasis
 
-SWG basis information attached to a [`TetMesh`](@ref). One basis function is
-defined per *internal* face (a face shared by exactly two tetrahedra).
+SWG basis information attached to a [`TetMesh`](@ref).
+
+Following Schaubert-Wilton-Glisson (1984), one basis function is defined per
+face of the tetrahedral model, including BOTH internal faces (shared by two
+tets) and boundary faces (on the global particle surface ∂Ω). For a boundary
+face, `tet_minus[n] = 0` and `free_vertex_minus[n] = 0` as sentinels, so
+`f_n` has one-sided support on `T_n^+` only (a "half-SWG" basis function).
+This lets `D·n̂` be non-zero on the particle boundary, representing the
+surface polarization charge.
 
 Per basis index `n` we store the geometric quantities required by
-`f_n(r) = ±(a_n / (3 V_n^±)) (r - p_n^±)` and its divergence
+`f_n(r) = ±(a_n / (3 V_n^±)) (r - p_n^±)` and its bulk divergence
 `∇·f_n = ±a_n / V_n^±` (Eqs. (10),(12) of SWG 1984).
 
 # Fields
 - `mesh::TetMesh`                       — underlying mesh
-- `face_nodes::Vector{SVector{3,Int}}`  — sorted node triple of the shared face
+- `face_nodes::Vector{SVector{3,Int}}`  — sorted node triple of the face
 - `face_areas::Vector{Float64}`         — face area `a_n`
 - `tet_plus::Vector{Int}`               — index of `T_n^+`
-- `tet_minus::Vector{Int}`              — index of `T_n^-`
+- `tet_minus::Vector{Int}`              — index of `T_n^-` (0 for boundary faces)
 - `free_vertex_plus::Vector{Int}`       — node index `p_n^+` (free vertex of `T_n^+`)
-- `free_vertex_minus::Vector{Int}`      — node index `p_n^-` (free vertex of `T_n^-`)
+- `free_vertex_minus::Vector{Int}`      — node index `p_n^-` (0 for boundary faces)
+- `is_boundary::Vector{Bool}`           — true if face n is on ∂Ω (half-SWG)
 """
 struct SWGBasis <: AbstractDivBasis
     mesh::TetMesh
@@ -49,6 +57,7 @@ struct SWGBasis <: AbstractDivBasis
     tet_minus::Vector{Int}
     free_vertex_plus::Vector{Int}
     free_vertex_minus::Vector{Int}
+    is_boundary::Vector{Bool}
 end
 
 """
@@ -84,15 +93,26 @@ end
 """
     build_swg_basis(mesh::TetMesh) -> SWGBasis
 
-Construct the SWG basis on `mesh` by enumerating all faces and pairing those
-that are shared by two tetrahedra. Boundary faces (only one neighbor) are
-discarded since the corresponding SWG basis would lack normal continuity.
+Construct the SWG basis on `mesh` by enumerating all faces.
 
-The `+` / `-` assignment for each internal face is deterministic: the tet with
-the *smaller* global index becomes `T^+`. This guarantees a reproducible basis
-ordering across runs and platforms.
+Faces shared by two tets always become interior SWG basis functions. When
+`include_boundary_faces = true`, faces with only one tet (on the global
+boundary ∂Ω) additionally become half-SWG basis functions with
+`tet_minus = 0`, `free_vertex_minus = 0`. The half-SWG functions let `D·n̂`
+be non-zero on ∂Ω, as in the full SWG 1984 formulation.
+
+WARNING: enabling `include_boundary_faces` without also applying the
+matching surface-correction terms in the weak form (Eq. 28 of SWG 1984,
+the `(κ_+ - κ_-) ∫_{∂_n} G ds'` contribution) breaks charge neutrality
+and gives catastrophically wrong cross sections. Only turn this flag on
+when the impedance-matrix assembly has been updated to include surface
+corrections.
+
+The `+` / `-` assignment for each internal face is deterministic: the tet
+with the *smaller* global index becomes `T^+`. This guarantees a
+reproducible basis ordering across runs and platforms.
 """
-function build_swg_basis(mesh::TetMesh)
+function build_swg_basis(mesh::TetMesh; include_boundary_faces::Bool = false)
     # face_key (sorted node triple) -> (tet_idx, local_face_idx)
     face_table = Dict{NTuple{3,Int},Vector{Tuple{Int,Int}}}()
     for (ti, tet) in enumerate(mesh.tets)
@@ -109,36 +129,47 @@ function build_swg_basis(mesh::TetMesh)
     tet_minus = Int[]
     free_plus = Int[]
     free_minus = Int[]
+    is_boundary = Bool[]
 
     for (key, owners) in face_table
-        if length(owners) == 1
-            continue                    # boundary face
-        elseif length(owners) > 2
-            error("Non-manifold face $(key) shared by $(length(owners)) tets")
-        end
-        (ta, la), (tb, lb) = owners
-        # deterministic +/- assignment: smaller tet index is "+"
-        if ta < tb
-            tp, lp, tm, lm = ta, la, tb, lb
-        else
-            tp, lp, tm, lm = tb, lb, ta, la
-        end
-        # free vertex of T± is the local vertex with index lp / lm
-        fp = mesh.tets[tp][lp]
-        fm = mesh.tets[tm][lm]
-        # face area from any of the three triangle nodes
         n1, n2, n3 = key
         a = triangle_area(mesh.nodes[n1], mesh.nodes[n2], mesh.nodes[n3])
-        push!(face_nodes, SVector{3,Int}(n1, n2, n3))
-        push!(face_areas, a)
-        push!(tet_plus, tp)
-        push!(tet_minus, tm)
-        push!(free_plus, fp)
-        push!(free_minus, fm)
+
+        if length(owners) == 2
+            (ta, la), (tb, lb) = owners
+            if ta < tb
+                tp, lp, tm, lm = ta, la, tb, lb
+            else
+                tp, lp, tm, lm = tb, lb, ta, la
+            end
+            fp = mesh.tets[tp][lp]
+            fm = mesh.tets[tm][lm]
+            push!(face_nodes, SVector{3,Int}(n1, n2, n3))
+            push!(face_areas, a)
+            push!(tet_plus, tp)
+            push!(tet_minus, tm)
+            push!(free_plus, fp)
+            push!(free_minus, fm)
+            push!(is_boundary, false)
+        elseif length(owners) == 1
+            include_boundary_faces || continue
+            # Half-SWG on boundary face: one-sided support on T^+ only.
+            (ta, la), = owners
+            fp = mesh.tets[ta][la]
+            push!(face_nodes, SVector{3,Int}(n1, n2, n3))
+            push!(face_areas, a)
+            push!(tet_plus, ta)
+            push!(tet_minus, 0)
+            push!(free_plus, fp)
+            push!(free_minus, 0)
+            push!(is_boundary, true)
+        else
+            error("Non-manifold face $(key) shared by $(length(owners)) tets")
+        end
     end
 
     return SWGBasis(mesh, face_nodes, face_areas, tet_plus, tet_minus,
-                    free_plus, free_minus)
+                    free_plus, free_minus, is_boundary)
 end
 
 @inline function _sorted_triple(t::NTuple{3,Int})

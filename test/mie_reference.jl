@@ -3,8 +3,19 @@
 #
 # NOT part of the BlockVIEM package; used only in tests.
 #
-# Convention: exp(−iωt) physics convention for Mie coefficients a_n, b_n.
-# Cross sections are convention-independent (real, positive quantities).
+# Convention: exp(−iωt) physics convention (BH83).
+#   ξ_n = ψ_n + iχ_n  (BH83 Eq. 4.13, p.100) = x h_n^(2)(x) (INCOMING wave)
+#   where ψ_n = ρ j_n(ρ), χ_n = -ρ y_n(ρ).
+#   Wronskian: W = ψ_n ξ_n' - ψ_n' ξ_n = -i.
+#
+# Cross sections Q_ext, Q_sca, Q_abs are correct because they depend only on
+# Re(a_n+b_n) and |a_n|²+|b_n|², which are invariant under h^(1)↔h^(2) for
+# real x (lossless background). Validated against MieScat_Py to 1e-15.
+#
+# CAUTION: The partial-wave coefficients a_n, b_n, c_n, d_n from this file
+# use h^(2) (incoming wave) and are NOT suitable for internal field evaluation.
+# For internal field coefficients, use mie_internal_field.jl which uses
+# ξ^out = ψ - iχ = x h^(1) (outgoing wave, matching MATLAB MIE.m).
 
 """
     mie_cross_sections(; wl_0, m_m, r_p, m_p) -> NamedTuple

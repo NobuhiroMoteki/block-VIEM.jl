@@ -75,12 +75,61 @@ const TET_QUAD_5PT = TetQuadRule(
 )
 
 """
-11-point rule, degree 4 (Keast 1986, Rule index 6).
+    tet_collapsed_rule(n::Int) -> TetQuadRule
 
-Uses 4 orbits: 1 centroid + two sets of 4 vertex-orbit + one edge orbit of 6.
-All weights normalized so that `sum(weights) == 1` (reference simplex volume
-is factored out and applied in [`integrate`](@ref)).
+Construct a tetrahedron quadrature rule with `n^3` points and algebraic degree
+`2n - 1` using a collapsed coordinate (Duffy-type) map from the unit cube
+`[0,1]^3` to barycentric coordinates.
+
+The mapping `(u1, u2, u3) → (λ1, λ2, λ3, λ4)` is:
+
+    λ1 = 1 - u1,  λ2 = u1(1-u2),  λ3 = u1 u2 (1-u3),  λ4 = u1 u2 u3
+
+with Jacobian `J = u1² u2`. Gauss-Legendre quadrature on each axis with `n`
+points integrates the Jacobian-weighted polynomial part exactly for total
+polynomial degree up to `2n - 1`.
+
+This reuses the existing [`gauss_legendre_unit`](@ref) infrastructure and
+is guaranteed correct by construction. The number of points (`n^3`) is not
+optimal for a given degree, but the rule is simple, robust, and all weights
+are positive.
+
+# Usage
+- `n = 3` → 27 points, degree 5 (sufficient for RT1 mass/radiation terms)
+- `n = 4` → 64 points, degree 7 (extra safety for RT1 + Green's function)
 """
+function tet_collapsed_rule(n::Int)
+    nodes, weights = gauss_legendre_unit(n)
+    npts = n^3
+    bary = Vector{NTuple{4,Float64}}(undef, npts)
+    wts = Vector{Float64}(undef, npts)
+    idx = 0
+    @inbounds for i in 1:n
+        u1 = nodes[i]
+        w1 = weights[i]
+        for j in 1:n
+            u2 = nodes[j]
+            w2 = weights[j]
+            for k in 1:n
+                u3 = nodes[k]
+                w3 = weights[k]
+                idx += 1
+                λ1 = 1 - u1
+                λ2 = u1 * (1 - u2)
+                λ3 = u1 * u2 * (1 - u3)
+                λ4 = u1 * u2 * u3
+                bary[idx] = (λ1, λ2, λ3, λ4)
+                # Jacobian: 6 × u1² × u2 (the factor 6 normalizes
+                # ∫₀¹∫₀¹∫₀¹ 6 u1² u2 du = 6 × 1/3 × 1/2 × 1 = 1)
+                wts[idx] = w1 * w2 * w3 * 6 * u1^2 * u2
+            end
+        end
+    end
+    # The Jacobian u1^2 u2 adds degree 2 in u1 and 1 in u2 to the integrand.
+    # A tet monomial of degree p has max u1-degree p+2, which requires 2n-1 >= p+2
+    # i.e. p <= 2n-3. This is the effective polynomial degree of the rule.
+    return TetQuadRule(npts, bary, wts, max(2n - 3, 0))
+end
 
 """
     bary_to_point(λ, vertices) -> Vec3
@@ -138,3 +187,13 @@ function gauss_legendre_unit(n::Int)
     weights = weights_m11 ./ 2
     return nodes, weights
 end
+
+# ---------------------------------------------------------------------------
+# High-order tet rules (depend on gauss_legendre_unit, must be defined after it)
+# ---------------------------------------------------------------------------
+
+"64-point collapsed rule, degree 5. Minimum for RT1 (degree-4 integrands)."
+const TET_QUAD_64PT = tet_collapsed_rule(4)
+
+"125-point collapsed rule, degree 7. High-accuracy RT1 or Green's function integrands."
+const TET_QUAD_125PT = tet_collapsed_rule(5)

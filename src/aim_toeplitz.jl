@@ -105,3 +105,56 @@ function fft_convolve!(result::AbstractArray{ComplexF64,3},
     result .= @view buf[1:Nx, 1:Ny, 1:Nz]
     return result
 end
+
+# ---------------------------------------------------------------------------
+# Planned FFT workspace — allows pre-allocating buffers and FFT plans once
+# for repeated use in inner loops (AIM precorrection, iterative MVP).
+# ---------------------------------------------------------------------------
+
+"""
+    AIMFFTWorkspace
+
+Pre-allocated state for repeated Toeplitz convolutions on a fixed grid:
+* `buf`  — working buffer of shape `(2Nx, 2Ny, 2Nz)`
+* `plan` — in-place forward FFT plan for that buffer
+* `iplan`— in-place inverse FFT plan for that buffer
+
+Usage: build once with [`aim_fft_workspace`](@ref), then call
+[`fft_convolve_plan!`](@ref) repeatedly. Each call avoids FFT plan
+setup and the `2Nx * 2Ny * 2Nz` complex allocation of `fft_convolve`.
+"""
+struct AIMFFTWorkspace{P,IP}
+    buf::Array{ComplexF64,3}
+    plan::P
+    iplan::IP
+end
+
+function aim_fft_workspace(dims::NTuple{3,Int})
+    Nx, Ny, Nz = dims
+    buf = zeros(ComplexF64, 2Nx, 2Ny, 2Nz)
+    plan  = plan_fft!(buf)
+    iplan = plan_ifft!(buf)
+    return AIMFFTWorkspace(buf, plan, iplan)
+end
+
+"""
+    fft_convolve_plan!(result, G_hat, u, ws)
+
+In-place convolution using a pre-planned [`AIMFFTWorkspace`](@ref). Same
+semantics as [`fft_convolve!`](@ref) but reuses the FFT plan (no
+per-call plan creation).
+"""
+function fft_convolve_plan!(result::AbstractArray{ComplexF64,3},
+                             G_hat::Array{ComplexF64,3},
+                             u::AbstractArray{<:Number,3},
+                             ws::AIMFFTWorkspace)
+    Nx, Ny, Nz = size(u)
+    buf = ws.buf
+    fill!(buf, 0)
+    @inbounds buf[1:Nx, 1:Ny, 1:Nz] .= u
+    ws.plan * buf           # in-place forward FFT
+    @inbounds buf .*= G_hat
+    ws.iplan * buf          # in-place inverse FFT (already scaled 1/N)
+    @inbounds result .= @view buf[1:Nx, 1:Ny, 1:Nz]
+    return result
+end

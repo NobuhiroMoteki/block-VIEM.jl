@@ -38,6 +38,7 @@ end
         @test basis.free_vertex_minus[1] == 5
         @test basis.face_areas[1] ≈ sqrt(3) / 2
         @test sort(collect(basis.face_nodes[1])) == [2, 3, 4]
+        @test basis.is_boundary[1] == false
     end
 
     @testset "divergence formula (Eq. 12)" begin
@@ -50,7 +51,6 @@ end
         @test V_minus ≈ 1 / 3
         @test divergence(basis, 1, 1) ≈ +a / V_plus
         @test divergence(basis, 1, 2) ≈ -a / V_minus
-        # Outside support: zero.
         @test divergence(basis, 1, 0) == 0.0
     end
 
@@ -105,14 +105,29 @@ end
         # 6 squares * 2 tris = 12 boundary triangles. Internal faces:
         # (24 - 12) / 2 = 6.
         @test n_basis(basis) == 6
-        # Sanity: every internal face must store positive area, valid tets,
-        # and a free vertex distinct from the three face nodes.
         for n in 1:n_basis(basis)
             @test basis.face_areas[n] > 0
             @test basis.tet_plus[n] != basis.tet_minus[n]
             @test basis.tet_plus[n] < basis.tet_minus[n]
             @test !(basis.free_vertex_plus[n] in basis.face_nodes[n])
             @test !(basis.free_vertex_minus[n] in basis.face_nodes[n])
+            @test basis.is_boundary[n] == false
+        end
+    end
+
+    @testset "half-SWG opt-in: bipyramid with include_boundary_faces" begin
+        mesh = bipyramid_mesh()
+        basis = build_swg_basis(mesh; include_boundary_faces = true)
+        # 1 internal face + 6 boundary triangles.
+        @test n_basis(basis) == 7
+        @test sum(basis.is_boundary) == 6
+        @test sum(.!basis.is_boundary) == 1
+        for n in 1:n_basis(basis)
+            if basis.is_boundary[n]
+                @test basis.tet_minus[n] == 0
+                @test basis.free_vertex_minus[n] == 0
+                @test basis.tet_plus[n] in (1, 2)
+            end
         end
     end
 end

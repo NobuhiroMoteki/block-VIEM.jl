@@ -27,7 +27,9 @@ include("rt1_basis.jl")
 # Phase 2: Singular volume integration (Duffy)
 include("quadrature.jl")
 include("duffy.jl")
+include("triangle_quad.jl")
 include("green.jl")
+include("surface_integrals.jl")
 include("impedance.jl")
 
 # Phase 3: AIM (FFT-MVP)
@@ -50,15 +52,20 @@ export tet_collapsed_rule
 export bary_to_point, integrate, gauss_legendre_unit
 export DuffyQuadRule, duffy_reference_rule, duffy_quadrature
 export subdivide_around, duffy_quadrature_around
+export TriQuadRule, TRI_QUAD_1PT, TRI_QUAD_3PT, tri_collapsed_rule
+export tri_bary_to_point, integrate_tri
+export TriDuffyRule, tri_duffy_reference_rule, tri_duffy_quadrature
+export subdivide_triangle_around, tri_duffy_quadrature_around
+export surface_integral_G, boundary_face_vertices
 export helmholtz_green, helmholtz_green_static
-export impedance_element, assemble_impedance_matrix
+export impedance_element, assemble_impedance_matrix, assemble_half_swg_correction
 
 # Public API (Phase 3)
 export AIMGrid, n_grid_points, grid_point, aim_grid, grid_stencil, grid_point_at_linear
 export AIMProjection, build_aim_projection, basis_centroid
 export basis_moments, divergence_moments, multi_indices, n_moments
 export build_green_toeplitz, precompute_green_fft, fft_convolve, fft_convolve!
-export assemble_mass_matrix, near_pairs
+export assemble_mass_matrix, near_pairs, near_pairs_by_distance
 export aim_far_mvp, aim_radiation_element, assemble_precorrection
 export AIMOperator, build_aim_operator, aim_mvp
 

@@ -36,3 +36,20 @@
 # Mesh artifacts (regenerable from .geo)
 *.msh
 !test/meshes/reference/*.msh
+
+# External benchmark tools (buff-em, scuff-em, OpenBLAS, etc.)
+# These are large (~500MB) and rebuildable via benchmarks/external/README.md
+/benchmarks/external/buff-em/
+/benchmarks/external/scuff-em/
+/benchmarks/external/opt/
+
+# Benchmark run outputs (regenerable)
+/benchmarks/runs/*.PFT
+/benchmarks/runs/*.log
+/benchmarks/runs/*.buffgeo
+# FIBBI cache files are large (~14 MB each) and take ~10 min to compute,
+# but are mesh-dependent and can be regenerated — gitignore them.
+/benchmarks/runs/*.cache
+!/benchmarks/runs/.gitkeep
+# Keep omega files (small, describe the test conditions)
+!/benchmarks/runs/omega_*.txt

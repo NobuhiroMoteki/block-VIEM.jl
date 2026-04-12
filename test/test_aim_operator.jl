@@ -56,10 +56,11 @@ end
 end
 
 @testset "AIM operator: MVP vs direct Z*v" begin
-    @testset "near-pair precorrection is exact" begin
-        # For near pairs, K_near = K_direct - K_AIM is stored exactly, so
-        # (K_AIM + K_near)[m,n] == K_direct[m,n] for those pairs. Verify by
-        # building a test vector that only excites near-pair interactions.
+    @testset "AIM matches dense to machine precision on tiny mesh" begin
+        # With the distance-based near-field (3·stencil_extent), on a mesh
+        # this small every pair falls inside the near radius, so the
+        # precorrection covers the entire K and AIM reproduces dense Z
+        # to machine precision.
         mesh = unit_cube_mesh_op()
         basis = build_swg_basis(mesh)
         N = n_basis(basis)
@@ -69,18 +70,16 @@ end
         op = build_aim_operator(basis; k0 = k0, eps_p = eps_p,
                                 pitch = 0.25, padding = 3)
 
-        # Full AIM MVP should be a reasonable approximation (this tiny mesh
-        # has far pairs that are only ~1 cell apart, so AIM accuracy is
-        # limited). Accept 20% relative error as a smoke test.
         x = ComplexF64[(i + 0.3im) for i in 1:N]
         y_direct = Z * x
         y_aim = aim_mvp(op, x)
         rel_err = norm(y_aim - y_direct) / norm(y_direct)
-        @test rel_err < 0.2
+        @test rel_err < 1e-10
     end
 
-    @testset "AIM converges with finer grid" begin
-        # A finer AIM grid should reduce the far-field approximation error.
+    @testset "AIM accuracy is stable across grid pitches" begin
+        # After the near-field fix, AIM should be accurate to better than
+        # 1% on any reasonable grid pitch on this tiny mesh.
         mesh = unit_cube_mesh_op()
         basis = build_swg_basis(mesh)
         N = n_basis(basis)
@@ -90,15 +89,13 @@ end
         x = ComplexF64[(i + 0.3im) for i in 1:N]
         y_direct = Z * x
 
-        errs = Float64[]
         for pitch in (0.5, 0.25)
             op = build_aim_operator(basis; k0 = k0, eps_p = eps_p,
                                     pitch = pitch, padding = 3)
             y_aim = aim_mvp(op, x)
-            push!(errs, norm(y_aim - y_direct) / norm(y_direct))
+            rel_err = norm(y_aim - y_direct) / norm(y_direct)
+            @test rel_err < 1e-2
         end
-        # Finer grid should be at least as good.
-        @test errs[2] ≤ errs[1] + 1e-6
     end
 end
 
