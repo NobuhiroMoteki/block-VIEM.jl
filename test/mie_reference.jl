@@ -116,3 +116,79 @@ function _mie_bessel(x::Real, m_r::ComplexF64, nstop::Int)
     xi = psi .+ im .* chi
     return DD, psi, xi
 end
+
+"""
+    mie_cas_observables(; wl_0, m_m, r_p, m_p) -> NamedTuple
+
+Reference CAS-v2 forward and backward scattering observables for a
+homogeneous sphere, **physics convention** (matching block-DDA_Py
+`analytical_scattering_theories/homogeneous_sphere.mie_compute_q_and_s`).
+
+Returns `(; S_fw, S_bk, S1_fw, S2_fw, S1_bk, S2_bk, k)` where
+`S_fw = (S11(0)+S22(0))/2` and `S_bk = (-S11(π)+S22(π))/√2` with
+`S11 = S2/(-ik)`, `S22 = S1/(-ik)`. For a sphere `S1(0)=S2(0)`, so
+`S_fw = S1(0)/(-ik)` independent of polarization.
+"""
+function mie_cas_observables(; wl_0::Real, m_m::Real, r_p::Real, m_p::Number)
+    k_bg = 2π * m_m / wl_0
+    x = k_bg * r_p
+    m_r = ComplexF64(m_p) / m_m
+
+    nstop = floor(Int, abs(x) + 4 * abs(x)^(1/3) + 2)
+    nstop = max(nstop, 3)
+    DD, psi, xi = _mie_bessel(x, m_r, nstop)
+
+    a = zeros(ComplexF64, nstop)
+    b = zeros(ComplexF64, nstop)
+    @inbounds for n in 1:nstop
+        n_over_x = n / x
+        num_a = (DD[n+1] / m_r + n_over_x) * psi[n+1] - psi[n]
+        den_a = (DD[n+1] / m_r + n_over_x) * xi[n+1]  - xi[n]
+        a[n] = num_a / den_a
+        num_b = (m_r * DD[n+1] + n_over_x) * psi[n+1] - psi[n]
+        den_b = (m_r * DD[n+1] + n_over_x) * xi[n+1]  - xi[n]
+        b[n] = num_b / den_b
+    end
+
+    # Angular functions at θ = 0 and θ = π
+    # π_n(μ) and τ_n(μ): π_1=1, π_2=3μ, recurrence; τ_n = n μ π_n - (n+1) π_{n-1}
+    # At θ=0 (μ=1): π_n(1) = n(n+1)/2, τ_n(1) = n(n+1)/2
+    # At θ=π (μ=-1): π_n(-1) = (-1)^(n+1) n(n+1)/2, τ_n(-1) = (-1)^n n(n+1)/2 · (-1)
+    #                Actually use recurrences directly to avoid sign mistakes.
+    pie_fw = zeros(Float64, nstop); tau_fw = zeros(Float64, nstop)
+    pie_bk = zeros(Float64, nstop); tau_bk = zeros(Float64, nstop)
+    mu_fw = 1.0;  mu_bk = -1.0
+    pie_fw[1] = 1.0; tau_fw[1] = mu_fw
+    pie_bk[1] = 1.0; tau_bk[1] = mu_bk
+    if nstop >= 2
+        pie_fw[2] = 3.0 * mu_fw; tau_fw[2] = 6 * mu_fw^2 - 3
+        pie_bk[2] = 3.0 * mu_bk; tau_bk[2] = 6 * mu_bk^2 - 3
+    end
+    @inbounds for n in 3:nstop
+        pie_fw[n] = ((2n - 1)/(n - 1)) * mu_fw * pie_fw[n-1] - (n/(n - 1)) * pie_fw[n-2]
+        tau_fw[n] = n * mu_fw * pie_fw[n] - (n + 1) * pie_fw[n-1]
+        pie_bk[n] = ((2n - 1)/(n - 1)) * mu_bk * pie_bk[n-1] - (n/(n - 1)) * pie_bk[n-2]
+        tau_bk[n] = n * mu_bk * pie_bk[n] - (n + 1) * pie_bk[n-1]
+    end
+
+    S1_fw = ComplexF64(0); S2_fw = ComplexF64(0)
+    S1_bk = ComplexF64(0); S2_bk = ComplexF64(0)
+    @inbounds for n in 1:nstop
+        fn2 = (2n + 1) / (n * (n + 1))
+        S1_fw += fn2 * (a[n] * pie_fw[n] + b[n] * tau_fw[n])
+        S2_fw += fn2 * (a[n] * tau_fw[n] + b[n] * pie_fw[n])
+        S1_bk += fn2 * (a[n] * pie_bk[n] + b[n] * tau_bk[n])
+        S2_bk += fn2 * (a[n] * tau_bk[n] + b[n] * pie_bk[n])
+    end
+
+    S11_fw = S2_fw / (-im * k_bg); S22_fw = S1_fw / (-im * k_bg)
+    S11_bk = S2_bk / (-im * k_bg); S22_bk = S1_bk / (-im * k_bg)
+
+    S_fw = (S11_fw + S22_fw) / 2
+    S_bk = (-S11_bk + S22_bk) / sqrt(2.0)
+
+    return (; S_fw, S_bk,
+              S1_fw, S2_fw, S1_bk, S2_bk,
+              S11_fw, S22_fw, S11_bk, S22_bk,
+              k = k_bg, x, nstop)
+end

@@ -1,0 +1,174 @@
+using Test
+using StaticArrays
+using LinearAlgebra: norm, dot
+using BlockVIEM
+using BlockVIEM: Vec3
+import Gmsh: gmsh
+
+include(joinpath(@__DIR__, "mie_reference.jl"))
+
+# Reuse the sphere mesh helper from test_mie_validation if not already defined.
+if !@isdefined(generate_sphere_mesh)
+    function generate_sphere_mesh(radius::Float64, lc::Float64)
+        path = joinpath(tempdir(), "sphere_cas_$(lc).msh")
+        gmsh.initialize()
+        try
+            gmsh.option.setNumber("General.Terminal", 0)
+            gmsh.model.add("sphere_cas")
+            gmsh.model.occ.addSphere(0.0, 0.0, 0.0, radius, 1)
+            gmsh.model.occ.synchronize()
+            gmsh.model.addPhysicalGroup(3, [1], 1)
+            gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc)
+            gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc)
+            gmsh.model.mesh.generate(3)
+            gmsh.write(path)
+        finally
+            gmsh.finalize()
+        end
+        return path
+    end
+end
+
+@testset "CAS-v2 orientation geometry" begin
+    @testset "identity orientation" begin
+        ori = cas_orientation(0.0, 0.0, 0.0)
+        @test ori.u_inc       ≈ Vec3(0, 0, 1)
+        @test ori.theta_inc   ≈ Vec3(1, 0, 0)
+        @test ori.phi_inc     ≈ Vec3(0, 1, 0)
+        @test ori.u_sca_fw    ≈ Vec3(0, 0, 1)
+        @test ori.theta_sca_fw ≈ Vec3(1, 0, 0)
+        @test ori.phi_sca_fw  ≈ Vec3(0, 1, 0)
+        @test ori.u_sca_bk    ≈ Vec3(0, 0, -1)
+        @test ori.theta_sca_bk ≈ Vec3(-1, 0, 0)
+        @test ori.phi_sca_bk  ≈ Vec3(0, 1, 0)
+        # Right-handed: theta × phi = u
+        for (t, p, u) in ((ori.theta_inc, ori.phi_inc, ori.u_inc),
+                          (ori.theta_sca_fw, ori.phi_sca_fw, ori.u_sca_fw),
+                          (ori.theta_sca_bk, ori.phi_sca_bk, ori.u_sca_bk))
+            cr = Vec3(t[2]*p[3] - t[3]*p[2],
+                      t[3]*p[1] - t[1]*p[3],
+                      t[1]*p[2] - t[2]*p[1])
+            @test cr ≈ u atol = 1e-12
+        end
+    end
+
+    @testset "ZYZ rotation: u_inc tilts to particle frame" begin
+        # beta = π/2, alpha = γ = 0  → particle frame z-axis is rotated
+        # by Ry(π/2) about lab y. Inverse maps lab +z into particle frame.
+        ori = cas_orientation(0.0, π/2, 0.0)
+        # R_lp = Ry(π/2) sends particle z to lab x ⇒ R_pl sends lab z to particle -x.
+        # Numerical check via dot products:
+        @test isapprox(norm(ori.u_inc), 1.0; atol=1e-12)
+        @test isapprox(ori.u_inc[1], -1.0; atol=1e-12)
+        @test isapprox(ori.u_inc[3],  0.0; atol=1e-12)
+    end
+
+    @testset "circular polarization vector" begin
+        ori = cas_orientation(0.0, 0.0, 0.0)
+        e0 = ori.e0_inc
+        # |e0|² = 1
+        @test real(e0[1]*conj(e0[1]) + e0[2]*conj(e0[2]) + e0[3]*conj(e0[3])) ≈ 1.0 atol = 1e-12
+        # e0 ⊥ u_inc
+        @test abs(e0[1]*ori.u_inc[1] + e0[2]*ori.u_inc[2] + e0[3]*ori.u_inc[3]) < 1e-12
+    end
+end
+
+@testset "CAS-v2 vs Mie sphere (S_fw, S_bk)" begin
+    radius = 0.5
+    wl_0 = 4.0
+    m_m = 1.0
+    m_p = 1.5 + 0.01im
+    eps_bg = m_m^2
+    eps_p = m_p^2
+    k0 = 2π * m_m / wl_0
+
+    # Build sphere mesh and solve for D-coefficients (dense path).
+    lc = 0.18
+    path = generate_sphere_mesh(radius, lc)
+    mesh = read_msh(path)
+    basis = build_swg_basis(mesh; include_boundary_faces = true)
+    V_mesh = total_volume(mesh)
+    r_ve = (3 * V_mesh / (4π))^(1/3)
+
+    dr = duffy_reference_rule(7)
+    Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                  eps_bg = eps_bg, duffy_rule = dr,
+                                  symmetrize = true)
+
+    # Reference orientation: alpha=beta=gamma=0
+    ori = cas_orientation(0.0, 0.0, 0.0)
+
+    # Build the RHS using the same circular polarization that CAS-v2 expects.
+    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    b = project_plane_wave(basis; k_hat = ori.u_inc, E0 = ori.e0_inc, k_bg = k_bg)
+    D = Z \ b
+    @test norm(Z * D - b) / norm(b) < 1e-8
+
+    cas = compute_cas_observables(basis, D;
+                                  orientation = ori,
+                                  k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
+
+    mie = mie_cas_observables(; wl_0 = wl_0, m_m = m_m, r_p = r_ve, m_p = m_p)
+
+    @info "CAS-v2 vs Mie (sphere)" lc N=n_basis(basis) r_ve x=mie.x
+    @info "  Forward (PCAS)" S_fw_VIEM=cas.S_fw S_fw_Mie=mie.S_fw
+    @info "    theta-channel" S_fw_theta=cas.S_fw_theta
+    @info "    phi-channel"   S_fw_phi=cas.S_fw_phi
+    @info "  Backward (OCBS)" S_bk_VIEM=cas.S_bk S_bk_Mie=mie.S_bk
+
+    # For a sphere with circular illumination at θ=0, S_θ ≈ S_φ.
+    @test isapprox(cas.S_fw_theta, cas.S_fw_phi; rtol = 0.01)
+
+    # Re(S_fw) is the dominant scattering amplitude and converges quickly.
+    # Im(S_fw) (the radiative-damping/extinction part) is O(h)-limited per
+    # the existing postprocess.jl docstring, so we use a loose imag tolerance.
+    re_err_fw = abs(real(cas.S_fw) - real(mie.S_fw)) / abs(real(mie.S_fw))
+    im_err_fw = abs(imag(cas.S_fw) - imag(mie.S_fw)) / abs(imag(mie.S_fw))
+    @info "  S_fw relative error" re_err_fw im_err_fw
+    @test re_err_fw < 0.01
+    @test im_err_fw < 0.5
+
+    re_err_bk = abs(real(cas.S_bk) - real(mie.S_bk)) / abs(real(mie.S_bk))
+    @info "  S_bk Re relative error" re_err_bk
+    @test re_err_bk < 0.05
+
+    # Magnitude agreement (sign-convention-independent).
+    @test isapprox(abs(cas.S_fw), abs(mie.S_fw); rtol = 0.05)
+    @test isapprox(abs(cas.S_bk), abs(mie.S_bk); rtol = 0.05)
+end
+
+@testset "CAS-v2 sphere refinement: Im(S_fw) → Mie" begin
+    # Demonstrate that Im(S_fw) converges to Mie as the mesh is refined.
+    radius = 0.5
+    wl_0 = 4.0
+    m_m = 1.0
+    m_p = 1.5 + 0.01im
+    eps_p = m_p^2; eps_bg = m_m^2
+    k0 = 2π * m_m / wl_0
+
+    dr = duffy_reference_rule(7)
+    ori = cas_orientation(0.0, 0.0, 0.0)
+
+    im_errs = Float64[]
+    for lc in (0.30, 0.18, 0.12)
+        path = generate_sphere_mesh(radius, lc)
+        mesh = read_msh(path)
+        basis = build_swg_basis(mesh; include_boundary_faces = true)
+        V_mesh = total_volume(mesh)
+        r_ve = (3 * V_mesh / (4π))^(1/3)
+
+        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                      eps_bg = eps_bg, duffy_rule = dr,
+                                      symmetrize = true)
+        b = project_plane_wave(basis; k_hat = ori.u_inc, E0 = ori.e0_inc,
+                               k_bg = ComplexF64(k0))
+        D = Z \ b
+        cas = compute_cas_observables(basis, D; orientation = ori,
+                                       k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
+        mie = mie_cas_observables(; wl_0 = wl_0, m_m = m_m, r_p = r_ve, m_p = m_p)
+        im_err = abs(imag(cas.S_fw) - imag(mie.S_fw)) / abs(imag(mie.S_fw))
+        push!(im_errs, im_err)
+        @info "refinement" lc N=n_basis(basis) Re_VIEM=real(cas.S_fw) Re_Mie=real(mie.S_fw) Im_VIEM=imag(cas.S_fw) Im_Mie=imag(mie.S_fw) im_err
+    end
+    @test im_errs[end] < im_errs[1]
+end

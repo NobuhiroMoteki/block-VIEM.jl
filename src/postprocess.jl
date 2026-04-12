@@ -266,3 +266,218 @@ function compute_scattering(basis::AbstractDivBasis, D_coeffs::AbstractVector;
 
     return ScatteringResult(S_fw_s, S_fw_p, S_bak, C_ext, C_abs, C_sca)
 end
+
+# ============================================================================
+# CAS-v2 observables (block-DDA_Py / Moteki & Adachi 2024 compatible)
+# ============================================================================
+#
+# CAS-v2 (Complex Amplitude Sensing v2) observables are defined for circular
+# incident polarization in a fixed laboratory frame. The particle orientation
+# is parameterized by ZYZ Euler angles (alpha, beta, gamma) — same convention
+# as block-DDA_Py: scipy `Rotation.from_euler('ZYZ', [alpha, beta, gamma])`
+# rotates the particle coordinate system from the laboratory frame.
+#
+# Lab geometry (matches block-DDA_Py bl_dda/scatterer.py):
+#   u_inc_L      = +z       theta_inc_L     = +x       phi_inc_L     = +y
+#   u_sca_fw_L   = +z       theta_sca_fw_L  = +x       phi_sca_fw_L  = +y
+#   u_sca_bk_L   = -z       theta_sca_bk_L  = -x       phi_sca_bk_L  = +y
+#
+# Incident circular polarization:
+#   E0 = (theta_inc + j phi_inc) / sqrt(2)
+#
+# Sign convention note: VIEM internally uses the engineering convention
+# (e^{+jωt}, outgoing wave exp(-jk0R)/(4πR)), so `far_field_amplitude` returns
+# F^eng with integrand exp(+jk r̂·r'). block-DDA_Py and the Mie reference use
+# the physics convention (e^{-iωt}). For the same physical system one has
+# F^phys = conj(F^eng), and the CAS observables below are returned in the
+# **physics convention** so they can be compared directly to block-DDA_Py and
+# to the Mie reference (S_fw = (S11(0)+S22(0))/2 from
+# `analytical_scattering_theories/homogeneous_sphere.py`).
+
+"""
+    CASOrientation
+
+Per-orientation laboratory→particle-frame geometry vectors used by the
+CAS-v2 observables. All vectors are unit vectors expressed in the particle
+frame. `e0_inc` is the complex circular polarization vector
+`(theta_inc + j phi_inc)/√2`.
+"""
+struct CASOrientation
+    u_inc::Vec3
+    theta_inc::Vec3
+    phi_inc::Vec3
+    e0_inc::SVector{3,ComplexF64}
+    u_sca_fw::Vec3
+    theta_sca_fw::Vec3
+    phi_sca_fw::Vec3
+    u_sca_bk::Vec3
+    theta_sca_bk::Vec3
+    phi_sca_bk::Vec3
+end
+
+# Inverse of intrinsic ZYZ rotation R_lp = Rz(α) Ry(β) Rz(γ).
+# Returns the matrix that maps lab-frame vectors to particle-frame vectors.
+@inline function _zyz_inverse_apply(α::Real, β::Real, γ::Real, v::Vec3)
+    sα, cα = sincos(α)
+    sβ, cβ = sincos(β)
+    sγ, cγ = sincos(γ)
+    # R_lp (intrinsic ZYZ) =
+    #   [ cα cβ cγ - sα sγ,  -cα cβ sγ - sα cγ,  cα sβ ]
+    #   [ sα cβ cγ + cα sγ,  -sα cβ sγ + cα cγ,  sα sβ ]
+    #   [          -sβ cγ,             sβ sγ,       cβ ]
+    # R_pl = R_lp^T (rows of R_lp become columns of R_pl).
+    # particle = R_pl · lab
+    x = (cα*cβ*cγ - sα*sγ)*v[1] + (sα*cβ*cγ + cα*sγ)*v[2] + (-sβ*cγ)*v[3]
+    y = (-cα*cβ*sγ - sα*cγ)*v[1] + (-sα*cβ*sγ + cα*cγ)*v[2] + (sβ*sγ)*v[3]
+    z = (cα*sβ)*v[1] + (sα*sβ)*v[2] + (cβ)*v[3]
+    return Vec3(x, y, z)
+end
+
+"""
+    cas_orientation(alpha::Real, beta::Real, gamma::Real) -> CASOrientation
+
+Build the per-orientation geometry for CAS-v2 observables. The Euler angles
+(`alpha`, `beta`, `gamma`) follow the ZYZ intrinsic convention used by
+`scipy.spatial.transform.Rotation` and by block-DDA_Py.
+"""
+function cas_orientation(alpha::Real, beta::Real, gamma::Real)
+    α = float(alpha); β = float(beta); γ = float(gamma)
+
+    u_inc_L         = Vec3(0, 0, 1)
+    theta_inc_L     = Vec3(1, 0, 0)
+    phi_inc_L       = Vec3(0, 1, 0)
+    u_sca_fw_L      = Vec3(0, 0, 1)
+    theta_sca_fw_L  = Vec3(1, 0, 0)
+    phi_sca_fw_L    = Vec3(0, 1, 0)
+    u_sca_bk_L      = Vec3(0, 0, -1)
+    theta_sca_bk_L  = Vec3(-1, 0, 0)
+    phi_sca_bk_L    = Vec3(0, 1, 0)
+
+    u_inc          = _zyz_inverse_apply(α, β, γ, u_inc_L)
+    theta_inc      = _zyz_inverse_apply(α, β, γ, theta_inc_L)
+    phi_inc        = _zyz_inverse_apply(α, β, γ, phi_inc_L)
+    u_sca_fw       = _zyz_inverse_apply(α, β, γ, u_sca_fw_L)
+    theta_sca_fw   = _zyz_inverse_apply(α, β, γ, theta_sca_fw_L)
+    phi_sca_fw     = _zyz_inverse_apply(α, β, γ, phi_sca_fw_L)
+    u_sca_bk       = _zyz_inverse_apply(α, β, γ, u_sca_bk_L)
+    theta_sca_bk   = _zyz_inverse_apply(α, β, γ, theta_sca_bk_L)
+    phi_sca_bk     = _zyz_inverse_apply(α, β, γ, phi_sca_bk_L)
+
+    inv_sqrt2 = 1 / sqrt(2.0)
+    e0_inc = SVector{3,ComplexF64}(
+        inv_sqrt2 * theta_inc[1] + im * inv_sqrt2 * phi_inc[1],
+        inv_sqrt2 * theta_inc[2] + im * inv_sqrt2 * phi_inc[2],
+        inv_sqrt2 * theta_inc[3] + im * inv_sqrt2 * phi_inc[3])
+
+    return CASOrientation(u_inc, theta_inc, phi_inc, e0_inc,
+                          u_sca_fw, theta_sca_fw, phi_sca_fw,
+                          u_sca_bk, theta_sca_bk, phi_sca_bk)
+end
+
+"""
+    CASv2Result
+
+Per-orientation CAS-v2 forward and backward scattering observables, in the
+**physics convention** (e^{-iωt}, matching block-DDA_Py and Mie reference).
+
+# Fields
+- `S_fw_theta::ComplexF64` — forward scattering amplitude, θ-channel
+- `S_fw_phi::ComplexF64`   — forward scattering amplitude, φ-channel
+- `S_fw::ComplexF64`       — PCAS observable, `(S_fw_theta + S_fw_phi)/2`
+- `S_bk_theta::ComplexF64` — backward scattering amplitude, θ-channel
+- `S_bk_phi::ComplexF64`   — backward scattering amplitude, φ-channel
+- `S_bk::ComplexF64`       — OCBS observable, `(-S_bk_theta + S_bk_phi)/√2`
+"""
+struct CASv2Result
+    S_fw_theta::ComplexF64
+    S_fw_phi::ComplexF64
+    S_fw::ComplexF64
+    S_bk_theta::ComplexF64
+    S_bk_phi::ComplexF64
+    S_bk::ComplexF64
+end
+
+@inline function _project_far_field(F::SVector{3,ComplexF64}, hat::Vec3)
+    return ComplexF64(hat[1]) * F[1] + ComplexF64(hat[2]) * F[2] + ComplexF64(hat[3]) * F[3]
+end
+
+"""
+    compute_cas_observables(basis, D_coeffs;
+                            orientation::CASOrientation,
+                            k0, eps_p, eps_bg = 1,
+                            rule = TET_QUAD_5PT) -> CASv2Result
+
+Compute the CAS-v2 forward and backward scattering observables for one
+orientation. The result is returned in the physics convention (matching
+block-DDA_Py and Mie reference).
+
+The DDA observable formulas (block-DDA_Py `compute_PCAS_observable_S_fw`,
+`compute_OCBS_observable_S_bk`) are reproduced verbatim with VIEM's
+`far_field_amplitude` after taking its complex conjugate to convert from
+VIEM's engineering convention (e^{+jωt}) to the physics convention.
+"""
+function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVector;
+                                 orientation::CASOrientation,
+                                 k0::Number,
+                                 eps_p::Number,
+                                 eps_bg::Number = 1,
+                                 rule::TetQuadRule = TET_QUAD_5PT)
+    F_fw = far_field_amplitude(basis, D_coeffs;
+                               k_hat_sca = orientation.u_sca_fw,
+                               k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+                               rule = rule)
+    F_bk = far_field_amplitude(basis, D_coeffs;
+                               k_hat_sca = orientation.u_sca_bk,
+                               k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+                               rule = rule)
+
+    # Convention reconciliation:
+    # - VIEM's `far_field_amplitude` returns F defined by
+    #     E_sca = exp(-jk0 r)/(4π r) · F        (engineering, e^{+jωt})
+    # - block-DDA_Py's CAS observables and the Mie reference use the BH83
+    #   convention (physics, e^{-iωt}) with E_sca = exp(jkr)/r · f(r̂), so
+    #     f = F/(4π).
+    # - For the same physical sphere, F^eng and the corresponding "DDA-style"
+    #   far-field vector built from physics-convention dipoles give the SAME
+    #   complex value when evaluated as (β, jβ, 0)-type circular structures
+    #   (verified analytically in Stage 5.1 dev notes). Therefore the DDA
+    #   S_θ, S_φ formulas can be applied directly to F^eng — no inner
+    #   conjugation. The final S is then in engineering convention; we
+    #   conjugate at the very end to obtain the physics-convention value
+    #   that matches block-DDA_Py and the Mie reference.
+    #
+    # KNOWN ISSUE (Stage 5.1, 2026-04-12): the Mie sphere validation shows
+    # Re(S_fw) agreement to ~0.05% but Im(S_fw) is ~38% low and does NOT
+    # converge with mesh refinement (lc=0.30→0.18→0.12 all give ~0.39 rel
+    # error). This appears to be a pre-existing inconsistency in the
+    # `far_field_amplitude` formula: |F|² gives the correct C_sca and
+    # C_ext (matching Mie via :farfield mode), but the optical-theorem
+    # path (which depends on Im(F·E0*) directly) gives C_ext that is too
+    # small by the same ~38–40% factor. The mismatch is independent of
+    # the volume quadrature order. Real (dispersive) parts of S_fw — the
+    # dominant signal in CAS-v2 polarization measurements — are
+    # quantitatively reliable. Investigate the imag-part bug in a
+    # follow-up.
+    inv_4pi = 1 / (4π)
+    sqrt2 = sqrt(2.0)
+
+    # Forward (PCAS) — engineering convention
+    S_fw_theta_eng = inv_4pi * sqrt2 * _project_far_field(F_fw, orientation.theta_sca_fw)
+    S_fw_phi_eng   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_fw, orientation.phi_sca_fw)
+
+    # Backward (OCBS) — engineering convention
+    S_bk_theta_eng = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
+    S_bk_phi_eng   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
+
+    # Engineering → physics: take complex conjugate at the end.
+    S_fw_theta = conj(S_fw_theta_eng)
+    S_fw_phi   = conj(S_fw_phi_eng)
+    S_fw       = (S_fw_theta + S_fw_phi) / 2
+
+    S_bk_theta = conj(S_bk_theta_eng)
+    S_bk_phi   = conj(S_bk_phi_eng)
+    S_bk       = (-S_bk_theta + S_bk_phi) / sqrt2
+
+    return CASv2Result(S_fw_theta, S_fw_phi, S_fw,
+                       S_bk_theta, S_bk_phi, S_bk)
+end

@@ -83,5 +83,6 @@ include("postprocess.jl")
 # Public API (Phase 5)
 export far_field_amplitude, ScatteringResult, compute_scattering
 export SphericalQuadRule, spherical_product_rule, compute_csca_farfield
+export CASOrientation, cas_orientation, CASv2Result, compute_cas_observables
 
 end # module BlockVIEM
