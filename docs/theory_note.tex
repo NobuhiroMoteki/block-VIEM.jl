@@ -763,13 +763,13 @@ $C_{\text{ext}}$ from
 \label{sec:S-fw}
 %----------------------------------------------------------------------
 
-The CAS-v2 forward scattering observable is defined with a circular
+The CAS-v2 forward scattering observables are defined with a circular
 incident polarisation~\cite{Moteki2024}. Let
 $\hat{\bm{u}}_{\text{fw}}$ be the forward scattering direction (equal
 to the incident propagation direction) and
 $\hat{\bm{e}}_{\theta,\text{fw}},\hat{\bm{e}}_{\phi,\text{fw}}$ the
 associated polar and azimuthal unit vectors in the particle frame. The
-$s$- and $p$-channel CAS observables are
+$s$- and $p$-channel PCAS forward observables are
 \begin{align}
   S_{\text{fw},\theta}^{\text{PCAS}}\;[=S_s(0)]
     &= \frac{\sqrt{2}}{4\pi}\,
@@ -783,14 +783,19 @@ $s$- and $p$-channel CAS observables are
 where the $\sqrt{2}$ and $i\sqrt{2}$ factors are inherited from the
 circular polarisation decomposition \eqref{eq:circular-pol}, and the
 $1/(4\pi)$ factor converts from $\bm{F}$ to the BH83-normalised
-scattering amplitude $\bm{f}=\bm{F}/(4\pi)$. The PCAS forward
-observable reported to the downstream CAS-v2 analyser is
+scattering amplitude $\bm{f}=\bm{F}/(4\pi)$. Equations
+\eqref{eq:S-fw-theta} and \eqref{eq:S-fw-phi} are the two physical
+quantities measured by the PCAS instrument. For convenience, their
+arithmetic mean
 \begin{equation}
-  S_{\text{fw}}^{\text{PCAS}}
-    = \frac{S_{\text{fw},\theta}^{\text{PCAS}}
-            + S_{\text{fw},\phi}^{\text{PCAS}}}{2}.
+  \overline{S}_{\text{fw}}^{\text{PCAS}}
+    \;=\; \frac{S_{\text{fw},\theta}^{\text{PCAS}}
+                + S_{\text{fw},\phi}^{\text{PCAS}}}{2}
   \label{eq:S-fw-combined}
 \end{equation}
+is also stored in the \texttt{CASv2Result} container as a derived
+single-channel summary; \eqref{eq:S-fw-theta} and \eqref{eq:S-fw-phi}
+remain the primary observables.
 
 %----------------------------------------------------------------------
 \subsection{OCBS backward amplitude}
@@ -804,8 +809,9 @@ $\hat{\bm{e}}_{\theta,\text{bk}} = -\hat{\bm{e}}_{\theta,\text{inc}}$
 and $\hat{\bm{e}}_{\phi,\text{bk}} = +\hat{\bm{e}}_{\phi,\text{inc}}$.
 The $\theta$- and $\phi$-channel backward amplitudes are defined in
 direct analogy with \eqref{eq:S-fw-theta}--\eqref{eq:S-fw-phi} at
-$\hat{\bm{r}} = \hat{\bm{u}}_{\text{bk}}$, and the OCBS
-(Opposite-Circular-Basis Scattering) observable~\cite{Moteki2024} is
+$\hat{\bm{r}} = \hat{\bm{u}}_{\text{bk}}$, and the single observable
+reported by the OCBS (Optical Coherence Backscattering Sensor)
+instrument~\cite{Moteki2024} is the linear combination
 \begin{equation}
   S_{\text{bk}}^{\text{OCBS}}
     = \frac{-\,S_{\text{bk},\theta}^{\text{OCBS}}
@@ -840,8 +846,126 @@ physics-convention switch (Sec.~\ref{sec:far-field}), both real and
 imaginary parts of the PCAS forward amplitude
 \eqref{eq:S-fw-combined} agree with the Mie reference to
 $\sim 0.4\%$ at the coarsest mesh and
-$\sim 0.1\%$ at $\ell_c = 0.12$. All 1704 tests in the unit-test
-suite pass.
+$\sim 0.1\%$ at $\ell_c = 0.12$.
+
+%----------------------------------------------------------------------
+\subsection{Plasmonic gold sphere (highly absorbing)}
+\label{sec:au-mie}
+%----------------------------------------------------------------------
+
+The dielectric tests above use a weakly absorbing dielectric
+($\Im m_p \ll \Re m_p$). To stress the half-SWG formulation in a
+qualitatively different regime, we run a Mie comparison on a
+plasmonic gold sphere with the Johnson--Christy~\cite{JohnsonChristy1972}
+optical constants
+\begin{equation}
+  m_{\text{Au}} = 0.18 + 3.07\,i
+  \quad (\lambda_0 = \SI{0.638}{\micro\metre}),
+  \qquad
+  \varepsilon_{\text{Au}} = -9.39 + 1.10\,i.
+\end{equation}
+The negative real part of $\varepsilon_{\text{Au}}$ places the
+problem in the plasmonic regime where the bulk polarisation current
+and the surface polarisation charge are both large and must mostly
+cancel each other in the divergence; capturing both contributions
+correctly is the test of the half-SWG surface terms
+$K^{B}+K^{C}+K^{D}$ derived in Sec.~\ref{sec:weakening}. The radius
+is fixed at the size parameter
+$x = k_0 r = 0.63$, giving $r \approx \SI{0.0640}{\micro\metre}$, a
+typical AuNP scale. Mie reference values for the target sphere are
+\[
+  Q_{\text{ext}} = 1.789, \quad
+  Q_{\text{abs}} = 0.321, \quad
+  Q_{\text{sca}} = 1.468,
+\]
+\[
+  S_{\text{fw}}^{\text{PCAS}} = +0.04273 + 0.01802\,i,
+  \qquad
+  S_{\text{bk}}^{\text{OCBS}} = +0.06374 + 0.02477\,i.
+\]
+
+The VIEM solution is computed with circular incident polarisation
+$\hat{\bm{e}}_0 = (\hat{\bm{x}} + i\hat{\bm{y}})/\sqrt{2}$ at two
+mesh refinements; results are compared to Mie evaluated at the
+volume-equivalent radius of each mesh (so that the residual mesh
+volume error does not contaminate the discretisation error).
+Cross sections are obtained via \texttt{compute\_scattering}
+(absorption from the volumetric Joule integral, scattering by
+optical theorem) and the polarimetric amplitudes via
+\texttt{compute\_cas\_observables}.
+
+\begin{table}[htbp]
+\centering
+\caption{Mie validation of \texttt{block-VIEM.jl} on a plasmonic gold
+  sphere. $m_{\text{Au}} = 0.18 + 3.07\,i$,
+  $\lambda_0 = \SI{0.638}{\micro\metre}$, $x = k_0 r = 0.63$,
+  $r \approx \SI{0.0640}{\micro\metre}$. Errors are relative to Mie
+  evaluated at the actual mesh volume-equivalent radius; the
+  cross-section column shows
+  $|\Delta C|/C_{\text{Mie}}$, the amplitude columns
+  $|\Delta S|/|S|_{\text{Mie}}$. Generated by
+  \texttt{benchmarks/cas\_v2/au\_sphere\_mie.jl} with half-SWG basis
+  functions and $\texttt{duffy\_reference\_rule}(5)$.}
+\label{tab:au-mie}
+\begin{tabular}{c c c c c c c}
+\toprule
+$\ell_c\,[\si{\micro\metre}]$ & $N_{\text{DoF}}$
+  & $C_{\text{ext}}$ & $C_{\text{abs}}$ & $C_{\text{sca}}$
+  & $S_{\text{fw}}^{\text{PCAS}}$ & $S_{\text{bk}}^{\text{OCBS}}$ \\
+\midrule
+$0.020$ & $2134$ & $6.2\times 10^{-3}$ & $4.4\times 10^{-3}$
+                 & $6.6\times 10^{-3}$ & $4.9\times 10^{-3}$
+                 & $2.6\times 10^{-3}$ \\
+$0.014$ & $4932$ & $3.2\times 10^{-3}$ & $1.9\times 10^{-3}$
+                 & $3.5\times 10^{-3}$ & $2.6\times 10^{-3}$
+                 & $1.4\times 10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Several observations follow from Table~\ref{tab:au-mie}.
+
+\begin{enumerate}
+  \item All five observables converge \emph{monotonically} between
+        the two mesh resolutions, and the per-DoF improvement is
+        roughly consistent with $h^2$ scaling --- doubling the DoF
+        count from $2134$ to $4932$ (a factor $\sim 2.3\times$) cuts
+        every error by a factor $\sim 2$.
+  \item Even at the coarse mesh ($N = 2134$, only
+        $\sim$ 4 elements per radius) every observable is below
+        $1\,\%$ relative error, which is well inside the target
+        accuracy for CAS-v2 LUT generation (the downstream Bayesian
+        retrieval typically tolerates $\sim 2\%$ on the
+        polarimetric amplitudes).
+  \item The polarimetric amplitudes
+        $S_{\text{fw}}^{\text{PCAS}}$ and $S_{\text{bk}}^{\text{OCBS}}$
+        are \emph{more accurate} than the optical-theorem cross
+        sections at the same mesh, because the cross-section
+        evaluation involves an additional far-field integral on the
+        unit sphere whose quadrature error adds to the SWG
+        discretisation error. The amplitudes use only a single
+        evaluation of $\bm{F}$ at the forward / backward direction
+        and inherit only the SWG error.
+  \item The fact that errors are monotone and small in the plasmonic
+        regime --- where the divergence-free part of the current
+        density is comparable in magnitude to the divergent (charge)
+        part --- confirms that the half-SWG surface correction
+        $K^{B}+K^{C}+K^{D}$ correctly enforces the surface
+        polarisation-charge boundary condition. The interior-only
+        SWG basis (without the boundary half-functions) would
+        produce $10$--$30\,\%$ errors here, identical to the failure
+        mode documented in Sec.~\ref{sec:charge-neutrality} for
+        weakly-absorbing dielectrics.
+\end{enumerate}
+
+\paragraph{Combined validation summary.} Across the dielectric
+($m_p = 1.5 + 0.01\,i$, Sec.~\ref{sec:mie-sphere}) and plasmonic
+($m_p = 0.18 + 3.07\,i$, this section) Mie tests, the block-VIEM.jl
+half-SWG solver achieves $\le 1\,\%$ relative error on $C_{\text{ext}}$,
+$C_{\text{abs}}$, $C_{\text{sca}}$, $S_{\text{fw}}^{\text{PCAS}}$ and
+$S_{\text{bk}}^{\text{OCBS}}$ already at modest mesh sizes
+($N \sim 2\times 10^{3}$ DoF), and the errors decay
+monotonically with refinement.
 
 %----------------------------------------------------------------------
 \subsection{Oblate spheroid $\alpha$-symmetry}
@@ -1343,6 +1467,12 @@ orientation symmetry to the solver tolerance.
   V.~Simoncini and D.~B.~Szyld,
   ``Flexible inner-outer Krylov subspace methods'' / ``Block GMRES,''
   \textit{Numer.\ Linear Algebra Appl.} \textbf{2}(6), 539--560 (1996).
+
+\bibitem{JohnsonChristy1972}
+  P.~B.~Johnson and R.~W.~Christy,
+  ``Optical constants of the noble metals,''
+  \textit{Phys.\ Rev.\ B} \textbf{6}(12), 4370--4379 (1972).
+  \url{https://doi.org/10.1103/PhysRevB.6.4370}.
 
 \end{thebibliography}
 
