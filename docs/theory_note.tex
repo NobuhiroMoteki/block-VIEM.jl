@@ -159,11 +159,25 @@ polarisation is left-handed circular (matching
 where $\hat{\bm{e}}_{\theta,\text{inc}},\,\hat{\bm{e}}_{\phi,\text{inc}}$
 are the polar and azimuthal unit vectors of the incident direction in
 the particle frame. Particle orientation is parameterised by intrinsic
-ZYZ Euler angles $(\alpha,\beta,\gamma)$, as in
-\texttt{block-DDA\_Py}; the laboratory-frame triad
+ZYZ Euler angles $(\alpha,\beta,\gamma)$, following
+\texttt{scipy.spatial.transform.Rotation} and \texttt{block-DDA\_Py}.
+We denote by
+\begin{equation}
+  \mathbf{R}(\alpha,\beta,\gamma)
+  \;=\; \mathbf{R}_z(\alpha)\,\mathbf{R}_y(\beta)\,\mathbf{R}_z(\gamma)
+  \label{eq:zyz-rotation}
+\end{equation}
+the active rotation that maps particle-frame coordinates of a physical
+vector to its lab-frame coordinates; equivalently,
+\eqref{eq:zyz-rotation} is the fixed-frame composition obtained by
+applying the three extrinsic rotations
+$\mathbf{R}_z(\gamma)$, $\mathbf{R}_y(\beta)$, $\mathbf{R}_z(\alpha)$
+in that order about the lab axes. The laboratory-frame triad
 $\{\hat{\bm{u}}_{\text{inc},L},\hat{\bm{e}}_{\theta,L},\hat{\bm{e}}_{\phi,L}\}$
-is transformed into the particle frame via the inverse rotation
-$\mathbf{R}(\alpha,\beta,\gamma)^{-1}$.
+is therefore expressed in the particle frame by applying
+$\mathbf{R}(\alpha,\beta,\gamma)^{\top}$
+($=\mathbf{R}(\alpha,\beta,\gamma)^{-1}$ since $\mathbf{R}$ is
+orthogonal).
 
 %----------------------------------------------------------------------
 \subsection{SWG and half-SWG basis functions}

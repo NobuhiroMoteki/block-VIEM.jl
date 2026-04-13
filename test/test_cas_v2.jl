@@ -99,7 +99,9 @@ end
     ori = cas_orientation(0.0, 0.0, 0.0)
 
     # Build the RHS using the same circular polarization that CAS-v2 expects.
-    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    # k0 is already the background-medium wavenumber (= 2π·m_m/wl_0), so
+    # k_bg = k0.
+    k_bg = ComplexF64(k0)
     b = project_plane_wave(basis; k_hat = ori.u_inc, E0 = ori.e0_inc, k_bg = k_bg)
     D = Z \ b
     @test norm(Z * D - b) / norm(b) < 1e-8
@@ -206,4 +208,58 @@ end
         @test isapprox(r.S_fw, S_fw_0; rtol = 0.02)
         @test isapprox(r.S_bk, S_bk_0; rtol = 0.02)
     end
+
+    # block-DDA_Py-compatible API (wl_0, m_m, m_p) must give identical
+    # results to the raw (k0, eps_p, eps_bg) form when m_m = 1.
+    results_phys = solve_cas_v2_orientations(basis, euler_list;
+                                              wl_0 = wl_0, m_m = m_m, m_p = m_p,
+                                              duffy_rule = duffy_reference_rule(7))
+    for (r, rp) in zip(results, results_phys)
+        @test isapprox(rp.S_fw, r.S_fw; rtol = 1e-12)
+        @test isapprox(rp.S_bk, r.S_bk; rtol = 1e-12)
+    end
+
+    # Mixing the two input forms should error.
+    @test_throws ArgumentError solve_cas_v2_orientations(
+        basis, euler_list;
+        wl_0 = wl_0, m_m = m_m, m_p = m_p, k0 = k0,
+        duffy_rule = duffy_reference_rule(7))
+end
+
+@testset "solve_cas_v2_orientations: non-unit m_m (physical API)" begin
+    # Cross-check that the physical (wl_0, m_m, m_p) path gives the same
+    # physics as the equivalent "vacuum-scaled" raw form when we explicitly
+    # set k0 to the background-medium wavenumber. This exercises the
+    # corrected `k_bg = k0` convention for m_m ≠ 1.
+    radius = 0.5
+    wl_0 = 4.0
+    m_m = 1.33                      # water-like background
+    m_p = 1.5 + 0.01im
+    eps_p  = ComplexF64(m_p)^2
+    eps_bg = ComplexF64(m_m)^2
+    k0_bg  = 2π * m_m / wl_0        # wavenumber in background medium
+
+    path = generate_sphere_mesh(radius, 0.30)
+    mesh = read_msh(path)
+    basis = build_swg_basis(mesh; include_boundary_faces = true)
+
+    euler_list = [(0.0, 0.0, 0.0), (0.3, 0.7, 0.5)]
+
+    # Raw form — user has already pre-computed k0 in the medium.
+    res_raw  = solve_cas_v2_orientations(basis, euler_list;
+                                         k0 = k0_bg, eps_p = eps_p,
+                                         eps_bg = eps_bg,
+                                         duffy_rule = duffy_reference_rule(7))
+    # Physical form — internally computes k0 = 2π·m_m/wl_0.
+    res_phys = solve_cas_v2_orientations(basis, euler_list;
+                                         wl_0 = wl_0, m_m = m_m, m_p = m_p,
+                                         duffy_rule = duffy_reference_rule(7))
+    for (rr, rp) in zip(res_raw, res_phys)
+        @test isapprox(rp.S_fw, rr.S_fw; rtol = 1e-12)
+        @test isapprox(rp.S_bk, rr.S_bk; rtol = 1e-12)
+    end
+
+    # Sanity: rotation invariance still holds for non-unit m_m.
+    @test isapprox(res_phys[2].S_fw, res_phys[1].S_fw; rtol = 0.02)
+    @test isapprox(res_phys[2].S_bk, res_phys[1].S_bk; rtol = 0.02)
 end

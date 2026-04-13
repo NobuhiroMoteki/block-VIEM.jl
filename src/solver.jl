@@ -37,6 +37,12 @@ end
 Solve the VIEM system using a direct dense factorization (LU). This is
 `O(N³)` and only practical for small meshes (N ≲ a few hundred). Intended
 as a validation reference for the AIM-accelerated iterative solver.
+
+**Convention.** `k0` is the wavenumber **in the background medium**,
+i.e. `k0 = 2π·m_m/λ₀` with `m_m` the (real) background refractive index,
+matching block-DDA_Py's `self.k`. `eps_p`, `eps_bg` are absolute
+permittivities (so for an absorbing particle in air, pass
+`k0 = 2π/λ₀`, `eps_p = m_p^2` with `Im(m_p) > 0`, `eps_bg = 1`).
 """
 function solve_direct(basis::AbstractDivBasis;
                       k0::Number,
@@ -44,7 +50,9 @@ function solve_direct(basis::AbstractDivBasis;
                       eps_bg::Number = 1,
                       k_hat::Vec3,
                       E0::SVector{3,ComplexF64})
-    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    # `k0` is the wavenumber in the background medium
+    # (k0 = 2π·m_m/λ₀, not the vacuum wavenumber).
+    k_bg = ComplexF64(k0)
     b = project_plane_wave(basis;
                            k_hat = k_hat, E0 = E0, k_bg = k_bg)
     Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
@@ -69,6 +77,10 @@ end
 Solve the VIEM system using the AIM-accelerated BiCGSTAB iteration
 (via Krylov.jl). The AIM operator is wrapped as a closure that computes
 `aim_mvp(op, x)`.
+
+**Convention.** Same as [`solve_direct`](@ref): `k0` is the
+background-medium wavenumber (`2π·m_m/λ₀`), and `eps_p`, `eps_bg` are
+absolute permittivities.
 """
 function solve_iterative(basis::AbstractDivBasis;
                          k0::Number,
@@ -80,7 +92,9 @@ function solve_iterative(basis::AbstractDivBasis;
                          padding::Integer = 3,
                          tol::Float64 = 1e-6,
                          maxiter::Integer = 200)
-    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    # `k0` is the wavenumber in the background medium
+    # (k0 = 2π·m_m/λ₀, not the vacuum wavenumber).
+    k_bg = ComplexF64(k0)
     b = project_plane_wave(basis;
                            k_hat = k_hat, E0 = E0, k_bg = k_bg)
     op = build_aim_operator(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
@@ -146,6 +160,10 @@ incident plane wave.
 `method` selects the block solver:
 - `:bicgstab` — Block BiCGSTAB (Tadano et al. 2009). Default.
 - `:gmres`    — Unrestarted Block GMRES (Simoncini & Szyld 1996).
+
+**Convention.** Same as [`solve_direct`](@ref): `k0` is the
+background-medium wavenumber (`2π·m_m/λ₀`), and `eps_p`, `eps_bg` are
+absolute permittivities.
 """
 function solve_iterative_block(basis::AbstractDivBasis;
                                k0::Number,
@@ -164,7 +182,9 @@ function solve_iterative_block(basis::AbstractDivBasis;
     L = length(k_hat_list)
     L == 0 && throw(ArgumentError("at least one RHS required"))
 
-    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    # `k0` is the wavenumber in the background medium
+    # (k0 = 2π·m_m/λ₀, not the vacuum wavenumber).
+    k_bg = ComplexF64(k0)
     N = n_basis(basis)
     B = Matrix{ComplexF64}(undef, N, L)
     for j in 1:L

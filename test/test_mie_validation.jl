@@ -80,7 +80,9 @@ end
             Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
                                           eps_bg = eps_bg, duffy_rule = dr,
                                           symmetrize = true)
-            k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+            # k0 is already the background-medium wavenumber
+            # (= 2π·m_m/wl_0), so k_bg == k0.
+            k_bg = ComplexF64(k0)
             b = project_plane_wave(basis; k_hat = k_hat, E0 = E0, k_bg = k_bg)
             D = Z \ b
             residual = norm(Z * D - b) / norm(b)

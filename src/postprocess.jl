@@ -316,18 +316,27 @@ struct CASOrientation
     phi_sca_bk::Vec3
 end
 
-# Inverse of intrinsic ZYZ rotation R_lp = Rz(α) Ry(β) Rz(γ).
-# Returns the matrix that maps lab-frame vectors to particle-frame vectors.
+# Apply the lab→particle coordinate transform for intrinsic ZYZ Euler
+# angles (α, β, γ), matching `scipy.spatial.transform.Rotation` and
+# block-DDA_Py. Convention follows §2.2 of docs/theory_note.tex:
+#
+#   R(α,β,γ) = Rz(α) Ry(β) Rz(γ)
+#
+# is the active rotation mapping particle-frame coordinates to lab-frame
+# coordinates (equivalently, the fixed-frame composition obtained by
+# applying Rz(γ), Ry(β), Rz(α) in that order about lab axes). The
+# lab→particle transform is therefore R(α,β,γ)^T, and this routine
+# computes R(α,β,γ)^T · v for a lab-frame vector v.
 @inline function _zyz_inverse_apply(α::Real, β::Real, γ::Real, v::Vec3)
     sα, cα = sincos(α)
     sβ, cβ = sincos(β)
     sγ, cγ = sincos(γ)
-    # R_lp (intrinsic ZYZ) =
+    # R(α,β,γ) (particle→lab active rotation) =
     #   [ cα cβ cγ - sα sγ,  -cα cβ sγ - sα cγ,  cα sβ ]
     #   [ sα cβ cγ + cα sγ,  -sα cβ sγ + cα cγ,  sα sβ ]
     #   [          -sβ cγ,             sβ sγ,       cβ ]
-    # R_pl = R_lp^T (rows of R_lp become columns of R_pl).
-    # particle = R_pl · lab
+    # v_particle = R(α,β,γ)^T · v_lab
+    # (rows of R become columns below).
     x = (cα*cβ*cγ - sα*sγ)*v[1] + (sα*cβ*cγ + cα*sγ)*v[2] + (-sβ*cγ)*v[3]
     y = (-cα*cβ*sγ - sα*cγ)*v[1] + (-sα*cβ*sγ + cα*cγ)*v[2] + (sβ*sγ)*v[3]
     z = (cα*sβ)*v[1] + (sα*sβ)*v[2] + (cβ)*v[3]
@@ -455,36 +464,117 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
                        S_bk_theta, S_bk_phi, S_bk)
 end
 
+# Resolve the two equivalent physical-input forms accepted by
+# `solve_cas_v2_orientations` into the `(k0, eps_p, eps_bg)` triple
+# consumed by `assemble_impedance_matrix`, `build_aim_operator`, and
+# `compute_cas_observables`.
+#
+# Form A (block-DDA_Py compatible): supply `(wl_0, m_m, m_p)`. The
+# resolver sets
+#     k0     = 2π · m_m / wl_0       (wavenumber in background medium)
+#     eps_p  = m_p^2                 (absolute particle permittivity)
+#     eps_bg = m_m^2                 (absolute background permittivity)
+#
+# Form B (raw VIEM): supply `(k0, eps_p[, eps_bg])`. `k0` must already
+# be the background-medium wavenumber. `eps_bg` defaults to `1`.
+function _resolve_physical_inputs(wl_0, m_m, m_p, k0, eps_p, eps_bg)
+    have_phys = (wl_0 !== nothing) || (m_m !== nothing) || (m_p !== nothing)
+    have_raw  = (k0  !== nothing) || (eps_p !== nothing)
+    if have_phys && have_raw
+        throw(ArgumentError(
+            "solve_cas_v2_orientations: pass either (wl_0, m_m, m_p) OR " *
+            "(k0, eps_p, eps_bg), not both."))
+    elseif have_phys
+        (wl_0 !== nothing && m_m !== nothing && m_p !== nothing) ||
+            throw(ArgumentError(
+                "solve_cas_v2_orientations: wl_0, m_m, m_p must all be " *
+                "provided together."))
+        k0_out     = ComplexF64(2π * m_m / wl_0)
+        eps_p_out  = ComplexF64(m_p)^2
+        eps_bg_out = ComplexF64(m_m)^2
+        return k0_out, eps_p_out, eps_bg_out
+    elseif have_raw
+        (k0 !== nothing && eps_p !== nothing) ||
+            throw(ArgumentError(
+                "solve_cas_v2_orientations: both k0 and eps_p must be " *
+                "provided in the raw form."))
+        k0_out     = ComplexF64(k0)
+        eps_p_out  = ComplexF64(eps_p)
+        eps_bg_out = ComplexF64(eps_bg === nothing ? 1 : eps_bg)
+        return k0_out, eps_p_out, eps_bg_out
+    else
+        throw(ArgumentError(
+            "solve_cas_v2_orientations: must supply either " *
+            "(wl_0, m_m, m_p) or (k0, eps_p[, eps_bg])."))
+    end
+end
+
 """
     solve_cas_v2_orientations(basis::AbstractDivBasis,
                               euler_angles::AbstractVector;
-                              k0::Number,
-                              eps_p::Number,
-                              eps_bg::Number = 1,
+                              # --- block-DDA_Py-compatible physical inputs ---
+                              wl_0::Union{Real,Nothing}   = nothing,
+                              m_m::Union{Real,Nothing}    = nothing,
+                              m_p::Union{Number,Nothing}  = nothing,
+                              # --- or the raw VIEM inputs ---
+                              k0::Union{Number,Nothing}    = nothing,
+                              eps_p::Union{Number,Nothing} = nothing,
+                              eps_bg::Union{Number,Nothing} = nothing,
                               duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                               outer_rule::TetQuadRule = TET_QUAD_5PT,
                               ff_rule::TetQuadRule = TET_QUAD_5PT,
-                              symmetrize::Bool = true)
+                              symmetrize::Bool = true,
+                              method::Symbol = :dense,
+                              pitch::Union{Float64,Nothing} = nothing,
+                              padding::Integer = 3,
+                              tol::Float64 = 1e-6,
+                              maxiter::Integer = 200,
+                              verbose::Bool = false)
         -> Vector{CASv2Result}
 
 Solve the VIEM system for many particle orientations and return the
-CAS-v2 forward/backward observables for each. The impedance matrix `Z`
-is assembled and LU-factorized once; each orientation reuses the same
-factorization for the back-substitution.
+CAS-v2 forward/backward observables for each.
 
-`euler_angles` is an iterable of `(alpha, beta, gamma)` tuples (or any
-indexable container with three elements), in the ZYZ convention used by
-block-DDA_Py.
+# Physical inputs — two equivalent forms
 
-Use this for moderate-size problems where dense `Z` fits in memory
-(N ≲ a few thousand DOFs). For larger problems, see the AIM-iterative
-multi-orientation interface (TODO).
+Either pass the **block-DDA_Py-compatible form**
+- `wl_0`  — vacuum wavelength (same length unit as the mesh)
+- `m_m`   — background medium refractive index (real)
+- `m_p`   — particle complex refractive index (absorbing: `Im(m_p) > 0`)
+
+and the function will internally set
+`k0 = 2π·m_m/wl_0`, `eps_p = m_p^2`, `eps_bg = m_m^2` — exactly matching
+the convention used by block-DDA_Py so results are directly comparable.
+
+Or pass the **raw VIEM form**
+- `k0`    — wavenumber **in the background medium** (`2π·m_m/λ₀`, NOT
+            the vacuum wavenumber)
+- `eps_p` — absolute particle permittivity
+- `eps_bg` — absolute background permittivity (default `1`)
+
+Mixing the two forms, or supplying neither complete set, raises an
+`ArgumentError`.
+
+# Solver selection
+
+`method` selects how the multi-RHS system is solved:
+- `:dense`        — assemble `Z` and LU-factorize once, then reuse
+                    across orientations. Use for `N ≲ few×10³`.
+- `:aim_bicgstab` — AIM FFT-MVP + Block BiCGSTAB (needs `pitch`).
+- `:aim_gmres`    — AIM FFT-MVP + Block GMRES (needs `pitch`).
+
+`euler_angles` is an iterable of `(alpha, beta, gamma)` tuples in the
+intrinsic ZYZ convention, matching `scipy.spatial.transform.Rotation`
+and block-DDA_Py.
 """
 function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    euler_angles::AbstractVector;
-                                   k0::Number,
-                                   eps_p::Number,
-                                   eps_bg::Number = 1,
+                                   wl_0::Union{Real,Nothing}   = nothing,
+                                   m_m::Union{Real,Nothing}    = nothing,
+                                   m_p::Union{Number,Nothing}  = nothing,
+                                   k0::Union{Number,Nothing}    = nothing,
+                                   eps_p::Union{Number,Nothing} = nothing,
+                                   eps_bg::Union{Number,Nothing} = nothing,
                                    duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                                    outer_rule::TetQuadRule = TET_QUAD_5PT,
                                    ff_rule::TetQuadRule = TET_QUAD_5PT,
@@ -495,15 +585,19 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    tol::Float64 = 1e-6,
                                    maxiter::Integer = 200,
                                    verbose::Bool = false)
-    k_bg = ComplexF64(k0) * sqrt(ComplexF64(eps_bg))
+    k0_c, eps_p_c, eps_bg_c = _resolve_physical_inputs(wl_0, m_m, m_p,
+                                                       k0, eps_p, eps_bg)
+    # `k0_c` is the wavenumber in the background medium, matching
+    # block-DDA_Py's `self.k = 2π·m_m/wl_0`.
+    k_bg = k0_c
     orientations = [cas_orientation(ea[1], ea[2], ea[3]) for ea in euler_angles]
     L = length(orientations)
 
     local D_block::Matrix{ComplexF64}
 
     if method === :dense
-        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
-                                      eps_bg = eps_bg,
+        Z = assemble_impedance_matrix(basis; k0 = k0_c, eps_p = eps_p_c,
+                                      eps_bg = eps_bg_c,
                                       outer_rule = outer_rule,
                                       duffy_rule = duffy_rule,
                                       symmetrize = symmetrize)
@@ -525,7 +619,8 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                          E0 = ori.e0_inc, k_bg = k_bg,
                                          rule = outer_rule)
         end
-        op = build_aim_operator(basis; k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
+        op = build_aim_operator(basis; k0 = k0_c, eps_p = eps_p_c,
+                                eps_bg = eps_bg_c,
                                 pitch = pitch, padding = padding,
                                 outer_rule = outer_rule,
                                 duffy_rule = duffy_rule)
@@ -545,8 +640,8 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
     for i in 1:L
         results[i] = compute_cas_observables(basis, @view D_block[:, i];
                                              orientation = orientations[i],
-                                             k0 = k0, eps_p = eps_p,
-                                             eps_bg = eps_bg, rule = ff_rule)
+                                             k0 = k0_c, eps_p = eps_p_c,
+                                             eps_bg = eps_bg_c, rule = ff_rule)
     end
     return results
 end
