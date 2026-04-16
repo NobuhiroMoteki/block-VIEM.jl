@@ -14,7 +14,7 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-04-13 (corresponds to block-VIEM.jl v0.2.0)}
+\date{Last updated: 2026-04-16 (corresponds to block-VIEM.jl v0.3.0)}
 
 \begin{document}
 \maketitle
@@ -1398,6 +1398,176 @@ $\sim 5\times 10^{-10}$, confirming that the block iteration preserves
 orientation symmetry to the solver tolerance.
 
 %======================================================================
+\section{Gaussian Random Ellipsoid (GRE) Shape Model}
+\label{sec:gre}
+
+Block-DDA\_Py parameterises particle geometry via the Gaussian Random
+Ellipsoid (GRE) shape model~\cite{MuinonenPieniluoma2011}.
+\texttt{block-VIEM.jl} v0.3.0 provides a Julia-native implementation
+(\texttt{src/gre\_mesh.jl}) that accepts the same four-parameter tuple
+$(r_{v,\text{base}},\; b\!/\!c,\; a\!/\!b,\; \beta)$
+and produces a tetrahedral mesh suitable for the VIEM solver.
+
+\subsection{Base ellipsoid}
+
+The semi-axes of the undeformed ellipsoid are determined by the
+volume-preservation condition
+$V = \frac{4\pi}{3}abc = \frac{4\pi}{3}r_{v,\text{base}}^{3}$:
+\begin{equation}\label{eq:gre-semiaxes}
+  c = \Bigl(\frac{r_{v,\text{base}}^{3}}{(a/b)(b/c)^{2}}\Bigr)^{1/3},
+  \qquad
+  b = c\,(b/c),
+  \qquad
+  a = b\,(a/b).
+\end{equation}
+The convention is $a \ge b \ge c$, with $c$ along the $z$-axis.
+
+\subsection{Gaussian random deformation field}
+
+A zero-mean Gaussian random field $s(\theta,\phi)$ is sampled on the
+ellipsoid surface with covariance
+\begin{equation}\label{eq:gre-cov}
+  C(\bm{r}_i, \bm{r}_j)
+  = \beta^{2}\,\exp\!\Bigl(
+      -\frac{\lVert\bm{r}_i - \bm{r}_j\rVert^{2}}{2\,\ell_c^{2}}
+    \Bigr),
+  \qquad
+  \ell_c = 0.3\,c,
+\end{equation}
+where $\{\bm{r}_i\}$ are the ellipsoid-surface positions on a coarse
+$(\theta,\phi)$ grid ($N_\theta=25$, $N_\phi=100$).  Sampling is
+performed via Cholesky decomposition
+$\mathbf{C} = \mathbf{L}\mathbf{L}^{\!\top}$,
+$\bm{s} = \mathbf{L}\bm{z}$, $\bm{z}\sim\mathcal{N}(0,\mathbf{I})$.
+The coarse-grid field is bilinearly interpolated onto a finer grid
+(interpolation factor
+$\max\!\bigl(1,\,\lfloor 4\,(bc\_ratio \cdot ab\_ratio)^{1/3}\rceil\bigr)$).
+
+Each surface point is then displaced along the outward ellipsoid normal
+$\hat{\bm{n}}$:
+\begin{equation}\label{eq:gre-deform}
+  \bm{r}_{\text{GRE}}
+  = \bm{r}_0
+    + h_0\bigl(e^{s(\theta,\phi)} - \tfrac{1}{2}\beta^{2} - 1\bigr)\,
+      \hat{\bm{n}},
+  \qquad
+  h_0 = \frac{c^{2}}{a},
+\end{equation}
+reproducing the \texttt{compute\_r\_points\_on\_GRE} definition in
+block-DDA\_Py exactly.
+
+\subsection{Mesh generation strategy}
+
+\paragraph{$\beta=0$ (smooth ellipsoid).}
+The Gmsh OpenCASCADE kernel constructs the ellipsoid analytically
+(\texttt{addSphere} + \texttt{dilate}), yielding a high-quality
+mesh without intermediate geometry conversion.
+
+\paragraph{$\beta>0$ (deformed GRE).}
+\begin{enumerate}
+\item Construct the base ellipsoid via OCC and generate the full 3-D
+  tetrahedral mesh at the target characteristic length~$\ell_c$.
+\item Deform every mesh node (surface \emph{and} interior) according to
+  the sampled field~\eqref{eq:gre-deform}.  For an interior node at
+  position $\bm{r}$ with normalised ellipsoidal radius
+  $\tilde{r} = \sqrt{(x/a)^{2}+(y/b)^{2}+(z/c)^{2}} \in [0,1]$,
+  the displacement is scaled linearly:
+  \begin{equation}\label{eq:gre-interior-deform}
+    \bm{r}_{\text{new}}
+    = \bm{r}
+      + \tilde{r}\,\delta(\theta,\phi)\,\hat{\bm{n}},
+  \end{equation}
+  where $\delta = h_0(e^{s}-\frac{1}{2}\beta^{2}-1)$.
+  This ensures zero displacement at the centre and full displacement at
+  the surface, preserving element quality for moderate~$\beta$.
+\end{enumerate}
+This two-step approach avoids the fragile STL $\to$
+\texttt{classifySurfaces} $\to$ \texttt{createGeometry} pipeline in
+Gmsh, which fails for closed surfaces without boundary edges.
+
+\subsection{Adaptive mesh size}
+\label{sec:gre-lc}
+
+The characteristic edge length $\ell_c$ is set automatically as the
+minimum of three constraints:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Constraint & Formula & Condition \\
+\midrule
+Wavelength & $\lambda_0/(\max\lvert m_p\rvert \cdot N_{pw})$ &
+  $\lambda_0$ and $m_p$ supplied \\
+Geometry & $c/3$ & always \\
+Correlation length & $\ell_c^{\text{corr}}/3 = 0.1\,c$ &
+  $\beta>0$ only \\
+\bottomrule
+\end{tabular}
+\end{center}
+Block-DDA\_Py uses $N_{pw} = \text{dpl} = 17$ dipoles per wavelength
+inside the particle.  The higher per-DOF accuracy of SWG allows
+$N_{pw}\approx 10$ for VIEM, corresponding to comparable overall accuracy
+at fewer degrees of freedom.
+
+\subsection{Volume-equivalent radius}
+
+After meshing, the volume-equivalent radius is computed directly from
+the tetrahedral mesh:
+\begin{equation}\label{eq:gre-rve}
+  V_{\text{mesh}} = \sum_{i} V_i,
+  \qquad
+  r_{ve} = \Bigl(\frac{3\,V_{\text{mesh}}}{4\pi}\Bigr)^{\!1/3}.
+\end{equation}
+Unlike the DDA approach (which rescales the lattice spacing to enforce
+$V = \frac{4\pi}{3}r_{v,\text{base}}^{3}$ exactly), the VIEM mesh
+volume is geometrically accurate to the mesh resolution and no
+post-hoc rescaling is needed.
+
+\subsection{Cross-validation vs block-DDA\_Py ($\beta > 0$)}
+\label{sec:gre-crossval}
+
+To verify that the GRE mesh generation and VIEM solver produce correct
+observables for deformed particle shapes, we cross-validate against
+block-DDA\_Py on three GRE configurations with $\beta > 0$.  The
+\emph{same} Gaussian random deformation field $s(\theta,\phi)$
+(generated and saved by the Python script
+\texttt{benchmarks/cas\_v2/gre\_comparison/run\_dda\_gre.py}) is loaded
+by the Julia script
+(\texttt{run\_viem\_gre.jl}) and used to deform the VIEM mesh via
+\texttt{gre\_mesh\_with\_field}, ensuring that both codes solve the
+identical shape.
+
+Common parameters:
+$\lambda_0 = \SI{0.638}{\micro\meter}$,
+$n_m = 1.0$,
+$m_p = 1.5 + 0.01\,i$,
+$r_{v,\text{base}} = \SI{0.20}{\micro\meter}$.
+The DDA uses $\text{dpl} = 17$ ($N_{\text{DDA}} \approx 2300$ dipoles);
+the VIEM uses $\ell_c = \SI{0.035}{\micro\meter}$
+($N_{\text{VIEM}} \approx 8600$ half-SWG DoFs).
+Two tilt angles $\beta_{\text{ori}} = \pi/4$ and $\pi/2$ are tested.
+
+\begin{center}
+\begin{tabular}{@{}cccccc@{}}
+\toprule
+Case & $b/c$ & $a/b$ & $\beta$
+     & $|\Delta S_\theta|/|S_\theta|$
+     & $|\Delta S_\phi|/|S_\phi|$ \\
+\midrule
+A & 2.0 & 1.0 & 0.10 & 0.5--0.7\,\% & 0.1--0.3\,\% \\
+B & 3.0 & 1.0 & 0.15 & 2.0--2.6\,\% & 1.7--1.8\,\% \\
+C & 1.5 & 1.5 & 0.20 & 1.2--1.6\,\% & 1.6--1.8\,\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+The relative errors in the complex forward amplitudes $S_\theta$ and
+$S_\phi$ range from $0.1\%$ to $2.6\%$, consistent with the
+discretisation-error level observed in the smooth-spheroid benchmark
+(Sec.~\ref{sec:gre}).  The errors are larger for higher $\beta$ and
+$b/c$, reflecting both the coarser per-feature resolution of the DDA
+lattice on thin or strongly deformed shapes and the inherent
+discretisation mismatch between cubic-lattice DDA and tetrahedral VIEM.
+
+%======================================================================
 \begin{thebibliography}{99}
 
 \bibitem{SWG1984}
@@ -1473,6 +1643,14 @@ orientation symmetry to the solver tolerance.
   ``Optical constants of the noble metals,''
   \textit{Phys.\ Rev.\ B} \textbf{6}(12), 4370--4379 (1972).
   \url{https://doi.org/10.1103/PhysRevB.6.4370}.
+
+\bibitem{MuinonenPieniluoma2011}
+  K.~Muinonen and T.~Pieniluoma,
+  ``Light scattering by Gaussian random ellipsoid particles: First
+  results with discrete-dipole approximation,''
+  \textit{J.\ Quant.\ Spectrosc.\ Radiat.\ Transfer} \textbf{112}(11),
+  1747--1752 (2011).
+  \url{https://doi.org/10.1016/j.jqsrt.2011.02.001}.
 
 \end{thebibliography}
 

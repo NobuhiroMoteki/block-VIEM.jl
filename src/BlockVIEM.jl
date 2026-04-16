@@ -19,6 +19,7 @@ module BlockVIEM
 include("mesh.jl")
 include("swg.jl")
 include("gmsh_io.jl")
+include("gre_mesh.jl")
 
 # RT1 reference element and physical basis
 include("reference_rt1.jl")
@@ -45,6 +46,7 @@ export tet_volume, tet_signed_volume, tet_centroid, triangle_area
 export AbstractDivBasis, SWGBasis, build_swg_basis, n_basis, evaluate, divergence, support_tets
 export RT1Basis, build_rt1_basis, build_tet_to_dofs
 export read_msh
+export GREParams, gre_semi_axes, adaptive_lc, gre_surface, gre_mesh, gre_mesh_with_field
 
 # Public API (Phase 2)
 export TetQuadRule, TET_QUAD_1PT, TET_QUAD_4PT, TET_QUAD_5PT, TET_QUAD_64PT, TET_QUAD_125PT

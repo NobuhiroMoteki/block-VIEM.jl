@@ -13,11 +13,13 @@ products.
 
 ## Status
 
-**v0.2.0** — 1763 tests pass. All numerical kernels are in place.
+**v0.3.0** — 14 334 tests pass. All numerical kernels + GRE shape model
+are in place.
 
 | Phase | Module                                          | Status |
 |-------|-------------------------------------------------|--------|
 | 1     | Mesh & SWG / half-SWG / RT1 bases               | done   |
+| 1+    | GRE shape model → tetrahedral mesh               | done   |
 | 2     | Duffy-transform singular integration            | done   |
 | 3     | AIM (FFT-MVP) with precorrection                | done   |
 | 4     | Direct and iterative (Krylov) solvers            | done   |
@@ -50,11 +52,22 @@ products.
 - **Spheroid symmetry** (`benchmarks/cas_v2/spheroid_ar3.jl`): the
   analytical α-expansion `S_θ(α) = A + B·exp(+2jα)` holds at machine
   precision (~5×10⁻¹⁵) on an oblate AR = 3 mesh.
-- **Cross-validation vs block-DDA_Py**
+- **Cross-validation vs block-DDA_Py (spheroid)**
   (`benchmarks/cas_v2/dda_comparison/`): oblate AR = 3 spheroid
   (D_ve = 0.40 μm, m_p = 1.5, λ₀ = 0.638 μm), VIEM and DDA agree to
   ~2 % on the complex polarimetric forward amplitudes at two tilt
   angles (β = π/4, π/2).
+- **GRE cross-validation vs block-DDA_Py (β > 0)**
+  (`benchmarks/cas_v2/gre_comparison/`): three GRE shapes with surface
+  deformation (β = 0.10–0.20, bc_ratio = 1.5–3.0, ab_ratio = 1.0–1.5),
+  m_p = 1.5 + 0.01i, λ₀ = 0.638 μm, at two tilt angles. The same
+  Gaussian random field is shared between DDA and VIEM. Agreement:
+
+  | Case | b/c | a/b | β    | |ΔS_θ| | |ΔS_φ| |
+  |------|-----|-----|------|--------|--------|
+  | A    | 2.0 | 1.0 | 0.10 | 0.5–0.7 % | 0.1–0.3 % |
+  | B    | 3.0 | 1.0 | 0.15 | 2.0–2.6 % | 1.7–1.8 % |
+  | C    | 1.5 | 1.5 | 0.20 | 1.2–1.6 % | 1.6–1.8 % |
 
 ## Quick start
 
@@ -108,6 +121,46 @@ Both are also exposed directly as `block_bicgstab(A, B; tol, maxiter)`
 and `block_gmres(A, B; tol, maxiter)` for any linear operator `A`
 supporting `A * X::AbstractMatrix`.
 
+### Gaussian Random Ellipsoid (GRE) shapes
+
+BlockVIEM.jl can generate tetrahedral meshes for the same Gaussian
+Random Ellipsoid particle shapes used by block-DDA_Py, directly from the
+`(r_v_base, bc_ratio, ab_ratio, beta)` parameter set:
+
+```julia
+using BlockVIEM, Random
+
+p = GREParams(
+    0.2,    # r_v_base [μm] — volume-equivalent radius of base ellipsoid
+    3.0,    # bc_ratio      — b/c semi-axis ratio  (range [1, 7])
+    1.5,    # ab_ratio      — a/b semi-axis ratio  (range [1, 2])
+    0.15,   # beta          — Gaussian deformation σ (range [0, 0.3])
+)
+
+rng = MersenneTwister(42)
+
+# Mesh size is chosen automatically from wavelength + geometry:
+mesh, r_ve = gre_mesh(p, rng;
+    wl_0    = 0.638,   # vacuum wavelength [μm]
+    m_p_max = 1.5,     # max |m_p| (for resolution estimate)
+    N_pw    = 10,       # elements per wavelength inside particle
+)
+
+# Or set lc explicitly:
+mesh, r_ve = gre_mesh(p, rng; lc = 0.04)
+
+basis = build_swg_basis(mesh; include_boundary_faces = true)
+# ... proceed with solve_cas_v2_orientations as above
+```
+
+For `beta = 0` (smooth ellipsoid) the mesh is generated via the Gmsh
+OpenCASCADE kernel.  For `beta > 0`, a Gaussian random deformation
+field is sampled on the ellipsoid surface (Muinonen & Pieniluoma 2011,
+JQSRT) and all mesh nodes are deformed radially, preserving mesh
+quality.  The adaptive mesh size `adaptive_lc(p; ...)` takes the minimum
+of a wavelength constraint, a geometry constraint (`c/3`), and the
+surface-deformation correlation length (`0.1c`).
+
 ## Conventions
 
 - **Time convention:** physics, `exp(−iωt)`, matching block-DDA_Py and
@@ -129,7 +182,8 @@ supporting `A * X::AbstractMatrix`.
 
 - `docs/theory_note.tex` — full formulation reference: EFVIE-D, SWG /
   half-SWG, Duffy transform, AIM, block-Krylov, CAS-v2 observables,
-  Mie validation (dielectric + plasmonic Au), spheroid benchmarks
+  Mie validation (dielectric + plasmonic Au), spheroid benchmarks,
+  GRE shape model
 - `docs/io_spec.md` — block-DDA_Py compatible I/O specification
 - `.claude/reference/` — primary literature (SWG 1984, Volakis-Sertel,
   Sheng-Song, Mousavi-Sukumar 2010)

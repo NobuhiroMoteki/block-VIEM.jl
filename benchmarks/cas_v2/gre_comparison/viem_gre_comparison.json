@@ -1,0 +1,32 @@
+[
+  {
+    "case": "A", "bc": 2.0, "ab": 1.0, "beta": 0.10,
+    "beta_ori": 0.7854, "n_dda": 2325, "n_viem": 8728,
+    "err_Sth": 0.007178, "err_Sph": 0.001334
+  },
+  {
+    "case": "A", "bc": 2.0, "ab": 1.0, "beta": 0.10,
+    "beta_ori": 1.5708, "n_dda": 2325, "n_viem": 8728,
+    "err_Sth": 0.005035, "err_Sph": 0.003205
+  },
+  {
+    "case": "B", "bc": 3.0, "ab": 1.0, "beta": 0.15,
+    "beta_ori": 0.7854, "n_dda": 2314, "n_viem": 8746,
+    "err_Sth": 0.020065, "err_Sph": 0.016745
+  },
+  {
+    "case": "B", "bc": 3.0, "ab": 1.0, "beta": 0.15,
+    "beta_ori": 1.5708, "n_dda": 2314, "n_viem": 8746,
+    "err_Sth": 0.026096, "err_Sph": 0.018083
+  },
+  {
+    "case": "C", "bc": 1.5, "ab": 1.5, "beta": 0.20,
+    "beta_ori": 0.7854, "n_dda": 2345, "n_viem": 8561,
+    "err_Sth": 0.011452, "err_Sph": 0.016446
+  },
+  {
+    "case": "C", "bc": 1.5, "ab": 1.5, "beta": 0.20,
+    "beta_ori": 1.5708, "n_dda": 2345, "n_viem": 8561,
+    "err_Sth": 0.016375, "err_Sph": 0.018018
+  }
+]
