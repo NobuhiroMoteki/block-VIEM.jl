@@ -13,8 +13,7 @@ products.
 
 ## Status
 
-**v0.3.1** — 14 334 tests pass. All numerical kernels + GRE shape model
-are in place. HDF5 sweep I/O scripts added.
+**v0.4.0** — 14 359 tests pass. Anisotropic permittivity supported.
 
 | Phase | Module                                          | Status |
 |-------|-------------------------------------------------|--------|
@@ -29,6 +28,7 @@ are in place. HDF5 sweep I/O scripts added.
 | 5.4   | HDF5 spheroid-sweep output (block-DDA_Py schema) | done   |
 | 5.5   | AIM + Block-Krylov multi-orientation solve        | done   |
 | 5.6   | HDF5 sweep I/O (block-DDA_Py schema)              | done   |
+| 6     | Anisotropic ε_p = diag(ε_x, ε_y, ε_z)           | done   |
 
 ### Validation
 
@@ -70,6 +70,17 @@ are in place. HDF5 sweep I/O scripts added.
   | B    | 3.0 | 1.0 | 0.15 | 2.0–2.6 %  | 1.7–1.8 %  |
   | C    | 1.5 | 1.5 | 0.20 | 1.2–1.6 %  | 1.6–1.8 %  |
 
+- **Anisotropic ε_p cross-validation vs block-DDA_Py**
+  (`benchmarks/cas_v2/aniso_comparison/`): sphere (r_ve = 0.20 μm,
+  λ₀ = 0.638 μm) with diagonal-tensor refractive index. The same
+  `m_p_xyz = [m_x, m_y, m_z]` is passed to both DDA and VIEM:
+
+  | Case   | m_p               | ΔS_θ rel.  | ΔS_φ rel.  |
+  |--------|-------------------|------------|------------|
+  | iso    | [1.5, 1.5, 1.5]  | 1.3–2.4 %  | 2.4 %      |
+  | mild   | [1.55, 1.5, 1.45] | 1.2–3.5 %  | 2.3–2.6 %  |
+  | strong | [1.6, 1.5, 1.4]  | 0.7–5.0 %  | 2.3–2.9 %  |
+
 ## Quick start
 
 ```julia
@@ -93,9 +104,22 @@ results = solve_cas_v2_orientations(
 # results[i].S_fw, results[i].S_bk, results[i].S_fw_theta, ...
 ```
 
+For **anisotropic** particles, pass `m_p` as a 3-element vector
+`[m_x, m_y, m_z]` (principal-axis refractive indices in the particle
+frame), matching block-DDA_Py's `m_p_xyz`:
+
+```julia
+results = solve_cas_v2_orientations(
+    basis, euler_list;
+    wl_0 = 0.638, m_m = 1.0,
+    m_p  = [1.6 + 0im, 1.5 + 0im, 1.4 + 0im],   # birefringent
+)
+```
+
 Alternatively, pass the raw VIEM form `(k0, eps_p, eps_bg)` where
 `k0` is the background-medium wavenumber (`2π·m_m/λ₀`, **not** the
 vacuum wavenumber) and `eps_p`, `eps_bg` are absolute permittivities.
+`eps_p` can be a scalar or a 3-vector `[ε_x, ε_y, ε_z]`.
 See [`solve_cas_v2_orientations`](src/postprocess.jl) docstring.
 
 ### AIM + Block Krylov (large problems)

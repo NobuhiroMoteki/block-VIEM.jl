@@ -29,7 +29,7 @@ end
 """
     solve_direct(basis::AbstractDivBasis;
                  k0::Number,
-                 eps_p::Number,
+                 eps_p,
                  eps_bg::Number = 1,
                  k_hat::Vec3,
                  E0::SVector{3,ComplexF64}) -> SolveResult
@@ -46,7 +46,7 @@ permittivities (so for an absorbing particle in air, pass
 """
 function solve_direct(basis::AbstractDivBasis;
                       k0::Number,
-                      eps_p::Number,
+                      eps_p,
                       eps_bg::Number = 1,
                       k_hat::Vec3,
                       E0::SVector{3,ComplexF64})
@@ -65,7 +65,7 @@ end
 """
     solve_iterative(basis::AbstractDivBasis;
                     k0::Number,
-                    eps_p::Number,
+                    eps_p,
                     eps_bg::Number = 1,
                     k_hat::Vec3,
                     E0::SVector{3,ComplexF64},
@@ -84,7 +84,7 @@ absolute permittivities.
 """
 function solve_iterative(basis::AbstractDivBasis;
                          k0::Number,
-                         eps_p::Number,
+                         eps_p,
                          eps_bg::Number = 1,
                          k_hat::Vec3,
                          E0::SVector{3,ComplexF64},
@@ -167,7 +167,7 @@ absolute permittivities.
 """
 function solve_iterative_block(basis::AbstractDivBasis;
                                k0::Number,
-                               eps_p::Number,
+                               eps_p,
                                eps_bg::Number = 1,
                                k_hat_list::AbstractVector,
                                E0_list::AbstractVector,

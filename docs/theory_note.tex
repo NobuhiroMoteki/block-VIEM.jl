@@ -14,7 +14,7 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-04-16 (corresponds to block-VIEM.jl v0.3.1)}
+\date{Last updated: 2026-04-17 (corresponds to block-VIEM.jl v0.4.0)}
 
 \begin{document}
 \maketitle
@@ -1566,6 +1566,91 @@ discretisation-error level observed in the smooth-spheroid benchmark
 $b/c$, reflecting both the coarser per-feature resolution of the DDA
 lattice on thin or strongly deformed shapes and the inherent
 discretisation mismatch between cubic-lattice DDA and tetrahedral VIEM.
+
+%======================================================================
+\section{Anisotropic Permittivity}
+\label{sec:anisotropic}
+
+Version 0.4.0 extends the EFVIE-D formulation to diagonal-tensor
+permittivity
+$\bar{\epsilon}_p = \operatorname{diag}(\epsilon_x, \epsilon_y, \epsilon_z)$
+in the particle frame, matching the \texttt{m\_p\_xyz} parameter of
+block-DDA\_Py.
+
+\subsection{Modified weak form}
+
+Defining the component-wise contrast
+$\kappa_\alpha = (\epsilon_\alpha - \epsilon_{\text{bg}})/\epsilon_\alpha$
+and its average
+$\bar{\kappa} = (\kappa_x + \kappa_y + \kappa_z)/3$,
+the Galerkin impedance element becomes
+\begin{equation}\label{eq:aniso-zmn}
+  Z_{mn}
+  = \sum_\alpha \frac{1}{\epsilon_\alpha}
+    \int (f_m)_\alpha\,(f_n)_\alpha\,dV
+  - \frac{1}{\epsilon_{\text{bg}}}
+    \iint \!\Bigl[
+      k_0^2 \sum_\alpha \kappa_\alpha\,(f_m)_\alpha\,(f_n)_\alpha
+      \;-\; \bar{\kappa}\,(\nabla\!\cdot\!\bm{f}_m)\,
+             (\nabla'\!\cdot\!\bm{f}_n)
+    \Bigr] G\,dV'\,dV.
+\end{equation}
+The simplification $\nabla'\!\cdot(\bar{\kappa}\cdot\bm{f}_n)
+= \bar{\kappa}\,\nabla'\!\cdot\bm{f}_n$ exploits the SWG structure
+$\partial(f_n)_\alpha/\partial r_\alpha = a_n/(3V)$ (identical for all
+$\alpha$).
+
+\subsection{Implementation}
+
+\begin{itemize}
+\item \textbf{Mass term:} component-weighted inner product
+  $\sum_\alpha (1/\epsilon_\alpha)\int (f_m)_\alpha(f_n)_\alpha\,dV$.
+\item \textbf{Radiation kernel (bulk):} $k_0^2$ term uses per-component
+  $\kappa_\alpha$; $\nabla\nabla\!\cdot$ term uses $\bar{\kappa}$.
+\item \textbf{Half-SWG surface terms} ($K^B$, $K^C$, $K^D$): scaled by
+  $\bar{\kappa}$ (exact for isotropic; $O(|\Delta\kappa|/|\kappa|)$
+  approximation for anisotropic).
+\item \textbf{AIM FFT-MVP:} per-channel $\kappa_\alpha$ weighting on
+  the $x,y,z$ vector channels; $\bar{\kappa}$ on the divergence channel.
+\item \textbf{Far-field amplitude:}
+  $\bm{F} = (k_0^2/\epsilon_{\text{bg}})
+  (\mathbf{I} - \hat{\bm{r}}\hat{\bm{r}})\cdot(\bar{\kappa}\cdot\bm{P})$.
+\item \textbf{Absorption:}
+  $C_{\text{abs}} = \frac{k_0}{\epsilon_{\text{bg}}}
+  \sum_\alpha \frac{\operatorname{Im}(\epsilon_\alpha)}{|\epsilon_\alpha|^2}
+  \int |D_\alpha|^2\,dV$.
+\end{itemize}
+When $\epsilon_x = \epsilon_y = \epsilon_z$ all expressions reduce to the
+isotropic formulation of Sec.~\ref{sec:viem-formulation} and earlier
+sections.
+
+\subsection{Cross-validation vs block-DDA\_Py}
+\label{sec:aniso-crossval}
+
+A sphere ($r_{ve} = \SI{0.20}{\micro\meter}$,
+$\lambda_0 = \SI{0.638}{\micro\meter}$, $n_m = 1$,
+$\ell_c = \SI{0.035}{\micro\meter}$, $N_{\text{VIEM}} \approx 8000$
+half-SWG DoFs) was solved with three refractive-index configurations at
+tilt angles $\beta_{\text{ori}} = \pi/4$ and $\pi/2$:
+
+\begin{center}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Case & $m_p = [m_x,\, m_y,\, m_z]$
+     & $|\Delta S_\theta|/|S_\theta|$
+     & $|\Delta S_\phi|/|S_\phi|$ \\
+\midrule
+iso    & $[1.5,\;1.5,\;1.5]$   & 1.3--2.4\,\% & 2.4\,\%      \\
+mild   & $[1.55,\;1.5,\;1.45]$ & 1.2--3.5\,\% & 2.3--2.6\,\% \\
+strong & $[1.6,\;1.5,\;1.4]$   & 0.7--5.0\,\% & 2.3--2.9\,\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+The isotropic baseline (1.3--2.4\,\%) matches the existing spheroid
+benchmark accuracy.  Errors grow moderately with anisotropy strength,
+reaching ${\sim}\,5\%$ for the ``strong'' case at $\beta = \pi/2$, which
+is dominated by the $\bar{\kappa}$~approximation in the half-SWG surface
+terms and the cubic-vs-tetrahedral discretisation mismatch.
 
 %======================================================================
 \begin{thebibliography}{99}

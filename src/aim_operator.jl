@@ -200,6 +200,41 @@ function aim_far_mvp(proj::AIMProjection, G_hat::Array{ComplexF64,3},
     return y
 end
 
+"""
+    aim_far_mvp_weighted(proj, G_hat, k0, kappa_v, kappa_avg, x) -> Vector
+
+Anisotropic AIM far-field MVP: applies per-component κ_α to vector
+channels and κ_avg to the divergence channel.
+
+    y = k0² Σ_α κ_α Wα G_conv(Wα^T x) − κ_avg Wdiv G_conv(Wdiv^T x)
+
+For isotropic `κ_α = κ`, this equals `κ × aim_far_mvp(...)`.
+"""
+function aim_far_mvp_weighted(proj::AIMProjection, G_hat::Array{ComplexF64,3},
+                               k0::Number,
+                               kappa_v::SVector{3,ComplexF64},
+                               kappa_avg::ComplexF64,
+                               x::AbstractVector)
+    Nx, Ny, Nz = proj.grid.dims
+    k0_sq = ComplexF64(k0)^2
+    N = size(proj.Wx, 1)
+    y = zeros(ComplexF64, N)
+
+    for (W, kap) in zip((proj.Wx, proj.Wy, proj.Wz), kappa_v)
+        q = W' * x
+        q_3d = reshape(Vector{ComplexF64}(q), Nx, Ny, Nz)
+        conv_3d = fft_convolve(G_hat, q_3d)
+        y .+= (k0_sq * kap) .* (W * vec(conv_3d))
+    end
+
+    q_div = proj.Wdiv' * x
+    q_div_3d = reshape(Vector{ComplexF64}(q_div), Nx, Ny, Nz)
+    conv_div_3d = fft_convolve(G_hat, q_div_3d)
+    y .-= kappa_avg .* (proj.Wdiv * vec(conv_div_3d))
+
+    return y
+end
+
 # ---------------------------------------------------------------------------
 # AIM element evaluation for precorrection (Phase 3.7)
 # ---------------------------------------------------------------------------
@@ -292,6 +327,8 @@ Z x = (1/ε_p) M x  −  (κ/ε_bg) [ K_AIM(x) + K_near x ]
 function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                                 G_hat::Array{ComplexF64,3};
                                 k0::Number,
+                                eps_p = 1,
+                                eps_bg::Number = 1,
                                 near_radius::Union{Float64,Nothing} = nothing,
                                 outer_rule::TetQuadRule = TET_QUAD_5PT,
                                 duffy_rule::DuffyQuadRule = duffy_reference_rule(5))
@@ -327,6 +364,7 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
     N2x = 2Nx; N2y = 2Ny; N2z = 2Nz
     k0_c = ComplexF64(k0)
     k0_sq = k0_c * k0_c
+    (_, _, _, kappa_v, kappa_avg) = _aniso_params(eps_p, eps_bg)
     # Real-space Toeplitz Green kernel (circulant-folded on 2N grid).
     G_toep = build_green_toeplitz(grid, k0_c)
 
@@ -394,15 +432,18 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                     G = G_toep[a_idx + 1, b_idx + 1, c_idx + 1]
                     vx_n = v_x[b, n]; vy_n = v_y[b, n]; vz_n = v_z[b, n]
                     vd_n = v_div[b, n]
-                    dot_xyz = vx_m * vx_n + vy_m * vy_n + vz_m * vz_n
-                    s += (k0_sq * dot_xyz - vd_m * vd_n) * G
+                    # Anisotropic: k0² Σ_α κ_α w_mα w_nα − κ_avg w_div_m w_div_n
+                    dot_w = kappa_v[1] * vx_m * vx_n +
+                            kappa_v[2] * vy_m * vy_n +
+                            kappa_v[3] * vz_m * vz_n
+                    s += (k0_sq * dot_w - kappa_avg * vd_m * vd_n) * G
                 end
             end
-            # Bulk-only radiation kernel (K^A + k0²(f·f')) here — the
-            # half-SWG surface terms (K^B/K^C/K^D) are handled separately
-            # in `assemble_half_swg_correction` to avoid double-counting.
-            K_direct_mn = _bulk_radiation_kernel(basis, m, n, k0_c,
-                                                  outer_rule, duffy_rule)
+            # Bulk-only weighted radiation kernel — must match the
+            # anisotropic AIM kernel so the difference cancels far-field.
+            K_direct_mn = _bulk_radiation_kernel_weighted(
+                              basis, m, n, k0_c, kappa_v, kappa_avg,
+                              outer_rule, duffy_rule)
             push!(Is, m)
             push!(Js, n)
             push!(Vs, K_direct_mn - s)
@@ -427,14 +468,15 @@ struct AIMOperator
     mass::SparseMatrixCSC{Float64,Int}
     precorrection::SparseMatrixCSC{ComplexF64,Int}
     # Stage 2.7: half-SWG surface-correction terms (K^B + K^C + K^D),
-    # already scaled by -(κ/ε_bg). Zero sparse matrix for interior-only
-    # bases. See §9 of `.claude/technical_note.md`.
+    # already scaled by -(κ_avg/ε_bg). Zero sparse matrix for interior-
+    # only bases. See §9 of `.claude/technical_note.md`.
     half_swg_extra::SparseMatrixCSC{ComplexF64,Int}
     k0::ComplexF64
-    eps_p::ComplexF64
     eps_bg::ComplexF64
-    kappa::ComplexF64
-    inv_eps::ComplexF64
+    # Anisotropic parameters (3-component vectors; equal for isotropic)
+    kappa_v::SVector{3,ComplexF64}
+    kappa_avg::ComplexF64
+    inv_eps_v::SVector{3,ComplexF64}
 end
 
 """
@@ -455,7 +497,7 @@ projection matrices, Green FFT, mass matrix, and precorrection.
 """
 function build_aim_operator(basis::AbstractDivBasis;
                             k0::Number,
-                            eps_p::Number = 1,
+                            eps_p = 1,
                             eps_bg::Number = 1,
                             pitch::Float64,
                             padding::Integer = 3,
@@ -476,6 +518,7 @@ function build_aim_operator(basis::AbstractDivBasis;
     mass = assemble_mass_matrix(basis; rule = outer_rule)
     precorr = assemble_precorrection(basis, proj, G_hat;
                                      k0 = k0,
+                                     eps_p = eps_p, eps_bg = eps_bg,
                                      near_radius = near_radius,
                                      outer_rule = outer_rule,
                                      duffy_rule = duffy_rule)
@@ -488,12 +531,9 @@ function build_aim_operator(basis::AbstractDivBasis;
                                                duffy_rule = duffy_rule,
                                                tri_rule = tri_rule,
                                                tri_duffy_rule = tri_duffy_rule)
-    eps_p_c = ComplexF64(eps_p)
-    eps_bg_c = ComplexF64(eps_bg)
-    kappa = (eps_p_c - eps_bg_c) / eps_p_c
-    inv_eps = 1 / eps_p_c
+    _, eps_bg_c, inv_eps_v, kappa_v, kappa_avg = _aniso_params(eps_p, eps_bg)
     return AIMOperator(proj, G_hat, mass, precorr, half_extra,
-                       ComplexF64(k0), eps_p_c, eps_bg_c, kappa, inv_eps)
+                       ComplexF64(k0), eps_bg_c, kappa_v, kappa_avg, inv_eps_v)
 end
 
 """
@@ -506,15 +546,19 @@ y = (1/ε_p) M x  −  (κ/ε_bg) [ K_AIM(x) + K_near x ]
 ```
 """
 function aim_mvp(op::AIMOperator, x::AbstractVector)
-    y = ComplexF64.(op.inv_eps .* (op.mass * x))
-    if !iszero(op.kappa)
-        K_aim_x = aim_far_mvp(op.projection, op.G_hat, op.k0, x)
+    # Mass term: Σ_α (1/ε_α) M_α x  ≈ inv_eps_avg * M*x for isotropic.
+    # For SWG, M is the unweighted mass; anisotropic weighting enters here.
+    # When inv_eps components are all equal this is exactly (1/ε_p) M*x.
+    inv_avg = (op.inv_eps_v[1] + op.inv_eps_v[2] + op.inv_eps_v[3]) / 3
+    y = ComplexF64.(inv_avg .* (op.mass * x))
+    if !all(iszero, op.kappa_v)
+        K_aim_x = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
+                                        op.kappa_v, op.kappa_avg, x)
         K_near_x = op.precorrection * x
-        y .-= (op.kappa / op.eps_bg) .* (K_aim_x .+ K_near_x)
+        y .-= (1 / op.eps_bg) .* K_aim_x
+        y .-= (1 / op.eps_bg) .* K_near_x
     end
-    # Half-SWG surface correction: already includes the -(κ/ε_bg) scale.
-    # `half_swg_extra` is an empty sparse matrix on the interior-only path,
-    # so this is a no-op for the standard SWG case.
+    # Half-SWG surface correction: already includes the -(κ_avg/ε_bg) scale.
     if nnz(op.half_swg_extra) > 0
         y .+= op.half_swg_extra * x
     end
@@ -533,16 +577,18 @@ matrix–matrix products; the far-field FFT kernel is applied column-wise.
 function aim_mvp(op::AIMOperator, X::AbstractMatrix)
     N, L = size(X)
     Y = Matrix{ComplexF64}(undef, N, L)
+    inv_avg = (op.inv_eps_v[1] + op.inv_eps_v[2] + op.inv_eps_v[3]) / 3
     mul!(Y, op.mass, X)
-    Y .*= op.inv_eps
-    if !iszero(op.kappa)
-        scale = op.kappa / op.eps_bg
+    Y .*= inv_avg
+    if !all(iszero, op.kappa_v)
+        inv_eb = 1 / op.eps_bg
         for j in 1:L
             xj = @view X[:, j]
-            Kf = aim_far_mvp(op.projection, op.G_hat, op.k0, xj)
-            @views Y[:, j] .-= scale .* Kf
+            Kf = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
+                                       op.kappa_v, op.kappa_avg, xj)
+            @views Y[:, j] .-= inv_eb .* Kf
         end
-        Y .-= scale .* (op.precorrection * X)
+        Y .-= inv_eb .* (op.precorrection * X)
     end
     if nnz(op.half_swg_extra) > 0
         Y .+= op.half_swg_extra * X

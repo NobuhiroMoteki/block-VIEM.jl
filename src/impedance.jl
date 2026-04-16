@@ -36,10 +36,56 @@
 using LinearAlgebra: dot
 using SparseArrays: SparseMatrixCSC, sparse, spzeros
 
+# ── Anisotropic permittivity helpers ─────────────────────────────────────────
+#
+# For diagonal-tensor anisotropic ε_p = diag(ε_x, ε_y, ε_z), the EFVIE-D
+# weakened form becomes:
+#
+#   Z_mn = Σ_α (1/ε_α) ∫ (f_m)_α (f_n)_α dV
+#        - (1/ε_bg) ∫∫ [k0² Σ_α κ_α (f_m)_α (f_n)_α
+#                        − κ_avg (∇·f_m)(∇'·f_n)] G dV' dV
+#
+# where κ_α = (ε_α − ε_bg)/ε_α and κ_avg = (κ_x + κ_y + κ_z)/3.
+# The κ_avg simplification for the ∇∇· term exploits the SWG structure:
+# ∂(f_n)_α/∂r_α = a_n/(3V) for all α, so ∇·(κ̄·f_n) = κ_avg · ∇·f_n.
+#
+# Half-SWG surface terms (K^B, K^C, K^D) use κ_avg as an approximation;
+# this is exact for isotropic ε_p and introduces O(|Δκ|/|κ|) error for
+# mildly anisotropic materials.
+
+"""
+    _eps_p_vec(eps_p) -> SVector{3,ComplexF64}
+
+Promote any `eps_p` input (scalar or 3-vector) to `SVector{3,ComplexF64}`.
+"""
+_eps_p_vec(eps_p::Number) = let e = ComplexF64(eps_p); SVector{3,ComplexF64}(e,e,e) end
+_eps_p_vec(eps_p::SVector{3}) = SVector{3,ComplexF64}(ComplexF64(eps_p[1]),
+                                                       ComplexF64(eps_p[2]),
+                                                       ComplexF64(eps_p[3]))
+_eps_p_vec(eps_p::AbstractVector) = begin
+    length(eps_p) == 3 || throw(ArgumentError("eps_p vector must have length 3"))
+    SVector{3,ComplexF64}(ComplexF64(eps_p[1]), ComplexF64(eps_p[2]), ComplexF64(eps_p[3]))
+end
+
+"""
+    _aniso_params(eps_p, eps_bg) -> (eps_p_v, eps_bg_c, inv_eps_v, kappa_v, kappa_avg)
+
+Compute anisotropic derived quantities from `eps_p` (scalar or 3-vector)
+and scalar `eps_bg`. Returns `SVector{3}` quantities for component-wise use.
+"""
+function _aniso_params(eps_p, eps_bg)
+    ev = _eps_p_vec(eps_p)
+    eb = ComplexF64(eps_bg)
+    inv_eps_v = SVector{3,ComplexF64}(1/ev[1], 1/ev[2], 1/ev[3])
+    kappa_v   = SVector{3,ComplexF64}((ev[1]-eb)/ev[1], (ev[2]-eb)/ev[2], (ev[3]-eb)/ev[3])
+    kappa_avg = (kappa_v[1] + kappa_v[2] + kappa_v[3]) / 3
+    return ev, eb, inv_eps_v, kappa_v, kappa_avg
+end
+
 """
     impedance_element(basis::AbstractDivBasis, m::Integer, n::Integer;
                       k0::Number,
-                      eps_p::Number = 1,
+                      eps_p = 1,
                       eps_bg::Number = 1,
                       outer_rule::TetQuadRule = TET_QUAD_5PT,
                       duffy_rule::DuffyQuadRule = duffy_reference_rule(5))
@@ -54,24 +100,25 @@ Works for any `AbstractDivBasis` (SWGBasis, RT1Basis, etc.).
 """
 function impedance_element(basis::AbstractDivBasis, m::Integer, n::Integer;
                            k0::Number,
-                           eps_p::Number = 1,
+                           eps_p = 1,
                            eps_bg::Number = 1,
                            outer_rule::TetQuadRule = TET_QUAD_5PT,
                            duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                            tri_rule::TriQuadRule = tri_collapsed_rule(4),
                            tri_duffy_rule::TriDuffyRule = tri_duffy_reference_rule(6))
-    eps_p_c = ComplexF64(eps_p)
-    eps_bg_c = ComplexF64(eps_bg)
+    _, eps_bg_c, inv_eps_v, kappa_v, kappa_avg = _aniso_params(eps_p, eps_bg)
     k0_c = ComplexF64(k0)
-    inv_eps = 1 / eps_p_c
-    kappa = (eps_p_c - eps_bg_c) / eps_p_c
 
-    M = _mass_term(basis, Int(m), Int(n), outer_rule)
-    Z = inv_eps * M
-    if !iszero(kappa)
-        K = _radiation_kernel(basis, Int(m), Int(n), k0_c, outer_rule, duffy_rule,
-                              tri_rule, tri_duffy_rule)
-        Z -= (kappa / eps_bg_c) * K
+    # Mass: Σ_α (1/ε_α) ∫ (f_m)_α (f_n)_α dV
+    Z = _mass_term_weighted(basis, Int(m), Int(n), outer_rule, inv_eps_v)
+
+    # Radiation: (1/ε_bg) [k0² Σ_α κ_α (f_m)_α(f_n)_α − κ_avg (∇·f_m)(∇·f_n)] G
+    if !all(iszero, kappa_v)
+        K = _radiation_kernel_weighted(basis, Int(m), Int(n), k0_c,
+                                       kappa_v, kappa_avg,
+                                       outer_rule, duffy_rule,
+                                       tri_rule, tri_duffy_rule)
+        Z -= (1 / eps_bg_c) * K
     end
     return Z
 end
@@ -93,6 +140,32 @@ function _mass_term(basis::AbstractDivBasis, m::Int, n::Int, rule::TetQuadRule)
             f_m_r = evaluate(basis, m, r, tm)
             f_n_r = evaluate(basis, n, r, tm)
             s += rule.weights[i] * V * dot(f_m_r, f_n_r)
+        end
+    end
+    return s
+end
+
+"""
+Weighted mass term: Σ_α w_α ∫ (f_m)_α (f_n)_α dV.  For isotropic
+`w = (1/ε, 1/ε, 1/ε)` this equals `(1/ε) M_mn`.
+"""
+function _mass_term_weighted(basis::AbstractDivBasis, m::Int, n::Int,
+                             rule::TetQuadRule, w::SVector{3,ComplexF64})
+    tets_m = support_tets(basis, m)
+    tets_n = support_tets(basis, n)
+    s = zero(ComplexF64)
+    @inbounds for tm in tets_m, tn in tets_n
+        (tm == 0 || tn == 0) && continue
+        tm == tn || continue
+        verts = _tet_vertices(basis.mesh, tm)
+        V = tet_volume(verts...)
+        for i in 1:rule.n
+            r = bary_to_point(rule.bary[i], verts)
+            f_m_r = evaluate(basis, m, r, tm)
+            f_n_r = evaluate(basis, n, r, tm)
+            s += rule.weights[i] * V * (w[1] * f_m_r[1] * f_n_r[1] +
+                                        w[2] * f_m_r[2] * f_n_r[2] +
+                                        w[3] * f_m_r[3] * f_n_r[3])
         end
     end
     return s
@@ -137,6 +210,43 @@ function _bulk_radiation_kernel(basis::AbstractDivBasis, m::Int, n::Int,
     @inbounds for tm in tets_m, tn in tets_n
         (tm == 0 || tn == 0) && continue
         s += _radiation_pair(basis, m, n, tm, tn, k0, outer_rule, duffy_rule)
+    end
+    return s
+end
+
+# Weighted variants for anisotropic ε_p.  The kernel becomes
+#   k0² Σ_α κ_α (f_m)_α (f_n)_α G  −  κ_avg (∇·f_m)(∇'·f_n) G
+# which reduces to κ [k0² f_m·f_n − (∇·f_m)(∇·f_n)] G for isotropic κ.
+
+function _radiation_kernel_weighted(basis::AbstractDivBasis, m::Int, n::Int,
+                                     k0::ComplexF64,
+                                     kappa_v::SVector{3,ComplexF64},
+                                     kappa_avg::ComplexF64,
+                                     outer_rule::TetQuadRule,
+                                     duffy_rule::DuffyQuadRule,
+                                     tri_rule::TriQuadRule,
+                                     tri_duffy_rule::TriDuffyRule)
+    s = _bulk_radiation_kernel_weighted(basis, m, n, k0, kappa_v, kappa_avg,
+                                        outer_rule, duffy_rule)
+    # Half-SWG surface terms use κ_avg (exact for isotropic, approximate for aniso)
+    s += kappa_avg * _half_swg_surface_kernel(basis, m, n, k0, outer_rule, duffy_rule,
+                                               tri_rule, tri_duffy_rule)
+    return s
+end
+
+function _bulk_radiation_kernel_weighted(basis::AbstractDivBasis, m::Int, n::Int,
+                                          k0::ComplexF64,
+                                          kappa_v::SVector{3,ComplexF64},
+                                          kappa_avg::ComplexF64,
+                                          outer_rule::TetQuadRule,
+                                          duffy_rule::DuffyQuadRule)
+    tets_m = support_tets(basis, m)
+    tets_n = support_tets(basis, n)
+    s = zero(ComplexF64)
+    @inbounds for tm in tets_m, tn in tets_n
+        (tm == 0 || tn == 0) && continue
+        s += _radiation_pair_weighted(basis, m, n, tm, tn, k0,
+                                       kappa_v, kappa_avg, outer_rule, duffy_rule)
     end
     return s
 end
@@ -568,6 +678,108 @@ function _radiation_pair(basis::AbstractDivBasis, m::Int, n::Int,
     return s
 end
 
+# Anisotropic radiation pair: computes
+#   ∫_{T_m}∫_{T_n} [k0² Σ_α κ_α (f_m)_α(f_n)_α − κ_avg (∇·f_m)(∇'·f_n)] G dV' dV
+@inline function _aniso_kernel(k0_sq::ComplexF64,
+                               kappa_v::SVector{3,ComplexF64},
+                               kappa_avg::ComplexF64,
+                               f_m::Vec3, f_n::Vec3,
+                               div_m::Float64, div_n::Float64)
+    k0_sq * (kappa_v[1] * f_m[1] * f_n[1] +
+             kappa_v[2] * f_m[2] * f_n[2] +
+             kappa_v[3] * f_m[3] * f_n[3]) - kappa_avg * div_m * div_n
+end
+
+function _radiation_pair_weighted(basis::AbstractDivBasis, m::Int, n::Int,
+                                   m_tet::Int, n_tet::Int, k0::ComplexF64,
+                                   kappa_v::SVector{3,ComplexF64},
+                                   kappa_avg::ComplexF64,
+                                   outer_rule::TetQuadRule,
+                                   duffy_rule::DuffyQuadRule)
+    verts_m = _tet_vertices(basis.mesh, m_tet)
+    verts_n = _tet_vertices(basis.mesh, n_tet)
+    Vm = tet_volume(verts_m...)
+    Vn = tet_volume(verts_n...)
+    k0_sq = k0 * k0
+    self_pair = (m_tet == n_tet)
+    near_cross = !self_pair && _tets_share_nodes(basis.mesh, m_tet, n_tet)
+
+    s = zero(ComplexF64)
+    for i in 1:outer_rule.n
+        r = bary_to_point(outer_rule.bary[i], verts_m)
+        outer_w = outer_rule.weights[i] * Vm
+        f_m_r = evaluate(basis, m, r, m_tet)
+        div_m = divergence(basis, m, r, m_tet)
+
+        if self_pair
+            inner_pts, inner_wts = duffy_quadrature_around(verts_n, r, duffy_rule)
+            inner = zero(ComplexF64)
+            @inbounds for j in eachindex(inner_pts)
+                rp = inner_pts[j]
+                R = norm(r - rp)
+                R == 0 && continue
+                G = helmholtz_green(R, k0)
+                f_n_rp = evaluate(basis, n, rp, n_tet)
+                div_n = divergence(basis, n, rp, n_tet)
+                inner += inner_wts[j] * _aniso_kernel(k0_sq, kappa_v, kappa_avg,
+                                                       f_m_r, f_n_rp, div_m, div_n) * G
+            end
+        elseif near_cross
+            shared = _shared_local_vertices(basis.mesh, m_tet, n_tet)
+            inner_static = zero(ComplexF64)
+            n_shared = length(shared)
+            for sv in shared
+                sv_pts, sv_wts = duffy_quadrature(verts_n, sv, duffy_rule)
+                term = zero(ComplexF64)
+                @inbounds for j in eachindex(sv_pts)
+                    rp = sv_pts[j]
+                    R = norm(r - rp)
+                    R == 0 && continue
+                    G0 = helmholtz_green_static(R)
+                    f_n_rp = evaluate(basis, n, rp, n_tet)
+                    div_n = divergence(basis, n, rp, n_tet)
+                    term += sv_wts[j] * _aniso_kernel(k0_sq, kappa_v, kappa_avg,
+                                                       f_m_r, f_n_rp, div_m, div_n) * G0
+                end
+                inner_static += term
+            end
+            inner_static /= n_shared
+
+            gauss_pts, gauss_wts = _gauss_pts_wts(outer_rule, verts_n, Vn)
+            inner_smooth = zero(ComplexF64)
+            @inbounds for j in eachindex(gauss_pts)
+                rp = gauss_pts[j]
+                R = norm(r - rp)
+                if R == 0
+                    dG = -im * k0 * _INV_FOUR_PI
+                else
+                    dG = helmholtz_green(R, k0) - helmholtz_green_static(R)
+                end
+                f_n_rp = evaluate(basis, n, rp, n_tet)
+                div_n = divergence(basis, n, rp, n_tet)
+                inner_smooth += gauss_wts[j] * _aniso_kernel(k0_sq, kappa_v, kappa_avg,
+                                                              f_m_r, f_n_rp, div_m, div_n) * dG
+            end
+            inner = inner_static + inner_smooth
+        else
+            inner_pts, inner_wts = _gauss_pts_wts(outer_rule, verts_n, Vn)
+            inner = zero(ComplexF64)
+            @inbounds for j in eachindex(inner_pts)
+                rp = inner_pts[j]
+                R = norm(r - rp)
+                R == 0 && continue
+                G = helmholtz_green(R, k0)
+                f_n_rp = evaluate(basis, n, rp, n_tet)
+                div_n = divergence(basis, n, rp, n_tet)
+                inner += inner_wts[j] * _aniso_kernel(k0_sq, kappa_v, kappa_avg,
+                                                       f_m_r, f_n_rp, div_m, div_n) * G
+            end
+        end
+        s += outer_w * inner
+    end
+    return s
+end
+
 """
     _shared_local_vertices(mesh, t1, t2) -> Vector{Int}
 
@@ -626,7 +838,7 @@ Works for any `AbstractDivBasis` (SWGBasis, RT1Basis, etc.).
 """
 function assemble_impedance_matrix(basis::AbstractDivBasis;
                                    k0::Number,
-                                   eps_p::Number = 1,
+                                   eps_p = 1,
                                    eps_bg::Number = 1,
                                    outer_rule::TetQuadRule = TET_QUAD_5PT,
                                    duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
@@ -678,23 +890,22 @@ end
 # ---------------------------------------------------------------------------
 function assemble_half_swg_correction(basis::AbstractDivBasis;
                                         k0::Number,
-                                        eps_p::Number = 1,
+                                        eps_p = 1,
                                         eps_bg::Number = 1,
                                         outer_rule::TetQuadRule = TET_QUAD_5PT,
                                         duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                                         tri_rule::TriQuadRule = tri_collapsed_rule(4),
                                         tri_duffy_rule::TriDuffyRule = tri_duffy_reference_rule(6))
     N = n_basis(basis)
-    eps_p_c = ComplexF64(eps_p)
-    eps_bg_c = ComplexF64(eps_bg)
+    _, eps_bg_c, _, kappa_v, kappa_avg = _aniso_params(eps_p, eps_bg)
     k0_c = ComplexF64(k0)
-    kappa = (eps_p_c - eps_bg_c) / eps_p_c
 
-    if iszero(kappa) || !(basis isa SWGBasis) || !any(basis.is_boundary)
+    if all(iszero, kappa_v) || !(basis isa SWGBasis) || !any(basis.is_boundary)
         return spzeros(ComplexF64, N, N)
     end
 
-    scale = -(kappa / eps_bg_c)
+    # Use kappa_avg for surface terms (exact for isotropic, O(Δκ/κ) for aniso)
+    scale = -(kappa_avg / eps_bg_c)
 
     # Threaded row-wise assembly: each task writes to its own row buffer
     # only, and the global sparse triple is assembled sequentially from

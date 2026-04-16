@@ -23,7 +23,7 @@ import LinearAlgebra
     far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                         k_hat_sca::Vec3,
                         k0::Number,
-                        eps_p::Number,
+                        eps_p,
                         eps_bg::Number = 1,
                         rule::TetQuadRule = TET_QUAD_5PT)
         -> SVector{3,ComplexF64}
@@ -34,12 +34,11 @@ Compute the vector scattering amplitude `F(k̂_sca)` at observation direction
 function far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                              k_hat_sca::Vec3,
                              k0::Number,
-                             eps_p::Number,
+                             eps_p,
                              eps_bg::Number = 1,
                              rule::TetQuadRule = TET_QUAD_5PT)
     k0c = ComplexF64(k0)
-    kappa = (ComplexF64(eps_p) - ComplexF64(eps_bg)) / ComplexF64(eps_p)
-    eps_bg_c = ComplexF64(eps_bg)
+    _, eps_bg_c, _, kappa_v, _ = _aniso_params(eps_p, eps_bg)
 
     # PHYSICS CONVENTION: P(r̂) = Σ_n D_n ∫ f_n(r') exp(-ik0 r̂·r') dV'
     # (Far-field expansion of exp(+ik0|r-r'|)/(4π|r-r'|) for r→∞.)
@@ -64,12 +63,12 @@ function far_field_amplitude(basis::AbstractDivBasis, D_coeffs::AbstractVector;
     end
     P = SVector{3,ComplexF64}(Px, Py, Pz)
 
-    # Transverse projection: F = (k0²κ/ε_bg)(P − (k̂·P)k̂)
-    # The positive sign follows from E^sca = (κ/ε_bg)(k0²+∇∇·)∫ D' G dV'
-    # → far-field: (κ/ε_bg) k0² (I − r̂r̂) P  (see derivation below).
-    P_trans = P - dot(k_hat_sca, P) * SVector{3,ComplexF64}(k_hat_sca)
-    coeff = k0c^2 * kappa / eps_bg_c
-    return coeff * P_trans
+    # Anisotropic far-field: F = (k0²/ε_bg)(I − r̂r̂)·(κ̄·P)
+    # For isotropic κ this reduces to F = (k0²κ/ε_bg)(I − r̂r̂)·P.
+    kP = SVector{3,ComplexF64}(kappa_v[1]*P[1], kappa_v[2]*P[2], kappa_v[3]*P[3])
+    kP_trans = kP - dot(k_hat_sca, kP) * SVector{3,ComplexF64}(k_hat_sca)
+    coeff = k0c^2 / eps_bg_c
+    return coeff * kP_trans
 end
 
 """
@@ -97,6 +96,45 @@ end
 ## NOTE: The original compute_scattering with only optical theorem has been
 ## replaced by the extended version below that supports both :farfield and
 ## :optical_theorem methods via the `csca_method` keyword.
+
+"""
+Anisotropic absorption: C_abs = (k₀/ε_bg) Σ_α Im(ε_α)/|ε_α|² ∫|D_α|²dV.
+Requires component-wise mass integrals ∫ (f_m)_α (f_n)_α dV.
+"""
+function _absorption_anisotropic(basis, D_coeffs, eps_p_v, eps_bg_c,
+                                  k0c, E0_sq, rule)
+    N = length(D_coeffs)
+    C_abs = 0.0
+    for α in 1:3
+        abs_coeff = imag(eps_p_v[α]) / abs2(eps_p_v[α])
+        iszero(abs_coeff) && continue
+        # Component-α mass: M_α[m,n] = ∫ (f_m)_α (f_n)_α dV
+        DhMaD = 0.0
+        for m in 1:N, n in 1:N
+            Dm = D_coeffs[m]; Dn = D_coeffs[n]
+            (iszero(Dm) || iszero(Dn)) && continue
+            tets_m = support_tets(basis, m)
+            tets_n = support_tets(basis, n)
+            val = 0.0
+            @inbounds for tm in tets_m, tn in tets_n
+                (tm == 0 || tn == 0) && continue
+                tm == tn || continue
+                verts = _tet_vertices(basis.mesh, tm)
+                V = tet_volume(verts...)
+                for i in 1:rule.n
+                    r = bary_to_point(rule.bary[i], verts)
+                    fm = evaluate(basis, m, r, tm)
+                    fn = evaluate(basis, n, r, tm)
+                    val += rule.weights[i] * V * fm[α] * fn[α]
+                end
+            end
+            DhMaD += real(conj(Dm) * Dn * val)
+        end
+        C_abs += abs_coeff * DhMaD
+    end
+    C_abs *= real(k0c) / (real(eps_bg_c) * E0_sq)
+    return C_abs
+end
 
 @inline function _real_unit(E0::SVector{3,ComplexF64})
     v = Vec3(real(E0[1]), real(E0[2]), real(E0[3]))
@@ -159,7 +197,7 @@ end
 
 """
     compute_csca_farfield(basis::AbstractDivBasis, D_coeffs::AbstractVector;
-                          k0::Number, eps_p::Number, eps_bg::Number = 1,
+                          k0::Number, eps_p, eps_bg::Number = 1,
                           E0_sq::Float64,
                           rule::TetQuadRule = TET_QUAD_5PT,
                           n_theta::Int = 10) -> Float64
@@ -178,7 +216,7 @@ parameters up to ~5. Use `n_theta ≥ 20` for larger particles.
 """
 function compute_csca_farfield(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                                k0::Number,
-                               eps_p::Number,
+                               eps_p,
                                eps_bg::Number = 1,
                                E0_sq::Float64,
                                rule::TetQuadRule = TET_QUAD_5PT,
@@ -215,14 +253,13 @@ function compute_scattering(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                             k_hat::Vec3,
                             E0::SVector{3,ComplexF64},
                             k0::Number,
-                            eps_p::Number,
+                            eps_p,
                             eps_bg::Number = 1,
                             rule::TetQuadRule = TET_QUAD_5PT,
                             csca_method::Symbol = :farfield,
                             n_theta::Int = 10)
     k0c = ComplexF64(k0)
-    eps_p_c = ComplexF64(eps_p)
-    eps_bg_c = ComplexF64(eps_bg)
+    eps_p_v, eps_bg_c, _, _, _ = _aniso_params(eps_p, eps_bg)
 
     # --- polarization basis ---
     e_s = _real_unit(E0)
@@ -245,11 +282,19 @@ function compute_scattering(basis::AbstractDivBasis, D_coeffs::AbstractVector;
 
     E0_sq = real(dot(E0, E0))
 
-    # --- absorption cross section (always computed this way) ---
+    # --- absorption cross section ---
+    # Anisotropic: C_abs = (k₀/ε_bg) Σ_α Im(ε_α)/|ε_α|² ∫|D_α|²dV
+    # For isotropic this reduces to k₀ Im(ε_p)/(ε_bg |ε_p|²) D†MD.
     M = assemble_mass_matrix(basis; rule = rule)
-    DhMD = real(dot(D_coeffs, M * D_coeffs))
-    C_abs = real(k0c) * imag(eps_p_c) / (real(eps_bg_c) * abs2(eps_p_c) * E0_sq) *
-            DhMD
+    is_iso = (eps_p_v[1] == eps_p_v[2] == eps_p_v[3])
+    if is_iso
+        DhMD = real(dot(D_coeffs, M * D_coeffs))
+        C_abs = real(k0c) * imag(eps_p_v[1]) /
+                (real(eps_bg_c) * abs2(eps_p_v[1]) * E0_sq) * DhMD
+    else
+        C_abs = _absorption_anisotropic(basis, D_coeffs, eps_p_v, eps_bg_c,
+                                         k0c, E0_sq, rule)
+    end
 
     if csca_method == :farfield
         C_sca = compute_csca_farfield(basis, D_coeffs;
@@ -429,7 +474,7 @@ The DDA observable formulas (block-DDA_Py `compute_PCAS_observable_S_fw`,
 function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVector;
                                  orientation::CASOrientation,
                                  k0::Number,
-                                 eps_p::Number,
+                                 eps_p,
                                  eps_bg::Number = 1,
                                  rule::TetQuadRule = TET_QUAD_5PT)
     F_fw = far_field_amplitude(basis, D_coeffs;
@@ -490,8 +535,13 @@ function _resolve_physical_inputs(wl_0, m_m, m_p, k0, eps_p, eps_bg)
                 "solve_cas_v2_orientations: wl_0, m_m, m_p must all be " *
                 "provided together."))
         k0_out     = ComplexF64(2π * m_m / wl_0)
-        eps_p_out  = ComplexF64(m_p)^2
         eps_bg_out = ComplexF64(m_m)^2
+        # m_p can be scalar (isotropic) or 3-vector (anisotropic)
+        if m_p isa Number
+            eps_p_out = ComplexF64(m_p)^2
+        else
+            eps_p_out = _eps_p_vec(ComplexF64.(m_p) .^ 2)
+        end
         return k0_out, eps_p_out, eps_bg_out
     elseif have_raw
         (k0 !== nothing && eps_p !== nothing) ||
@@ -499,7 +549,8 @@ function _resolve_physical_inputs(wl_0, m_m, m_p, k0, eps_p, eps_bg)
                 "solve_cas_v2_orientations: both k0 and eps_p must be " *
                 "provided in the raw form."))
         k0_out     = ComplexF64(k0)
-        eps_p_out  = ComplexF64(eps_p)
+        # eps_p can be scalar or 3-vector
+        eps_p_out  = eps_p isa Number ? ComplexF64(eps_p) : _eps_p_vec(eps_p)
         eps_bg_out = ComplexF64(eps_bg === nothing ? 1 : eps_bg)
         return k0_out, eps_p_out, eps_bg_out
     else
@@ -571,9 +622,9 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    euler_angles::AbstractVector;
                                    wl_0::Union{Real,Nothing}   = nothing,
                                    m_m::Union{Real,Nothing}    = nothing,
-                                   m_p::Union{Number,Nothing}  = nothing,
+                                   m_p = nothing,
                                    k0::Union{Number,Nothing}    = nothing,
-                                   eps_p::Union{Number,Nothing} = nothing,
+                                   eps_p = nothing,
                                    eps_bg::Union{Number,Nothing} = nothing,
                                    duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                                    outer_rule::TetQuadRule = TET_QUAD_5PT,
