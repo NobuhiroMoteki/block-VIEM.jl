@@ -162,6 +162,36 @@ quality.  The adaptive mesh size `adaptive_lc(p; ...)` takes the minimum
 of a wavelength constraint, a geometry constraint (`c/3`), and the
 surface-deformation correlation length (`0.1c`).
 
+### Parameter-sweep HDF5 I/O
+
+For multi-dimensional parameter sweeps (`wl_0 × m_p × r_v_base ×
+bc_ratio × ab_ratio × gre_beta × orientation`), BlockVIEM.jl provides
+scripts that create and inspect HDF5 files in the same schema as
+block-DDA_Py (`dda_results/create_h5py.ipynb` / `check_h5py.ipynb`):
+
+```bash
+# 1. Edit sweep parameters at the top of create_h5.jl, then run:
+julia --project=. viem_results/create_h5.jl
+
+# 2. (run your solver to fill the HDF5 — see run_viem.jl or similar)
+
+# 3. Inspect completion status and results:
+julia --project=. viem_results/check_h5.jl                          # default file
+julia --project=. viem_results/check_h5.jl path/to/other_file.hdf5  # any file
+```
+
+`create_h5.jl` automatically detects **spheroid mode** when all
+`ab_ratio == 1` and all `gre_beta == 0`.  In this mode the solver
+only needs to solve `N_beta` orientations (at α = 0); the full
+`(N_alpha × N_beta × N_gamma)` grid is filled analytically via the
+spheroid α-expansion (`S_θ(α) = A + B·exp(+2jα)`).
+
+The HDF5 layout (`/target/simulated_data/...`) with datasets
+`S_fw_PCAS_theta`, `S_fw_PCAS_phi`, `S_bk_OCBS`, `C_ext`, `C_abs`,
+`Euler_angles`, and Mie reference values is byte-compatible with
+block-DDA_Py, so downstream consumers (e.g. `build_spheroid_lut.py`)
+can read either DDA or VIEM output without modification.
+
 ## Conventions
 
 - **Time convention:** physics, `exp(−iωt)`, matching block-DDA_Py and
