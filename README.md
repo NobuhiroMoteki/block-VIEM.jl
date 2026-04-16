@@ -13,8 +13,8 @@ products.
 
 ## Status
 
-**v0.3.0** — 14 334 tests pass. All numerical kernels + GRE shape model
-are in place.
+**v0.3.1** — 14 334 tests pass. All numerical kernels + GRE shape model
+are in place. HDF5 sweep I/O scripts added.
 
 | Phase | Module                                          | Status |
 |-------|-------------------------------------------------|--------|
@@ -28,6 +28,7 @@ are in place.
 | 5.3   | Oblate spheroid benchmark vs block-DDA_Py        | done   |
 | 5.4   | HDF5 spheroid-sweep output (block-DDA_Py schema) | done   |
 | 5.5   | AIM + Block-Krylov multi-orientation solve        | done   |
+| 5.6   | HDF5 sweep I/O (block-DDA_Py schema)              | done   |
 
 ### Validation
 
