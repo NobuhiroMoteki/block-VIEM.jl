@@ -1,0 +1,393 @@
+# Production parameter-sweep script for block-VIEM.jl.
+#
+# Julia equivalent of block-DDA_Py/run_dda.py. Reads an HDF5 file created
+# by create_h5.jl and fills every condition slot with VIEM CAS-v2
+# observables plus the Mie reference for the volume-equivalent sphere.
+#
+# Features:
+#   - AIM FFT-MVP + block-BiCGSTAB by default (O(N log N) per iteration)
+#   - Automatic spheroid-mode detection (ab_ratio==1 && gre_beta==0):
+#     solve only N_beta orientations at α=0, fill the full grid analytically
+#   - On solver failure, fills NaN and continues (matches block-DDA_Py)
+#   - Resume from partially filled HDF5 (skips already-computed slots)
+#   - Per-condition Mie reference calculation
+#
+# Usage:
+#     julia --project=. -t auto viem_results/run_viem.jl [filename]
+#
+# The -t auto flag is recommended to enable multi-threaded assembly.
+
+using BlockVIEM
+using BlockVIEM: Vec3
+using StaticArrays
+using LinearAlgebra
+using HDF5
+using Printf
+using Random
+using Dates
+
+# Include Mie reference (test utility, not part of the package)
+include(joinpath(dirname(@__DIR__), "test", "mie_reference.jl"))
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Settings
+# ══════════════════════════════════════════════════════════════════════════════
+const RNG_SEED      = 12345       # GRE shape random seed (matches run_dda.py)
+const SOLVER_TOL    = 1e-6        # solver tolerance
+const SOLVER_METHOD = :aim_bicgstab  # :aim_bicgstab | :aim_gmres | :dense
+const MAXITER       = 400         # max Krylov iterations per try
+const N_PW          = 10          # mesh: points per wavelength
+const DUFFY_ORDER   = 5           # Duffy quadrature order
+const AIM_PITCH_RATIO = 0.5      # AIM grid pitch = ratio × mean edge length
+const AIM_PADDING   = 4           # AIM grid padding (number of pitch cells)
+const OUTPUT_FILE   = length(ARGS) >= 1 ? ARGS[1] :
+                      joinpath(@__DIR__, "pcas_ocbs_simulated_data.hdf5")
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Logging utility
+# ══════════════════════════════════════════════════════════════════════════════
+function _log(msg::AbstractString)
+    println("[$(Dates.format(now(), "HH:MM:SS"))] $msg")
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Euler angle grid (deterministic, matches run_dda.py exactly)
+# ══════════════════════════════════════════════════════════════════════════════
+function generate_euler_grid(N_alpha::Int, N_beta::Int, N_gamma::Int)
+    alpha = range(0, 2π, length=N_alpha+1)[1:end-1]  # [0, 2π) endpoint=false
+    cos_beta = range(1 - 1/N_beta, -1 + 1/N_beta, length=N_beta)
+    beta = acos.(cos_beta)
+    gamma = range(0, 2π, length=N_gamma+1)[1:end-1]
+
+    L = N_alpha * N_beta * N_gamma
+    euler = Vector{NTuple{3,Float64}}(undef, L)
+    idx = 0
+    for ia in 1:N_alpha
+        for ib in 1:N_beta
+            for ig in 1:N_gamma
+                idx += 1
+                euler[idx] = (alpha[ia], beta[ib], gamma[ig])
+            end
+        end
+    end
+    return euler
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Spheroid detection
+# ══════════════════════════════════════════════════════════════════════════════
+_is_spheroid(ab_ratio, gre_beta) = ab_ratio == 1.0 && gre_beta == 0.0
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Build mesh + SWG basis for a GRE particle
+# ══════════════════════════════════════════════════════════════════════════════
+function build_particle(r_v_base, bc_ratio, ab_ratio, gre_beta, wl_0, m_p_xyz)
+    rng = Random.MersenneTwister(RNG_SEED)
+    p = GREParams(r_v_base, bc_ratio, ab_ratio, gre_beta)
+    m_p_max = maximum(abs.(m_p_xyz))
+    mesh, r_ve = gre_mesh(p, rng; wl_0=wl_0, m_p_max=m_p_max, N_pw=N_PW)
+    basis = build_swg_basis(mesh; include_boundary_faces=true)
+    return mesh, basis, r_ve
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Common solve core: calls solve_cas_v2_orientations with return_D=true,
+#  then computes cross sections from D_block.
+# ══════════════════════════════════════════════════════════════════════════════
+function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh)
+    k0 = ComplexF64(2π * m_m / wl_0)
+    eps_p = _to_eps(m_p_xyz)
+    eps_bg = ComplexF64(m_m)^2
+    num_ori = length(euler_list)
+
+    # AIM pitch from mesh geometry (ignored when method == :dense)
+    h_bar = mean_edge_length(mesh)
+    pitch = AIM_PITCH_RATIO * h_bar
+
+    method_kw = Dict{Symbol,Any}(
+        :method    => SOLVER_METHOD,
+        :tol       => SOLVER_TOL,
+        :maxiter   => MAXITER,
+        :verbose   => false,
+        :return_D  => true,
+        :duffy_rule => duffy_reference_rule(DUFFY_ORDER),
+        :symmetrize => true,
+    )
+    if SOLVER_METHOD !== :dense
+        method_kw[:pitch]   = pitch
+        method_kw[:padding] = AIM_PADDING
+    end
+
+    cas_results, D_block = solve_cas_v2_orientations(
+        basis, euler_list;
+        wl_0=wl_0, m_m=m_m, m_p=m_p_xyz,
+        method_kw...)
+
+    # Extract CAS-v2 observables
+    S_fw_th = [r.S_fw_theta for r in cas_results]
+    S_fw_ph = [r.S_fw_phi   for r in cas_results]
+    S_bk_v  = [r.S_bk       for r in cas_results]
+
+    # Cross sections from D_block (farfield integration)
+    orientations = [cas_orientation(ea...) for ea in euler_list]
+    C_abs = Vector{Float64}(undef, num_ori)
+    C_ext = Vector{Float64}(undef, num_ori)
+    for i in 1:num_ori
+        ori = orientations[i]
+        sr = compute_scattering(basis, @view(D_block[:, i]);
+                                k_hat=ori.u_inc, E0=ori.e0_inc,
+                                k0=k0, eps_p=eps_p, eps_bg=eps_bg,
+                                csca_method=:farfield)
+        C_abs[i] = sr.C_abs
+        C_ext[i] = sr.C_ext
+    end
+
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Solve: general particle (all orientations)
+# ══════════════════════════════════════════════════════════════════════════════
+function run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz, euler_angles)
+    C_abs, C_ext, S_fw_th, S_fw_ph, S_bk =
+        _solve_and_postprocess(basis, euler_angles, wl_0, m_m, m_p_xyz, mesh)
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, true
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Solve: spheroid (α-expansion, solve only N_beta orientations)
+# ══════════════════════════════════════════════════════════════════════════════
+function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
+                           N_alpha, N_beta, N_gamma)
+    num_full = N_alpha * N_beta * N_gamma
+
+    # Beta-only grid for solve (α=0, γ=0)
+    cos_beta = range(1 - 1/N_beta, -1 + 1/N_beta, length=N_beta)
+    beta_vals = acos.(cos_beta)
+    euler_beta_only = [(0.0, β, 0.0) for β in beta_vals]
+
+    C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0 =
+        _solve_and_postprocess(basis, euler_beta_only, wl_0, m_m, m_p_xyz, mesh)
+
+    _log("    [spheroid, L=$N_beta]: converged ✓")
+
+    # Analytical α-expansion to full grid
+    alpha_vals = collect(range(0, 2π, length=N_alpha+1)[1:end-1])
+
+    C_abs   = Vector{Float64}(undef, num_full)
+    C_ext   = Vector{Float64}(undef, num_full)
+    S_fw_th = Vector{ComplexF64}(undef, num_full)
+    S_fw_ph = Vector{ComplexF64}(undef, num_full)
+    S_bk    = Vector{ComplexF64}(undef, num_full)
+
+    idx = 0
+    for ia in 1:N_alpha
+        α = alpha_vals[ia]
+        e2a = exp(2im * α)
+        for ib in 1:N_beta
+            A_fw = (S_s_0[ib] + S_p_0[ib]) / 2
+            B_fw = (S_s_0[ib] - S_p_0[ib]) / 2
+            s_fw_th_val = A_fw + B_fw * e2a
+            s_fw_ph_val = A_fw - B_fw * e2a
+            s_bk_val    = S_bk_0[ib] * e2a
+            for _ in 1:N_gamma
+                idx += 1
+                C_abs[idx]   = C_abs_0[ib]
+                C_ext[idx]   = C_ext_0[ib]
+                S_fw_th[idx] = s_fw_th_val
+                S_fw_ph[idx] = s_fw_ph_val
+                S_bk[idx]    = s_bk_val
+            end
+        end
+    end
+
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, true
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Mie reference for volume-equivalent sphere
+# ══════════════════════════════════════════════════════════════════════════════
+function compute_mie_reference(wl_0, m_m, r_v_base, m_p_xyz)
+    m_p_avg = ComplexF64(sum(m_p_xyz) / length(m_p_xyz))
+    cs = mie_cross_sections(; wl_0=wl_0, m_m=m_m, r_p=r_v_base, m_p=m_p_avg)
+    cas = mie_cas_observables(; wl_0=wl_0, m_m=m_m, r_p=r_v_base, m_p=m_p_avg)
+    return cs.C_abs, cs.C_ext, cas.S_fw, cas.S_bk
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Helpers
+# ══════════════════════════════════════════════════════════════════════════════
+function _to_eps(m_p_xyz)
+    if m_p_xyz isa Number
+        return ComplexF64(m_p_xyz)^2
+    else
+        return ComplexF64.(m_p_xyz) .^ 2
+    end
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Main sweep
+# ══════════════════════════════════════════════════════════════════════════════
+function main()
+    isfile(OUTPUT_FILE) || error("HDF5 file not found: $OUTPUT_FILE\n" *
+        "Create it first with: julia --project=. viem_results/create_h5.jl")
+
+    _log("Opening $OUTPUT_FILE")
+    _log("Solver: $SOLVER_METHOD  tol=$SOLVER_TOL  maxiter=$MAXITER  " *
+         "pitch_ratio=$AIM_PITCH_RATIO  padding=$AIM_PADDING")
+
+    h5open(OUTPUT_FILE, "r+") do f
+        t  = f["target"]
+        sd = t["simulated_data"]
+
+        N_alpha = Int(read_attribute(t, "N_alpha_ori"))
+        N_beta  = Int(read_attribute(t, "N_beta_ori"))
+        N_gamma = Int(read_attribute(t, "N_gamma_ori"))
+        num_orientations = N_alpha * N_beta * N_gamma
+
+        wl_m_m_pairs  = read(t["wl_m_m_pairs"])     # (N_pairs, 2) in Julia
+        m_p_xyz_list  = read(t["m_p_xyz_list"])      # (N_m_p, 3)
+        r_v_base_list = read(t["r_v_base_list"])
+        bc_ratio_list = read(t["bc_ratio_list"])
+        ab_ratio_list = read(t["ab_ratio_list"])
+        gre_beta_list = read(t["gre_beta_list"])
+
+        N_pairs = size(wl_m_m_pairs, 1)
+        N_m_p   = size(m_p_xyz_list, 1)
+        N_rv    = length(r_v_base_list)
+        N_bc    = length(bc_ratio_list)
+        N_ab    = length(ab_ratio_list)
+        N_bt    = length(gre_beta_list)
+
+        # Full Euler angle grid
+        euler_angles = generate_euler_grid(N_alpha, N_beta, N_gamma)
+
+        _log("Sweep: $(N_pairs) wl-pairs × $(N_m_p) m_p × " *
+             "$(N_rv) r_v × $(N_bc) bc × $(N_ab) ab × $(N_bt) β")
+        _log("Orientation grid: N_α=$N_alpha, N_β=$N_beta, N_γ=$N_gamma " *
+             "(L=$num_orientations)")
+
+        n_done = 0
+        n_skip = 0
+        n_total = N_pairs * N_m_p * N_rv * N_bc * N_ab * N_bt
+
+        for i_rv in 1:N_rv, i_bc in 1:N_bc, i_ab in 1:N_ab, i_bt in 1:N_bt
+            r_v_base  = r_v_base_list[i_rv]
+            bc_ratio  = bc_ratio_list[i_bc]
+            ab_ratio  = ab_ratio_list[i_ab]
+            gre_beta  = gre_beta_list[i_bt]
+
+            shape_idx = (i_rv, i_bc, i_ab, i_bt)
+            spheroid_mode = _is_spheroid(ab_ratio, gre_beta)
+
+            # Write r_ve (geometric, same for all wl/m_p for this shape)
+            sd["r_ve"][shape_idx...] = r_v_base
+
+            for i_pair in 1:N_pairs, i_mp in 1:N_m_p
+                wl_0    = wl_m_m_pairs[i_pair, 1]
+                m_m     = wl_m_m_pairs[i_pair, 2]
+                m_p_xyz = ComplexF64.(m_p_xyz_list[i_mp, :])
+
+                idx6 = (i_pair, i_mp, i_rv, i_bc, i_ab, i_bt)
+
+                # ── Resume: skip if already computed ─────────────────────
+                existing_mie = sd["S_fw_PCAS_mie"][idx6...]
+                if imag(existing_mie) != 0.0
+                    n_skip += 1
+                    _log("Skip: idx=$idx6 (already computed) [$n_skip skipped]")
+                    continue
+                end
+
+                # ── Build mesh + basis ───────────────────────────────────
+                println("─" ^ 64)
+                mode_tag = spheroid_mode ? " [spheroid, L_solve=$N_beta]" : ""
+                _log("idx=$idx6  wl_0=$(Printf.@sprintf("%.4f", wl_0)) μm  " *
+                     "m_m=$(Printf.@sprintf("%.4f", m_m))  m_p=$m_p_xyz")
+                _log("  r_v=$r_v_base  bc=$bc_ratio  ab=$ab_ratio  " *
+                     "β=$gre_beta  N_ori=$num_orientations$mode_tag")
+
+                t_mesh = @elapsed begin
+                    mesh, basis, r_ve = build_particle(
+                        r_v_base, bc_ratio, ab_ratio, gre_beta, wl_0, m_p_xyz)
+                end
+                h_bar = mean_edge_length(mesh)
+                _log("  mesh: $(n_tets(mesh)) tets, $(n_basis(basis)) DOFs, " *
+                     "r_ve=$(Printf.@sprintf("%.5f", r_ve)), " *
+                     "h̄=$(Printf.@sprintf("%.4f", h_bar)), " *
+                     "pitch=$(Printf.@sprintf("%.4f", AIM_PITCH_RATIO * h_bar)) " *
+                     "($(Printf.@sprintf("%.1fs", t_mesh)))")
+
+                # Update r_ve from actual mesh volume
+                sd["r_ve"][shape_idx...] = r_ve
+
+                # ── Solve ────────────────────────────────────────────────
+                # On failure, fill with NaN and continue to next condition
+                # (matching block-DDA_Py behaviour). Only Ctrl+C stops the sweep.
+                C_abs      = fill(NaN, num_orientations)
+                C_ext      = fill(NaN, num_orientations)
+                S_fw_theta = fill(NaN + NaN*im, num_orientations)
+                S_fw_phi   = fill(NaN + NaN*im, num_orientations)
+                S_bk       = fill(NaN + NaN*im, num_orientations)
+                t0_solve = time_ns()
+                try
+                    if spheroid_mode
+                        C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, _ =
+                            run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
+                                              N_alpha, N_beta, N_gamma)
+                    else
+                        C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, _ =
+                            run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz,
+                                             euler_angles)
+                    end
+                catch e
+                    if e isa InterruptException
+                        _log("Interrupted — file closed cleanly.")
+                        return
+                    end
+                    _log("  FAILED: $(sprint(showerror, e))")
+                    _log("  filling with NaN and continuing")
+                end
+                t_solve = (time_ns() - t0_solve) / 1e9
+                _log("  solve: $(Printf.@sprintf("%.1fs", t_solve))")
+
+                # ── Mie reference ────────────────────────────────────────
+                C_abs_mie, C_ext_mie, S_fw_mie, S_bk_mie =
+                    compute_mie_reference(wl_0, m_m, r_v_base, m_p_xyz)
+
+                # ── Write Euler angles ───────────────────────────────────
+                euler_flat = Matrix{Float64}(undef, num_orientations, 3)
+                for i in 1:num_orientations
+                    euler_flat[i, 1] = euler_angles[i][1]
+                    euler_flat[i, 2] = euler_angles[i][2]
+                    euler_flat[i, 3] = euler_angles[i][3]
+                end
+
+                # ── Write results to HDF5 ────────────────────────────────
+                sd["Euler_angles"][idx6..., :, :]    = euler_flat
+                sd["C_abs"][idx6..., :]              = C_abs
+                sd["C_ext"][idx6..., :]              = C_ext
+                sd["S_fw_PCAS_theta"][idx6..., :]    = S_fw_theta
+                sd["S_fw_PCAS_phi"][idx6..., :]      = S_fw_phi
+                sd["S_bk_OCBS"][idx6..., :]          = S_bk
+                sd["C_abs_mie"][idx6...]              = C_abs_mie
+                sd["C_ext_mie"][idx6...]              = C_ext_mie
+                sd["S_fw_PCAS_mie"][idx6...]          = S_fw_mie
+                sd["S_bk_OCBS_mie"][idx6...]          = S_bk_mie
+
+                n_done += 1
+                C_ext_mean = sum(filter(!isnan, C_ext)) /
+                             max(1, count(!isnan, C_ext))
+                _log("  C_ext(mean)=$(Printf.@sprintf("%.4e", C_ext_mean))  " *
+                     "Mie C_ext=$(Printf.@sprintf("%.4e", C_ext_mie))  " *
+                     "[$n_done done, $n_skip skipped / $n_total total]")
+                flush(stdout)
+            end
+        end
+
+        println("═" ^ 64)
+        _log("Sweep complete: $n_done computed, $n_skip skipped, $n_total total")
+    end
+end
+
+# Run
+main()

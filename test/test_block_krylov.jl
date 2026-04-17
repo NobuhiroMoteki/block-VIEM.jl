@@ -66,17 +66,13 @@ end
 
     ref = solve_cas_v2_orientations(basis, euler_list;
                                     k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
-                                    duffy_rule = duffy_reference_rule(7))
+                                    duffy_rule = duffy_reference_rule(7),
+                                    method = :dense)
 
     # AIM pitch matches benchmarks/rt0/v9 — ~4% MVP error vs dense, same as
     # test_half_swg_aim.jl tolerance. AIM-vs-dense agreement is set by the
     # AIM discretization, not by the block Krylov convergence.
-    h_bar = 0.0
-    cnt = 0
-    for tet in mesh.tets, (a, b) in ((1,2),(1,3),(1,4),(2,3),(2,4),(3,4))
-        h_bar += norm(mesh.nodes[tet[a]] - mesh.nodes[tet[b]]); cnt += 1
-    end
-    h_bar /= cnt
+    h_bar = mean_edge_length(mesh)
     pitch = 0.5 * h_bar
 
     local out_bicgstab::Vector{CASv2Result}

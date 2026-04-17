@@ -107,3 +107,20 @@ end
     total_volume(mesh::TetMesh) -> Float64
 """
 total_volume(mesh::TetMesh) = sum(mesh.tet_volumes)
+
+"""
+    mean_edge_length(mesh::TetMesh) -> Float64
+
+Mean edge length across all tetrahedra (6 edges per tet, counted with
+multiplicity). Useful for setting the AIM grid pitch (`pitch ≈ 0.5 h̄`).
+"""
+function mean_edge_length(mesh::TetMesh)
+    s = 0.0; c = 0
+    @inbounds for tet in mesh.tets
+        for (a, b) in ((1,2),(1,3),(1,4),(2,3),(2,4),(3,4))
+            s += norm(mesh.nodes[tet[a]] - mesh.nodes[tet[b]])
+            c += 1
+        end
+    end
+    return s / c
+end

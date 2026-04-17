@@ -575,9 +575,9 @@ end
                               outer_rule::TetQuadRule = TET_QUAD_5PT,
                               ff_rule::TetQuadRule = TET_QUAD_5PT,
                               symmetrize::Bool = true,
-                              method::Symbol = :dense,
+                              method::Symbol = :aim_bicgstab,
                               pitch::Union{Float64,Nothing} = nothing,
-                              padding::Integer = 3,
+                              padding::Integer = 4,
                               tol::Float64 = 1e-6,
                               maxiter::Integer = 200,
                               verbose::Bool = false)
@@ -609,10 +609,11 @@ Mixing the two forms, or supplying neither complete set, raises an
 # Solver selection
 
 `method` selects how the multi-RHS system is solved:
+- `:aim_bicgstab` — AIM FFT-MVP + Block BiCGSTAB (**default**). If `pitch`
+                    is not supplied it is set to `0.5 × mean_edge_length`.
+- `:aim_gmres`    — AIM FFT-MVP + Block GMRES (same pitch auto-detection).
 - `:dense`        — assemble `Z` and LU-factorize once, then reuse
-                    across orientations. Use for `N ≲ few×10³`.
-- `:aim_bicgstab` — AIM FFT-MVP + Block BiCGSTAB (needs `pitch`).
-- `:aim_gmres`    — AIM FFT-MVP + Block GMRES (needs `pitch`).
+                    across orientations. Only for small problems (`N ≲ 10³`).
 
 `euler_angles` is an iterable of `(alpha, beta, gamma)` tuples in the
 intrinsic ZYZ convention, matching `scipy.spatial.transform.Rotation`
@@ -630,12 +631,13 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    outer_rule::TetQuadRule = TET_QUAD_5PT,
                                    ff_rule::TetQuadRule = TET_QUAD_5PT,
                                    symmetrize::Bool = true,
-                                   method::Symbol = :dense,
+                                   method::Symbol = :aim_bicgstab,
                                    pitch::Union{Float64,Nothing} = nothing,
-                                   padding::Integer = 3,
+                                   padding::Integer = 4,
                                    tol::Float64 = 1e-6,
                                    maxiter::Integer = 200,
-                                   verbose::Bool = false)
+                                   verbose::Bool = false,
+                                   return_D::Bool = false)
     k0_c, eps_p_c, eps_bg_c = _resolve_physical_inputs(wl_0, m_m, m_p,
                                                        k0, eps_p, eps_bg)
     # `k0_c` is the wavenumber in the background medium, matching
@@ -661,8 +663,10 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
             @views D_block[:, i] .= F \ b
         end
     elseif method === :aim_bicgstab || method === :aim_gmres
-        pitch === nothing &&
-            throw(ArgumentError("AIM methods require the `pitch` keyword"))
+        # Auto-detect pitch from mean edge length if not supplied
+        if pitch === nothing
+            pitch = 0.5 * mean_edge_length(basis.mesh)
+        end
         N = n_basis(basis)
         B = Matrix{ComplexF64}(undef, N, L)
         for (i, ori) in enumerate(orientations)
@@ -694,5 +698,5 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                              k0 = k0_c, eps_p = eps_p_c,
                                              eps_bg = eps_bg_c, rule = ff_rule)
     end
-    return results
+    return return_D ? (results, D_block) : results
 end

@@ -195,7 +195,8 @@ end
     ]
     results = solve_cas_v2_orientations(basis, euler_list;
                                          k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
-                                         duffy_rule = duffy_reference_rule(7))
+                                         duffy_rule = duffy_reference_rule(7),
+                                         method = :dense)
     @test length(results) == length(euler_list)
 
     # Sphere is rotation-invariant: all S_fw should agree across orientations.
@@ -213,7 +214,8 @@ end
     # results to the raw (k0, eps_p, eps_bg) form when m_m = 1.
     results_phys = solve_cas_v2_orientations(basis, euler_list;
                                               wl_0 = wl_0, m_m = m_m, m_p = m_p,
-                                              duffy_rule = duffy_reference_rule(7))
+                                              duffy_rule = duffy_reference_rule(7),
+                                              method = :dense)
     for (r, rp) in zip(results, results_phys)
         @test isapprox(rp.S_fw, r.S_fw; rtol = 1e-12)
         @test isapprox(rp.S_bk, r.S_bk; rtol = 1e-12)
@@ -249,11 +251,13 @@ end
     res_raw  = solve_cas_v2_orientations(basis, euler_list;
                                          k0 = k0_bg, eps_p = eps_p,
                                          eps_bg = eps_bg,
-                                         duffy_rule = duffy_reference_rule(7))
+                                         duffy_rule = duffy_reference_rule(7),
+                                         method = :dense)
     # Physical form — internally computes k0 = 2π·m_m/wl_0.
     res_phys = solve_cas_v2_orientations(basis, euler_list;
                                          wl_0 = wl_0, m_m = m_m, m_p = m_p,
-                                         duffy_rule = duffy_reference_rule(7))
+                                         duffy_rule = duffy_reference_rule(7),
+                                         method = :dense)
     for (rr, rp) in zip(res_raw, res_phys)
         @test isapprox(rp.S_fw, rr.S_fw; rtol = 1e-12)
         @test isapprox(rp.S_bk, rr.S_bk; rtol = 1e-12)
