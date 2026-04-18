@@ -14,7 +14,7 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-04-17 (corresponds to block-VIEM.jl v0.4.0)}
+\date{Last updated: 2026-04-18 (corresponds to block-VIEM.jl v0.4.2)}
 
 \begin{document}
 \maketitle
@@ -1390,10 +1390,18 @@ benchmark point.  CBICG tolerance $10^{-8}$.
 $\beta \in \{0, \pi/4, \pi/2\}$ and two refractive indices: a
 high-contrast dielectric $m_p = 1.60 + 0.01 i$ (polystyrene-like) and
 plasmonic gold $m_p = 0.17525 + 3.4830 i$ at \SI{638}{\nano\metre}
-(Johnson \& Christy 1972).  The relative error of $|S_{\text{fw,mean}}|$
-stays within \SI{1.5}{\percent} for both materials across all
-orientations, and the phase error is $\lesssim \SI{7}{\milli\radian}$
-even in the plasmonic case.
+(Johnson \& Christy 1972).  For the dielectric case the relative
+error of $|S_{\text{fw,mean}}|$ stays within \SI{1.6}{\percent}
+across all orientations.  For the plasmonic gold doublet the error
+grows with $\beta$ from \SI{1.3}{\percent} at $\beta = 0$ to
+\SI{4.0}{\percent} at $\beta = \pi/2$, with a corresponding phase
+error of at most $\SI{7}{\milli\radian}$.  The Re/Im-resolved
+breakdown (Tables~\ref{tab:doublet-mstm-theta},
+\ref{tab:doublet-mstm-phi}) reveals substantially stronger
+anisotropy: $\Im S_{\text{fw},\theta}$ at $\beta = \pi/2$ reaches
+\SI{10.5}{\percent}, reflecting the concentration of the plasmonic
+surface mode in the sub-wavelength inter-sphere gap when the doublet
+axis is aligned with the incident polarisation.
 
 Table~\ref{tab:doublet-mstm-summary} reports the composite
 $|S_{\text{fw,mean}}|$ magnitudes and complex relative errors, while

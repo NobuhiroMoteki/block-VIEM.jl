@@ -34,15 +34,13 @@ end
 
 function main()
     k_medium = 2π * M_MEDIUM / WL_0
-    # Extended range now that MSTMforCAS ≥ 0.4.2 uses Miller's downward
-    # recurrence for ψ_n(x), so high-N is numerically stable even at
-    # x ≈ 0.3.  This sweep verifies whether any higher-order multipoles
-    # (populated through the doublet translation coupling) still
-    # contribute at the 1e-5 level beyond the single-sphere Mie floor
-    # at n ≈ 6 for Au.
+    # MSTMforCAS ≥ 0.4.3 incorporates three upstream stability fixes:
     # Miller-downward ψ_n (PR #1), mie_vecs sizing (PR #2), and
-    # translation-coefficient j_n recurrence (PR #3) all merged into
-    # MSTMforCAS main.  Truncation up to N=15 is now stable at x≈0.3.
+    # Miller-downward j_n for the translation operator (PR #3), so the
+    # VSWF truncation is now numerically stable up to N = 15 at
+    # x ≈ 0.3.  This sweep quantifies how many VSWF orders are
+    # physically required for the doublet scattering coupling to
+    # converge below the benchmark target (rtol ≤ 1e-5).
     trunc_orders = (3, 5, 8, 10, 12, 15)
 
     println("MSTM VSWF truncation-order convergence (doublet benchmark)")
