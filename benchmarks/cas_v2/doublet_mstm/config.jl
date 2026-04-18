@@ -53,13 +53,15 @@ const MSTM_USE_FFT   = false
 const MSTM_TOL       = 1e-8
 # VSWF truncation order.  The auto-selected Wiscombe-based value is N=3
 # for our small-x monomers, which under-truncates the doublet forward
-# amplitude for high-|m| Au by ~5%.  We force N=6 explicitly: it is the
-# largest value that (i) exceeds the multi-sphere coupling convergence
-# threshold and (ii) stays within the numerically-stable regime of the
-# Riccati-Bessel upward recurrence at x ≈ 0.3 in MSTMforCAS.
-# (For x ≈ 0.3, |a_n| drops below double-precision ε at n = 6, so N = 6
-# is also physically exact to machine precision.)
-const MSTM_TRUNC_ORDER = 6
+# amplitude for plasmonic Au by ~5% on |S_fw| (|m·x|≈1 amplifies higher
+# multipoles through the inter-sphere translation coupling).  With
+# MSTMforCAS ≥ 0.4.3 (Miller ψ_n + Miller j_n translation + mie_vecs
+# sizing fixes) the reference is numerically stable up to N=15 at
+# x≈0.3.  Au converges to ≤ 1e-4 by N=10 and to reference (~1e-7) at
+# N=15.  We force N=15 for both materials — cheap for a 2-sphere
+# aggregate (<0.1 s per orientation) and gives a fully converged
+# exact reference for the VIEM benchmark.
+const MSTM_TRUNC_ORDER = 15
 
 # Output file paths (relative to this directory)
 _OUT_DIR = @__DIR__

@@ -40,10 +40,10 @@ function main()
     # (populated through the doublet translation coupling) still
     # contribute at the 1e-5 level beyond the single-sphere Mie floor
     # at n ≈ 6 for Au.
-    # Post Miller fix (MSTMforCAS ≥ 0.4.2) we can go beyond N=6 provided
-    # nois[i] stays within mie_nmax(x) = 8; higher N triggers a separate
-    # unrelated bug in solve_tmatrix (mie_vecs undersized).
-    trunc_orders = (3, 4, 5, 6, 7, 8)
+    # Miller-downward ψ_n (PR #1), mie_vecs sizing (PR #2), and
+    # translation-coefficient j_n recurrence (PR #3) all merged into
+    # MSTMforCAS main.  Truncation up to N=15 is now stable at x≈0.3.
+    trunc_orders = (3, 5, 8, 10, 12, 15)
 
     println("MSTM VSWF truncation-order convergence (doublet benchmark)")
     println("  R=$R_MONOMER μm, gap=$GAP μm, λ₀=$WL_0 μm, x≈",

@@ -1354,31 +1354,37 @@ convergence check (partial $Q_{\text{ext}}$ within $10^{-6}$).  That
 choice is converged for the high-index dielectric but not for gold:
 the product $|m\!\cdot\!x| \approx 1.03$ combined with the
 inter-sphere translation coupling amplifies higher-order multipoles,
-and $|S_{\text{fw,mean}}|$ shifts by roughly $0.9\%$ per additional order
-from $N = 3$ up to $N = 6$ (a total of $\approx 5\%$).  We therefore
-force $N_{\text{trunc}} = 6$ in \texttt{run\_mstm.jl} for both
-materials.
+and $|S_{\text{fw,mean}}|$ shifts by $\approx 5\%$ between $N = 3$
+and the fully-converged $N = 15$ reference (a geometric convergence
+with per-order ratio $\approx 0.3$).  We therefore force
+$N_{\text{trunc}} = 15$ in \texttt{run\_mstm.jl} for both materials:
+computationally cheap for a 2-sphere aggregate ($\lesssim
+\SI{0.5}{\second}$ per orientation) and delivers a reference with
+rtol $\leq 10^{-6}$.
 
-The original Riccati--Bessel upward recurrence in MSTMforCAS failed
-catastrophically at $N \geq 7$ for $x \approx 0.3$: the
-double-precision underflow $\psi_n(x) \sim x^n/(2n-1)!!$ reaches
-$\sim 10^{-9}$ at $n = 8$, below the spurious $\chi_n$-component
-amplification (factor $(2n-1)/x \approx 44$ per step).  This
-instability was fixed in MSTMforCAS $\geq 0.4.2$ by replacing the
-upward recurrence with Miller's downward (Wiscombe 1980) algorithm,
-after which the single-sphere Mie coefficients decay smoothly to
-$|a_n| \sim 10^{-50}$ at $n = 15$.  A residual numerical-stability
-issue remains in the multi-sphere translation-coefficient evaluation
-at $N \geq 7$ for this small-$kd$ geometry (the high-order
-spherical-Hankel growth $y_n(kd) \sim (2n-1)!!\, (kd)^{-n-1}$ loses
-precision against the exponentially decaying Mie coefficients), but
-it is irrelevant here because $|a_n|, |b_n|$ fall below machine
-$\varepsilon$ at $n = 6$ for $|m\!\cdot\!x| \approx 1$: the
-truncation at $N = 6$ is \emph{physically} exact to double precision
-for this benchmark.  Larger-$x$ or higher-$|m\!\cdot\!x|$ plasmonic
-targets would require a Mackowski-style recursive translation-operator
-scheme to take full advantage of the Miller fix.  CBICG tolerance
-$10^{-8}$.
+MSTMforCAS $\geq 0.4.3$ incorporates three numerical-stability fixes
+contributed as part of this benchmark work:
+\begin{enumerate}
+\item Miller's downward recurrence for the Riccati--Bessel
+      $\psi_n(x)$ replaces the conditionally-stable upward recurrence
+      (Wiscombe 1980); the upward recurrence previously failed
+      catastrophically at $N \geq 7$ for $x \approx 0.3$ because the
+      underflow $\psi_n(x) \sim x^n/(2n-1)!!$ reaches $\sim 10^{-9}$
+      at $n = 8$ and is drowned by the spurious $\chi_n$-component
+      amplification factor $(2n-1)/x \approx 44$ per step.
+\item Correct sizing of the per-sphere Mie-coefficient buffer
+      \texttt{mie\_vecs[i]} to \texttt{nois[i]} when the user-requested
+      \texttt{truncation\_order} exceeds the default Wiscombe bound
+      \texttt{mie\_nmax(x)}.
+\item Miller's downward recurrence for the spherical-Bessel $j_n(z)$
+      used in the multi-sphere translation operator, eliminating the
+      analogous $y_n(kd) \sim (2n-1)!!\,(kd)^{-n-1}$ precision loss
+      at small $kd$.
+\end{enumerate}
+With these fixes MSTMforCAS converges geometrically in $N$ to
+$\leq 10^{-6}$ by $N = 15$ for both materials at $x \approx 0.3$; the
+\texttt{check\_trunc\_convergence.jl} script verifies this at each
+benchmark point.  CBICG tolerance $10^{-8}$.
 
 \paragraph{Results.} The benchmark is run at three orientations
 $\beta \in \{0, \pi/4, \pi/2\}$ and two refractive indices: a
@@ -1410,9 +1416,10 @@ and analogously for $S_{\text{fw},\varphi}$.
 \begin{table}[htbp]
 \centering
 \caption{Summary of the complex $S_{\text{fw,mean}}$ agreement at
-$N_{\text{trunc}} = 6$.  Geometry as in the text: equal spheres of
-radius \SI{0.030}{\micro\metre}, gap \SI{0.003}{\micro\metre},
-$\lambda_0 = \SI{0.638}{\micro\metre}$, $m_m = 1$.}
+the fully-converged $N_{\text{trunc}} = 15$.  Geometry as in the
+text: equal spheres of radius \SI{0.030}{\micro\metre}, gap
+\SI{0.003}{\micro\metre}, $\lambda_0 = \SI{0.638}{\micro\metre}$,
+$m_m = 1$.}
 \label{tab:doublet-mstm-summary}
 \footnotesize
 \begin{tabular}{lrrrrrr}
@@ -1423,13 +1430,13 @@ material & $\beta$ [rad]
          & rel.\ $|\cdot|$ err. & complex rel.\ err.
          & phase err.\ [rad] \\
 \midrule
-dielectric & 0 & $1.769\!\times\!10^{-3}$ & $1.794\!\times\!10^{-3}$ & \SI{1.4}{\percent} & \SI{1.4}{\percent} & $1.6\!\times\!10^{-4}$ \\
+dielectric & 0 & $1.769\!\times\!10^{-3}$ & $1.794\!\times\!10^{-3}$ & \SI{1.4}{\percent} & \SI{1.4}{\percent} & $1.3\!\times\!10^{-4}$ \\
 $m_p=1.60+0.01i$ & $\pi/4$ & $1.822\!\times\!10^{-3}$ & $1.849\!\times\!10^{-3}$ & \SI{1.5}{\percent} & \SI{1.5}{\percent} & $1.6\!\times\!10^{-4}$ \\
 & $\pi/2$ & $1.878\!\times\!10^{-3}$ & $1.908\!\times\!10^{-3}$ & \SI{1.6}{\percent} & \SI{1.6}{\percent} & $2.0\!\times\!10^{-4}$ \\
 \midrule
-gold & 0 & $6.420\!\times\!10^{-3}$ & $6.515\!\times\!10^{-3}$ & \SI{1.5}{\percent} & \SI{1.5}{\percent} & $5.3\!\times\!10^{-4}$ \\
-$m_p=0.175+3.48i$ & $\pi/4$ & $8.043\!\times\!10^{-3}$ & $8.244\!\times\!10^{-3}$ & \SI{2.4}{\percent} & \SI{2.5}{\percent} & $3.2\!\times\!10^{-3}$ \\
-& $\pi/2$ & $9.785\!\times\!10^{-3}$ & $1.011\!\times\!10^{-2}$ & \SI{3.2}{\percent} & \SI{3.2}{\percent} & $4.4\!\times\!10^{-3}$ \\
+gold & 0 & $6.420\!\times\!10^{-3}$ & $6.504\!\times\!10^{-3}$ & \SI{1.3}{\percent} & \SI{1.3}{\percent} & $5.1\!\times\!10^{-4}$ \\
+$m_p=0.175+3.48i$ & $\pi/4$ & $8.043\!\times\!10^{-3}$ & $8.287\!\times\!10^{-3}$ & \SI{2.9}{\percent} & \SI{3.0}{\percent} & $4.9\!\times\!10^{-3}$ \\
+& $\pi/2$ & $9.785\!\times\!10^{-3}$ & $1.020\!\times\!10^{-2}$ & \SI{4.0}{\percent} & \SI{4.1}{\percent} & $7.0\!\times\!10^{-3}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1449,13 +1456,13 @@ material & $\beta$ [rad]
          & $\Im S_\theta^{\text{VIEM}}$ & $\Im S_\theta^{\text{MSTM}}$
          & rel.\ err.\ $\Im$ \\
 \midrule
-dielectric & 0 & $1.7682\!\times\!10^{-3}$ & $1.7937\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.1063\!\times\!10^{-5}$ & $4.2003\!\times\!10^{-5}$ & \SI{2.2}{\percent} \\
-& $\pi/4$ & $1.8768\!\times\!10^{-3}$ & $1.9068\!\times\!10^{-3}$ & \SI{1.6}{\percent} & $4.7872\!\times\!10^{-5}$ & $4.9087\!\times\!10^{-5}$ & \SI{2.5}{\percent} \\
-& $\pi/2$ & $1.9933\!\times\!10^{-3}$ & $2.0282\!\times\!10^{-3}$ & \SI{1.7}{\percent} & $5.5225\!\times\!10^{-5}$ & $5.6773\!\times\!10^{-5}$ & \SI{2.7}{\percent} \\
+dielectric & 0 & $1.7682\!\times\!10^{-3}$ & $1.7934\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.1063\!\times\!10^{-5}$ & $4.1991\!\times\!10^{-5}$ & \SI{2.2}{\percent} \\
+& $\pi/4$ & $1.8768\!\times\!10^{-3}$ & $1.9066\!\times\!10^{-3}$ & \SI{1.6}{\percent} & $4.7872\!\times\!10^{-5}$ & $4.9082\!\times\!10^{-5}$ & \SI{2.5}{\percent} \\
+& $\pi/2$ & $1.9933\!\times\!10^{-3}$ & $2.0279\!\times\!10^{-3}$ & \SI{1.7}{\percent} & $5.5225\!\times\!10^{-5}$ & $5.6771\!\times\!10^{-5}$ & \SI{2.7}{\percent} \\
 \midrule
-gold & 0 & $6.4046\!\times\!10^{-3}$ & $6.4992\!\times\!10^{-3}$ & \SI{1.5}{\percent} & $4.3635\!\times\!10^{-4}$ & $4.4794\!\times\!10^{-4}$ & \SI{2.6}{\percent} \\
-& $\pi/4$ & $9.6439\!\times\!10^{-3}$ & $9.9561\!\times\!10^{-3}$ & \SI{3.1}{\percent} & $1.2147\!\times\!10^{-3}$ & $1.3008\!\times\!10^{-3}$ & \SI{6.6}{\percent} \\
-& $\pi/2$ & $1.3102\!\times\!10^{-2}$ & $1.3646\!\times\!10^{-2}$ & \SI{4.0}{\percent} & $2.0467\!\times\!10^{-3}$ & $2.2088\!\times\!10^{-3}$ & \SI{7.3}{\percent} \\
+gold & 0 & $6.4046\!\times\!10^{-3}$ & $6.4886\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.3635\!\times\!10^{-4}$ & $4.4705\!\times\!10^{-4}$ & \SI{2.4}{\percent} \\
+& $\pi/4$ & $9.6439\!\times\!10^{-3}$ & $1.0037\!\times\!10^{-2}$ & \SI{3.9}{\percent} & $1.2147\!\times\!10^{-3}$ & $1.3381\!\times\!10^{-3}$ & \SI{9.2}{\percent} \\
+& $\pi/2$ & $1.3102\!\times\!10^{-2}$ & $1.3818\!\times\!10^{-2}$ & \SI{5.2}{\percent} & $2.0467\!\times\!10^{-3}$ & $2.2857\!\times\!10^{-3}$ & \SI{10.5}{\percent} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1475,13 +1482,13 @@ material & $\beta$ [rad]
          & $\Im S_\varphi^{\text{VIEM}}$ & $\Im S_\varphi^{\text{MSTM}}$
          & rel.\ err.\ $\Im$ \\
 \midrule
-dielectric & 0 & $1.7683\!\times\!10^{-3}$ & $1.7937\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.1285\!\times\!10^{-5}$ & $4.2003\!\times\!10^{-5}$ & \SI{1.7}{\percent} \\
-& $\pi/4$ & $1.7651\!\times\!10^{-3}$ & $1.7902\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.2005\!\times\!10^{-5}$ & $4.2723\!\times\!10^{-5}$ & \SI{1.7}{\percent} \\
-& $\pi/2$ & $1.7619\!\times\!10^{-3}$ & $1.7870\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.2680\!\times\!10^{-5}$ & $4.3462\!\times\!10^{-5}$ & \SI{1.8}{\percent} \\
+dielectric & 0 & $1.7683\!\times\!10^{-3}$ & $1.7934\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.1285\!\times\!10^{-5}$ & $4.1991\!\times\!10^{-5}$ & \SI{1.7}{\percent} \\
+& $\pi/4$ & $1.7651\!\times\!10^{-3}$ & $1.7902\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.2005\!\times\!10^{-5}$ & $4.2724\!\times\!10^{-5}$ & \SI{1.7}{\percent} \\
+& $\pi/2$ & $1.7619\!\times\!10^{-3}$ & $1.7870\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.2680\!\times\!10^{-5}$ & $4.3463\!\times\!10^{-5}$ & \SI{1.8}{\percent} \\
 \midrule
-gold & 0 & $6.4049\!\times\!10^{-3}$ & $6.4992\!\times\!10^{-3}$ & \SI{1.5}{\percent} & $4.3967\!\times\!10^{-4}$ & $4.4794\!\times\!10^{-4}$ & \SI{1.9}{\percent} \\
-& $\pi/4$ & $6.3556\!\times\!10^{-3}$ & $6.4387\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.4777\!\times\!10^{-4}$ & $4.5496\!\times\!10^{-4}$ & \SI{1.6}{\percent} \\
-& $\pi/2$ & $6.3084\!\times\!10^{-3}$ & $6.3892\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.5536\!\times\!10^{-4}$ & $4.6332\!\times\!10^{-4}$ & \SI{1.7}{\percent} \\
+gold & 0 & $6.4049\!\times\!10^{-3}$ & $6.4886\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.3967\!\times\!10^{-4}$ & $4.4705\!\times\!10^{-4}$ & \SI{1.7}{\percent} \\
+& $\pi/4$ & $6.3556\!\times\!10^{-3}$ & $6.4392\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.4777\!\times\!10^{-4}$ & $4.5502\!\times\!10^{-4}$ & \SI{1.6}{\percent} \\
+& $\pi/2$ & $6.3084\!\times\!10^{-3}$ & $6.3893\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.5536\!\times\!10^{-4}$ & $4.6332\!\times\!10^{-4}$ & \SI{1.7}{\percent} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1499,24 +1506,24 @@ discretisation error appears larger on $\Im$ in relative terms.  Both
 parts converge as $O(h^2)$ under mesh refinement
 (Sec.~\ref{sec:mie-sphere}).
 
-The plasmonic gold doublet reveals a more interesting
+The plasmonic gold doublet reveals a strong
 \emph{orientation-polarization anisotropy} of the discretisation error.
 The $\varphi$ channel (Table~\ref{tab:doublet-mstm-phi}) is essentially
-flat in $\beta$ at \SI{1.3}{\percent}--\SI{1.5}{\percent} on $\Re$ and
-\SI{1.6}{\percent}--\SI{1.9}{\percent} on $\Im$, because $S_{\text{fw},\varphi}$
-probes the polarisation component transverse to both the incidence
-direction and the doublet axis -- the two spheres are essentially
-independent through this channel.  The $\theta$ channel
-(Table~\ref{tab:doublet-mstm-theta}) behaves very differently: it
-couples to the component of the incident electric field that lies in
-the plane spanned by $\hat{\bm{k}}_{\text{inc}}$ and the doublet axis,
-and at $\beta = \pi/2$ this component is aligned with the doublet
-axis.  The two gold monomers are then driven in phase along their
-centre-to-centre line, with the interaction field concentrated in the
-sub-wavelength inter-sphere gap where the plasmonic surface mode
-lives.  In this configuration the error rises to \SI{4.0}{\percent}
-on $\Re S_{\text{fw},\theta}$ and \SI{7.3}{\percent} on
-$\Im S_{\text{fw},\theta}$.
+flat in $\beta$ at $\approx \SI{1.3}{\percent}$ on $\Re$ and
+\SI{1.6}{\percent}--\SI{1.7}{\percent} on $\Im$, because
+$S_{\text{fw},\varphi}$ probes the polarisation component transverse
+to both the incidence direction and the doublet axis -- the two
+spheres are essentially independent through this channel.  The
+$\theta$ channel (Table~\ref{tab:doublet-mstm-theta}) behaves very
+differently: it couples to the component of the incident electric
+field that lies in the plane spanned by $\hat{\bm{k}}_{\text{inc}}$
+and the doublet axis, and at $\beta = \pi/2$ this component is aligned
+with the doublet axis.  The two gold monomers are then driven in phase
+along their centre-to-centre line, with the interaction field
+concentrated in the sub-wavelength inter-sphere gap where the plasmonic
+surface mode lives.  In this configuration the error rises to
+\SI{5.2}{\percent} on $\Re S_{\text{fw},\theta}$ and \SI{10.5}{\percent}
+on $\Im S_{\text{fw},\theta}$.
 
 Physically, the gold skin depth at \SI{638}{\nano\metre} is
 \begin{equation*}
@@ -1536,26 +1543,30 @@ since the SWG basis converges as $O(h^2)$ under uniform refinement.
 The practical takeaway is that for high-$|m|$ absorbing aggregates the
 imaginary part of the longitudinal-polarisation channel is the
 stiffest observable and should be adopted as the convergence indicator
-when sizing $\ell_c$: a uniform \SI{3}{\percent} error on
-$|S_{\text{fw,mean}}|$ can hide a \SI{7.3}{\percent} error on
-$\Im S_{\text{fw},\theta}$, and it is the Re/Im-resolved component
-view of Tables~\ref{tab:doublet-mstm-theta}--\ref{tab:doublet-mstm-phi}
-that makes this gap visible.
+when sizing $\ell_c$: a \SI{4.0}{\percent} error on
+$|S_{\text{fw,mean}}|$ at $\beta = \pi/2$ \emph{hides} a
+\SI{10.5}{\percent} error on $\Im S_{\text{fw},\theta}$, and it is
+the Re/Im-resolved component view of
+Tables~\ref{tab:doublet-mstm-theta}--\ref{tab:doublet-mstm-phi} that
+makes this gap visible.
 
 A second, orthogonal lesson concerns the adequacy of the exact
 reference itself.  MSTMforCAS's default auto-truncation delivers
 $N_{\text{trunc}} = 3$ at these parameters -- adequate for the
 dielectric case, where $|a_3|$ is already below $10^{-6}$ of $|a_1|$,
-but \emph{under-truncating} the gold doublet by approximately
-\SI{5}{\percent} on $|S_{\text{fw,mean}}|$.  We therefore use
-$N_{\text{trunc}} = 6$ for both materials, which both saturates the
-isolated-monomer Mie series to machine precision and covers the
-higher-order multipoles populated through the doublet translation
-operator.  This is a reminder that for aggregates of plasmonic
-monomers the appropriate MSTM truncation is set by the
-\emph{inter-sphere coupling}, not by the single-sphere Mie
-convergence, and that MSTM reference data should always be supplied
-with an explicit $N_{\text{trunc}}$ and a convergence check
+but badly \emph{under-truncating} the gold doublet:
+$|S_{\text{fw,mean}}|$ shifts by $\approx \SI{5}{\percent}$ between
+$N = 3$ and the fully-converged $N = 15$ reference.  We therefore use
+$N_{\text{trunc}} = 15$, which reaches rtol $\leq 10^{-6}$ on both
+materials at $x \approx 0.3$.  Before the three MSTMforCAS stability
+fixes listed above this convergence sweep was impossible -- the
+package could not take $N$ beyond 6 at $x \approx 0.3$ because of
+combined Riccati--Bessel and translation-coefficient numerical
+instabilities.  For aggregates of plasmonic monomers the appropriate
+MSTM truncation is set by the \emph{inter-sphere coupling} amplified
+by $|m\!\cdot\!x|$, not by the single-sphere Mie convergence, and
+MSTM reference data should always be supplied with an explicit
+$N_{\text{trunc}}$ and a convergence check
 (\texttt{benchmarks/cas\_v2/doublet\_mstm/check\_trunc\_convergence.jl}).
 
 The full benchmark pipeline (geometry builder, VIEM solve, MSTM

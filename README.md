@@ -404,35 +404,40 @@ heuristic returns N = 3. For the polystyrene case the single-sphere
 Mie coefficients satisfy `|a_N|,|b_N| < 10⁻⁶` already at N = 3, so
 N = 3 is a converged reference. For **gold**, however, the high
 `|m·x| ≈ 1.03` combined with the multi-sphere translation coupling
-amplifies higher-order multipoles: empirically `|S_fw_mean|` shifts by
-~0.9 % per step from N = 3 to N = 6 (a total of ~5 %). We therefore
-force `truncation_order = 6` for both materials in `run_mstm.jl`.
+amplifies higher-order multipoles: empirically `|S_fw_mean|` shifts
+by ~5 % going from N = 3 to N = 15 and converges geometrically to a
+relative error ≤ 10⁻⁶ by N = 15. We therefore force
+`truncation_order = 15` for both materials in `run_mstm.jl` —
+computationally cheap for a 2-sphere aggregate (<0.5 s per
+orientation) and delivers a fully converged exact reference.
 
-MSTMforCAS ≥ 0.4.2 uses Miller's downward recurrence for the
-Riccati–Bessel ψ_n(x), so the single-sphere Mie coefficients are now
-stable all the way to `|a_n| ~ 10⁻⁵⁰` at n = 15 (see
-`benchmarks/cas_v2/doublet_mstm/mstm_patch_draft.md` for the patch
-that was contributed upstream, and
-`mstm_patch_draft_followup.md` for a follow-up size-of-`mie_vecs`
-fix). A separate numerical-stability issue remains in the
-multi-sphere translation-coefficient evaluation at N ≥ 7 for this
-`x ≈ 0.3` geometry (the `y_n(kd) ~ (2n−1)!!/(kd)^(n+1)` asymptotic
-growth loses precision against the exponentially decaying Mie
-coefficients at small `kd`). Since for `x ≈ 0.3`, `|m·x| ≈ 1` all Mie
-coefficients beyond n = 6 fall below machine ε anyway, N = 6 is
-effectively converged to full double precision for this benchmark
-and no further refinement is needed. A tightened Mackowski-style
-recursion for the translation operator would let MSTMforCAS take N
-larger for bigger `|m·x|` scenarios — relevant future work but not
-required here.
+MSTMforCAS ≥ 0.4.3 incorporates three upstream numerical-stability
+fixes contributed by this benchmark work:
+
+1. Miller's downward recurrence for ψ_n(x) replaces the
+   conditionally-stable upward recurrence (PR #1, see
+   `benchmarks/cas_v2/doublet_mstm/mstm_patch_draft.md`).
+2. Correct sizing of the per-sphere `mie_vecs` vector to
+   `nois[i]` when `truncation_order > mie_nmax(x)` (PR #2, see
+   `mstm_patch_draft_followup.md`).
+3. Miller's downward recurrence for the spherical-Bessel j_n(z)
+   used in the multi-sphere translation operator (PR #3),
+   eliminating the `y_n(kd) ~ (2n−1)!!/(kd)^(n+1)` precision loss
+   that previously destabilised N ≥ 7 at small kd.
+
+With these three patches MSTMforCAS is a numerically robust exact
+reference for sub-wavelength plasmonic aggregates.  The
+`check_trunc_convergence.jl` script verifies geometric convergence
+in N at each benchmark point (target rtol ≤ 10⁻⁶ reached by N = 15
+for both materials).
 
 **Dielectric case — m_p = 1.60 + 0.01i** (polystyrene-like high contrast):
 
-Summary (|S_fw_mean| magnitude + phase, MSTM at N = 6 post-Miller):
+Summary (|S_fw_mean| magnitude + phase, MSTM at N = 15 fully converged):
 
 | β [rad] | \|S_fw_mean\| VIEM | \|S_fw_mean\| MSTM | rel \|·\| err | complex rel err | phase err [rad] |
 |---------|--------------------|--------------------|---------------|-----------------|-----------------|
-| 0       | 1.769e−03          | 1.794e−03          | 1.4 %         | 1.4 %           | 1.6e−04         |
+| 0       | 1.769e−03          | 1.794e−03          | 1.4 %         | 1.4 %           | 1.3e−04         |
 | π/4     | 1.822e−03          | 1.849e−03          | 1.5 %         | 1.5 %           | 1.6e−04         |
 | π/2     | 1.878e−03          | 1.908e−03          | 1.6 %         | 1.6 %           | 2.0e−04         |
 
@@ -440,44 +445,44 @@ S_fw_θ — real and imaginary parts:
 
 | β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
 |---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +1.7682e−03  | +1.7937e−03  | 1.4 %      | +4.1063e−05  | +4.2003e−05  | 2.2 %      |
-| π/4     | +1.8768e−03  | +1.9068e−03  | 1.6 %      | +4.7872e−05  | +4.9087e−05  | 2.5 %      |
-| π/2     | +1.9933e−03  | +2.0282e−03  | 1.7 %      | +5.5225e−05  | +5.6773e−05  | 2.7 %      |
+| 0       | +1.7682e−03  | +1.7934e−03  | 1.4 %      | +4.1063e−05  | +4.1991e−05  | 2.2 %      |
+| π/4     | +1.8768e−03  | +1.9066e−03  | 1.6 %      | +4.7872e−05  | +4.9082e−05  | 2.5 %      |
+| π/2     | +1.9933e−03  | +2.0279e−03  | 1.7 %      | +5.5225e−05  | +5.6771e−05  | 2.7 %      |
 
 S_fw_φ — real and imaginary parts:
 
 | β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
 |---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +1.7683e−03  | +1.7937e−03  | 1.4 %      | +4.1285e−05  | +4.2003e−05  | 1.7 %      |
-| π/4     | +1.7651e−03  | +1.7902e−03  | 1.4 %      | +4.2005e−05  | +4.2723e−05  | 1.7 %      |
-| π/2     | +1.7619e−03  | +1.7870e−03  | 1.4 %      | +4.2680e−05  | +4.3462e−05  | 1.8 %      |
+| 0       | +1.7683e−03  | +1.7934e−03  | 1.4 %      | +4.1285e−05  | +4.1991e−05  | 1.7 %      |
+| π/4     | +1.7651e−03  | +1.7902e−03  | 1.4 %      | +4.2005e−05  | +4.2724e−05  | 1.7 %      |
+| π/2     | +1.7619e−03  | +1.7870e−03  | 1.4 %      | +4.2680e−05  | +4.3463e−05  | 1.8 %      |
 
 **Plasmonic case — m_p = 0.17525 + 3.4830i** (Au @ 638 nm, Johnson &
 Christy 1972):
 
-Summary (MSTM at N = 6 post-Miller):
+Summary (MSTM at N = 15 fully converged):
 
 | β [rad] | \|S_fw_mean\| VIEM | \|S_fw_mean\| MSTM | rel \|·\| err | complex rel err | phase err [rad] |
 |---------|--------------------|--------------------|---------------|-----------------|-----------------|
-| 0       | 6.420e−03          | 6.515e−03          | 1.5 %         | 1.5 %           | 5.3e−04         |
-| π/4     | 8.043e−03          | 8.244e−03          | 2.4 %         | 2.5 %           | 3.2e−03         |
-| π/2     | 9.785e−03          | 1.011e−02          | 3.2 %         | 3.2 %           | 4.4e−03         |
+| 0       | 6.420e−03          | 6.504e−03          | 1.3 %         | 1.3 %           | 5.1e−04         |
+| π/4     | 8.043e−03          | 8.287e−03          | 2.9 %         | 3.0 %           | 4.9e−03         |
+| π/2     | 9.785e−03          | 1.020e−02          | 4.0 %         | 4.1 %           | 7.0e−03         |
 
 S_fw_θ — real and imaginary parts:
 
 | β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
 |---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +6.4046e−03  | +6.4992e−03  | 1.5 %      | +4.3635e−04  | +4.4794e−04  | 2.6 %      |
-| π/4     | +9.6439e−03  | +9.9561e−03  | 3.1 %      | +1.2147e−03  | +1.3008e−03  | 6.6 %      |
-| π/2     | +1.3102e−02  | +1.3646e−02  | 4.0 %      | +2.0467e−03  | +2.2088e−03  | 7.3 %      |
+| 0       | +6.4046e−03  | +6.4886e−03  | 1.3 %      | +4.3635e−04  | +4.4705e−04  | 2.4 %      |
+| π/4     | +9.6439e−03  | +1.0037e−02  | 3.9 %      | +1.2147e−03  | +1.3381e−03  | 9.2 %      |
+| π/2     | +1.3102e−02  | +1.3818e−02  | 5.2 %      | +2.0467e−03  | +2.2857e−03  | 10.5 %     |
 
 S_fw_φ — real and imaginary parts:
 
 | β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
 |---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +6.4049e−03  | +6.4992e−03  | 1.5 %      | +4.3967e−04  | +4.4794e−04  | 1.9 %      |
-| π/4     | +6.3556e−03  | +6.4387e−03  | 1.3 %      | +4.4777e−04  | +4.5496e−04  | 1.6 %      |
-| π/2     | +6.3084e−03  | +6.3892e−03  | 1.3 %      | +4.5536e−04  | +4.6332e−04  | 1.7 %      |
+| 0       | +6.4049e−03  | +6.4886e−03  | 1.3 %      | +4.3967e−04  | +4.4705e−04  | 1.7 %      |
+| π/4     | +6.3556e−03  | +6.4392e−03  | 1.3 %      | +4.4777e−04  | +4.5502e−04  | 1.6 %      |
+| π/2     | +6.3084e−03  | +6.3893e−03  | 1.3 %      | +4.5536e−04  | +4.6332e−04  | 1.7 %      |
 
 **Discussion.**
 For the dielectric doublet the agreement is uniform across orientations
@@ -487,45 +492,49 @@ and polarizations: Re parts are recovered to ~1.4 % and Im parts to
 maps to a larger relative error on the imaginary axis. Both parts
 converge as `O(h²)` under mesh refinement.
 
-For the plasmonic gold doublet a clear anisotropy emerges. The
+For the plasmonic gold doublet a strong anisotropy emerges. The
 **S_fw_φ** component — which at any β corresponds to the polarization
 channel perpendicular to the plane of incidence and the doublet axis —
-is essentially β-independent (1.3–1.5 % on Re, 1.6–1.9 % on Im). In
+is essentially β-independent (~1.3 % on Re, 1.6–1.7 % on Im). In
 contrast the **S_fw_θ** component, which picks up the polarization
 component *along* the doublet axis after rotation, grows rapidly with
-β: at β = π/2 the real part is off by 4.0 % and the imaginary part by
-7.3 %. This is the orientation at which the two spheres are excited
-along their own axis and the electric field concentrates in the
-inter-sphere gap, with surface plasmons living in a skin layer of depth
-δ ≈ λ₀/(2π·Im m_p) ≈ 29 nm — essentially the monomer radius itself.
-The linear-SWG mesh with `lc = R/5 ≈ 6 nm` resolves this skin layer
-with roughly five elements, which is enough for a few-percent
-observable but not for high-precision plasmonic resonance reproduction.
-Refining to `lc = R/8–R/10` (or enabling the boundary-face half-SWG
-correction with tighter Duffy rules) is expected to bring the Im error
-below 3 % uniformly.
+β: at β = π/2 the real part is off by 5.2 % and the imaginary part
+by **10.5 %**. This is the orientation at which the two spheres are
+excited along their own axis and the electric field concentrates in
+the inter-sphere gap, with surface plasmons living in a skin layer of
+depth δ ≈ λ₀/(2π·Im m_p) ≈ 29 nm — essentially the monomer radius
+itself. The linear-SWG mesh with `lc = R/5 ≈ 6 nm` resolves this
+skin layer with only about five elements, which is enough for ~1 %
+accuracy on the transverse channel but not for the longitudinal
+plasmonic response.  Refining to `lc = R/8–R/10` (or enabling the
+boundary-face half-SWG correction with tighter Duffy rules) should
+bring the Im S_fw_θ error below 3 % uniformly under the expected
+`O(h²)` convergence.
 
-The key takeaway is that a single-number relative error on |S_fw_mean|
-undersells the orientation / polarization structure of the discretization
-error: the imaginary part of the axis-aligned-polarization channel is
-the most sensitive probe of mesh quality for high-|m| absorbing
-aggregates, and should be used as the convergence indicator when
-tuning `lc` for plasmonic targets.
+The key takeaway is that a single-number relative error on
+|S_fw_mean| undersells the orientation / polarization structure of
+the discretization error: at β = π/2 the 4.0 % `|S_fw_mean|` error
+hides a **10.5 %** error on Im S_fw_θ — the imaginary part of the
+axis-aligned-polarization channel is the stiffest observable and
+should be used as the convergence indicator when tuning `lc` for
+plasmonic targets.
 
 A second lesson concerns the reference solution itself. MSTM's
-Wiscombe-based auto-truncation (N = 3 at x ≈ 0.3) is converged for
-polystyrene but systematically under-truncates gold — forcing
-N = 6 shifts `|S_fw_mean|` by up to 5 %, and the VIEM errors quoted
-above already incorporate that correction. For `x ≈ 0.3` with
-`|m·x| ≈ 1` the single-sphere Mie coefficients saturate at machine
-epsilon by n = 6, so N = 6 is converged to double precision for this
-benchmark. For larger plasmonic monomers with `|m·x| > 2` one would
-need higher truncation orders; the Miller-downward recurrence in
-MSTMforCAS ≥ 0.4.2 keeps the Mie side stable at arbitrarily high N,
-but the multi-sphere translation-coefficient evaluation at small
-`kd` introduces a secondary numerical instability at N ≥ 7 that
-would need a Mackowski-style recursive scheme to lift completely —
-relevant future work but not required for this benchmark.
+Wiscombe-based auto-truncation returns N = 3 for `x ≈ 0.3`, which
+is converged for the polystyrene case but badly under-truncates
+gold: `|S_fw_mean|` shifts by 5 % between N = 3 and the
+fully-converged N = 15 reference. Before the three MSTMforCAS
+stability fixes (Miller ψ_n, mie_vecs sizing, Miller j_n for the
+translation operator) this convergence sweep was impossible —
+MSTMforCAS could not take N beyond 6 at `x ≈ 0.3`. The VIEM errors
+quoted above are against a MSTM solution with rtol ≤ 10⁻⁶, so they
+now genuinely reflect the linear-SWG discretization error of the
+VIEM solver itself. For aggregates of plasmonic monomers the
+appropriate MSTM truncation is set by the *inter-sphere coupling*
+amplified by `|m·x|`, not by the single-sphere Mie convergence;
+`check_trunc_convergence.jl` should be run at any new benchmark
+point to confirm a converged reference before comparing against
+VIEM.
 
 Reproduce the benchmark:
 
