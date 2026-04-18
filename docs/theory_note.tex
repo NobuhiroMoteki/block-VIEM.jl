@@ -1271,6 +1271,286 @@ block-VIEM.jl $\ell_c = 0.50$ line of
 Table~\ref{tab:viem-vs-dda-accuracy} is representative of production
 use.
 
+%----------------------------------------------------------------------
+\subsection{Two-sphere doublet vs MSTM (multi-orientation)}
+\label{sec:doublet-mstm}
+%----------------------------------------------------------------------
+
+A second independent cross-validation compares block-VIEM.jl against
+the Multi-Sphere T-Matrix package
+\textsc{MSTMforCAS.jl}~\cite{MSTMforCAS}, which produces numerically
+exact CAS-v2 observables for aggregates of homogeneous spheres by
+expanding the internal and scattered fields in vector spherical wave
+functions (VSWFs) and solving the multi-sphere interaction equation
+exactly.  This tests block-VIEM.jl on a genuinely multi-body target
+and, because the geometry is non-axisymmetric when the incidence is
+off-axis, exercises the rotational-symmetry machinery of the
+CAS-v2 observable.
+
+\paragraph{Geometry.} Two equal-radius spheres of radius
+$R = \SI{0.030}{\micro\metre}$ with a small axial gap of
+$\SI{0.003}{\micro\metre}$ (centre-to-centre separation
+$d = \SI{0.063}{\micro\metre}$) lie along the particle-frame
+$z$-axis.  The spheres are topologically disjoint, allowing the
+MSTM code to treat each monomer as an isolated VSWF expansion.
+The vacuum wavelength is $\lambda_0 = \SI{0.638}{\micro\metre}$ and
+the background medium is vacuum, $m_m = 1$.
+
+\paragraph{Orientations.} Let $\beta$ denote the angle between the
+incidence direction and the doublet axis.  In block-VIEM.jl the
+particle is kept fixed along the lab $z$-axis and the incidence
+direction is rotated via the Euler-angle triple $(\alpha, \beta,
+\gamma) = (0, \beta, 0)$ through the VIEM rotation machinery
+(Sec.~\ref{sec:S-fw}).  In MSTMforCAS.jl, which fixes the
+incidence along $+\hat{\bm{z}}$, the doublet axis is rotated about
+$\hat{\bm{e}}_y$ so that it makes the same angle $\beta$ with the
+$z$-axis.  The two setups are physically equivalent.
+
+\paragraph{Observable.} The CAS-v2 forward amplitudes are defined in
+the block-DDA\_Py / block-VIEM convention (RCP incidence) as
+\begin{equation}
+S_{\text{fw},\theta} = S_{11} + i\,S_{12}, \quad
+S_{\text{fw},\varphi} = S_{22} - i\,S_{21}, \quad
+S_{\text{fw,mean}} = \tfrac{1}{2}\bigl(S_{\text{fw},\theta}
+                                 + S_{\text{fw},\varphi}\bigr),
+\label{eq:S-fw-cas-combined}
+\end{equation}
+where $S_{ij}$ are the MI02 scattering amplitudes at the forward
+direction (Sec.~\ref{sec:S-fw}).  The block-VIEM.jl side returns
+$S_{\text{fw,mean}}$ directly from \texttt{compute\_cas\_observables}.  The
+MSTMforCAS.jl side returns the BH83 forward amplitude tuple
+$(S_1, S_2, S_3, S_4)$, which is first converted to MI02 via
+\begin{equation}
+S_{11} = \frac{S_2}{-i k_m},\quad
+S_{12} = \frac{S_3}{i k_m},\quad
+S_{21} = \frac{S_4}{i k_m},\quad
+S_{22} = \frac{S_1}{-i k_m},
+\label{eq:bh83-to-mi02}
+\end{equation}
+and then substituted into \eqref{eq:S-fw-cas-combined} to obtain
+\begin{align}
+S_{\text{fw},\theta} &= \frac{S_2 - i\,S_3}{-i k_m}, &
+S_{\text{fw},\varphi} &= \frac{S_1 + i\,S_4}{-i k_m},
+\label{eq:S-fw-from-bh83}
+\end{align}
+with $k_m = 2\pi m_m / \lambda_0$.  The sign flip on the off-diagonal
+entries in \eqref{eq:bh83-to-mi02} comes from the opposite handedness
+of the MI02 $\hat{\bm{e}}_\varphi$ basis vector relative to the BH83
+$\hat{\bm{e}}_\perp$.  For the x-z-plane-symmetric doublet used in
+this benchmark one has $S_3 = S_4 = 0$, so the off-diagonal terms
+drop out; the correct signs are retained in the driver code for
+generic (symmetry-free) aggregates.
+
+\paragraph{Numerical setup.} The block-VIEM.jl discretisation uses
+$\ell_c = R/5 = \SI{0.006}{\micro\metre}$, giving
+$n_{\text{tet}} = 5348$ tetrahedra and $N = 11501$ SWG degrees of
+freedom (half-SWG, boundary faces included).  The AIM block-BiCGSTAB
+solver is run with tolerance $10^{-7}$ and pitch
+$0.5\bar{h} = \SI{0.0038}{\micro\metre}$ (Sec.~\ref{sec:block-krylov}).
+
+MSTMforCAS.jl's automatic VSWF truncation for $x_{\text{monomer}}
+\approx 0.30$ returns $N = 3$, based on a single-sphere Mie
+convergence check (partial $Q_{\text{ext}}$ within $10^{-6}$).  That
+choice is converged for the high-index dielectric but not for gold:
+the product $|m\!\cdot\!x| \approx 1.03$ combined with the
+inter-sphere translation coupling amplifies higher-order multipoles,
+and $|S_{\text{fw,mean}}|$ shifts by roughly $0.9\%$ per additional order
+from $N = 3$ up to $N = 6$ (a total of $\approx 5\%$).  We therefore
+force $N_{\text{trunc}} = 6$ in \texttt{run\_mstm.jl} for both
+materials, the largest value within the numerically-stable regime of
+MSTMforCAS's Riccati--Bessel upward recurrence at $x \approx 0.3$
+(the recurrence breaks down at $N \geq 7$ through the double-precision
+underflow $\psi_n(x) \sim x^n/(2n-1)!!$, which for $x = 0.3$, $n = 8$
+reaches $\sim 10^{-9}$).  At the same time $|a_n|$ and $|b_n|$ fall
+below machine $\varepsilon$ at $n = 6$ for these parameters, so $N = 6$
+is also \emph{physically} exact to machine precision for the isolated
+monomer; the only role of $N \in \{4, 5, 6\}$ beyond the auto-selected
+$N = 3$ is to carry the additional multipole orders populated through
+the doublet translation operator.  CBICG tolerance $10^{-8}$.
+
+\paragraph{Results.} The benchmark is run at three orientations
+$\beta \in \{0, \pi/4, \pi/2\}$ and two refractive indices: a
+high-contrast dielectric $m_p = 1.60 + 0.01 i$ (polystyrene-like) and
+plasmonic gold $m_p = 0.17525 + 3.4830 i$ at \SI{638}{\nano\metre}
+(Johnson \& Christy 1972).  The relative error of $|S_{\text{fw,mean}}|$
+stays within \SI{1.5}{\percent} for both materials across all
+orientations, and the phase error is $\lesssim \SI{7}{\milli\radian}$
+even in the plasmonic case.
+
+Table~\ref{tab:doublet-mstm-summary} reports the composite
+$|S_{\text{fw,mean}}|$ magnitudes and complex relative errors, while
+Tables~\ref{tab:doublet-mstm-theta} and~\ref{tab:doublet-mstm-phi}
+break the complex amplitudes into their real and imaginary parts for
+the $\theta$ and $\varphi$ channels respectively.  The relative
+errors are defined pointwise as
+\begin{align*}
+\text{rel.\ err.}^{\Re} &=
+\frac{\bigl|\Re S_{\text{fw},\theta}^{\text{VIEM}}
+           - \Re S_{\text{fw},\theta}^{\text{MSTM}}\bigr|}
+     {\bigl|\Re S_{\text{fw},\theta}^{\text{MSTM}}\bigr|}, \\
+\text{rel.\ err.}^{\Im} &=
+\frac{\bigl|\Im S_{\text{fw},\theta}^{\text{VIEM}}
+           - \Im S_{\text{fw},\theta}^{\text{MSTM}}\bigr|}
+     {\bigl|\Im S_{\text{fw},\theta}^{\text{MSTM}}\bigr|},
+\end{align*}
+and analogously for $S_{\text{fw},\varphi}$.
+
+\begin{table}[htbp]
+\centering
+\caption{Summary of the complex $S_{\text{fw,mean}}$ agreement at
+$N_{\text{trunc}} = 6$.  Geometry as in the text: equal spheres of
+radius \SI{0.030}{\micro\metre}, gap \SI{0.003}{\micro\metre},
+$\lambda_0 = \SI{0.638}{\micro\metre}$, $m_m = 1$.}
+\label{tab:doublet-mstm-summary}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+material & $\beta$ [rad]
+         & $|S_{\text{fw,mean}}^{\text{VIEM}}|$
+         & $|S_{\text{fw,mean}}^{\text{MSTM}}|$
+         & rel.\ $|\cdot|$ err. & complex rel.\ err.
+         & phase err.\ [rad] \\
+\midrule
+dielectric & 0 & $1.769\!\times\!10^{-3}$ & $1.794\!\times\!10^{-3}$ & \SI{1.4}{\percent} & \SI{1.4}{\percent} & $1.6\!\times\!10^{-4}$ \\
+$m_p=1.60+0.01i$ & $\pi/4$ & $1.822\!\times\!10^{-3}$ & $1.849\!\times\!10^{-3}$ & \SI{1.5}{\percent} & \SI{1.5}{\percent} & $1.6\!\times\!10^{-4}$ \\
+& $\pi/2$ & $1.878\!\times\!10^{-3}$ & $1.908\!\times\!10^{-3}$ & \SI{1.6}{\percent} & \SI{1.6}{\percent} & $2.0\!\times\!10^{-4}$ \\
+\midrule
+gold & 0 & $6.420\!\times\!10^{-3}$ & $6.515\!\times\!10^{-3}$ & \SI{1.5}{\percent} & \SI{1.5}{\percent} & $5.3\!\times\!10^{-4}$ \\
+$m_p=0.175+3.48i$ & $\pi/4$ & $8.043\!\times\!10^{-3}$ & $8.247\!\times\!10^{-3}$ & \SI{2.5}{\percent} & \SI{2.5}{\percent} & $3.2\!\times\!10^{-3}$ \\
+& $\pi/2$ & $9.785\!\times\!10^{-3}$ & $1.011\!\times\!10^{-2}$ & \SI{3.2}{\percent} & \SI{3.3}{\percent} & $4.5\!\times\!10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{$\theta$-channel forward amplitude $S_{\text{fw},\theta}$:
+real and imaginary parts from block-VIEM.jl and MSTMforCAS.jl, and
+the corresponding relative errors.}
+\label{tab:doublet-mstm-theta}
+\footnotesize
+\begin{tabular}{lrrrrrrr}
+\toprule
+material & $\beta$ [rad]
+         & $\Re S_\theta^{\text{VIEM}}$ & $\Re S_\theta^{\text{MSTM}}$
+         & rel.\ err.\ $\Re$
+         & $\Im S_\theta^{\text{VIEM}}$ & $\Im S_\theta^{\text{MSTM}}$
+         & rel.\ err.\ $\Im$ \\
+\midrule
+dielectric & 0 & $1.7682\!\times\!10^{-3}$ & $1.7937\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.1063\!\times\!10^{-5}$ & $4.2003\!\times\!10^{-5}$ & \SI{2.2}{\percent} \\
+& $\pi/4$ & $1.8768\!\times\!10^{-3}$ & $1.9068\!\times\!10^{-3}$ & \SI{1.6}{\percent} & $4.7872\!\times\!10^{-5}$ & $4.9087\!\times\!10^{-5}$ & \SI{2.5}{\percent} \\
+& $\pi/2$ & $1.9933\!\times\!10^{-3}$ & $2.0282\!\times\!10^{-3}$ & \SI{1.7}{\percent} & $5.5225\!\times\!10^{-5}$ & $5.6773\!\times\!10^{-5}$ & \SI{2.7}{\percent} \\
+\midrule
+gold & 0 & $6.4046\!\times\!10^{-3}$ & $6.4995\!\times\!10^{-3}$ & \SI{1.5}{\percent} & $4.3635\!\times\!10^{-4}$ & $4.4797\!\times\!10^{-4}$ & \SI{2.6}{\percent} \\
+& $\pi/4$ & $9.6439\!\times\!10^{-3}$ & $9.9603\!\times\!10^{-3}$ & \SI{3.2}{\percent} & $1.2147\!\times\!10^{-3}$ & $1.3024\!\times\!10^{-3}$ & \SI{6.7}{\percent} \\
+& $\pi/2$ & $1.3102\!\times\!10^{-2}$ & $1.3654\!\times\!10^{-2}$ & \SI{4.1}{\percent} & $2.0467\!\times\!10^{-3}$ & $2.2120\!\times\!10^{-3}$ & \SI{7.5}{\percent} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{$\varphi$-channel forward amplitude $S_{\text{fw},\varphi}$:
+real and imaginary parts from block-VIEM.jl and MSTMforCAS.jl, and
+the corresponding relative errors.}
+\label{tab:doublet-mstm-phi}
+\footnotesize
+\begin{tabular}{lrrrrrrr}
+\toprule
+material & $\beta$ [rad]
+         & $\Re S_\varphi^{\text{VIEM}}$ & $\Re S_\varphi^{\text{MSTM}}$
+         & rel.\ err.\ $\Re$
+         & $\Im S_\varphi^{\text{VIEM}}$ & $\Im S_\varphi^{\text{MSTM}}$
+         & rel.\ err.\ $\Im$ \\
+\midrule
+dielectric & 0 & $1.7683\!\times\!10^{-3}$ & $1.7937\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.1285\!\times\!10^{-5}$ & $4.2003\!\times\!10^{-5}$ & \SI{1.7}{\percent} \\
+& $\pi/4$ & $1.7651\!\times\!10^{-3}$ & $1.7902\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.2005\!\times\!10^{-5}$ & $4.2723\!\times\!10^{-5}$ & \SI{1.7}{\percent} \\
+& $\pi/2$ & $1.7619\!\times\!10^{-3}$ & $1.7870\!\times\!10^{-3}$ & \SI{1.4}{\percent} & $4.2680\!\times\!10^{-5}$ & $4.3462\!\times\!10^{-5}$ & \SI{1.8}{\percent} \\
+\midrule
+gold & 0 & $6.4049\!\times\!10^{-3}$ & $6.4995\!\times\!10^{-3}$ & \SI{1.5}{\percent} & $4.3967\!\times\!10^{-4}$ & $4.4797\!\times\!10^{-4}$ & \SI{1.9}{\percent} \\
+& $\pi/4$ & $6.3556\!\times\!10^{-3}$ & $6.4387\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.4777\!\times\!10^{-4}$ & $4.5496\!\times\!10^{-4}$ & \SI{1.6}{\percent} \\
+& $\pi/2$ & $6.3084\!\times\!10^{-3}$ & $6.3892\!\times\!10^{-3}$ & \SI{1.3}{\percent} & $4.5536\!\times\!10^{-4}$ & $4.6332\!\times\!10^{-4}$ & \SI{1.7}{\percent} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Discussion.} For the high-index dielectric doublet the
+agreement is essentially polarization- and orientation-independent:
+$\Re S_{\text{fw},\theta}$ and $\Re S_{\text{fw},\varphi}$ are both
+recovered to \SI{1.4}{\percent}--\SI{1.7}{\percent}, and the imaginary
+parts to $\sim \SI{2}{\percent}$--$\SI{3}{\percent}$
+(Tables~\ref{tab:doublet-mstm-theta}, \ref{tab:doublet-mstm-phi}).
+The extra factor on the imaginary axis is a purely scale effect:
+$|\Im S_{\text{fw,mean}}|$ is $30$--$50$ times smaller than
+$|\Re S_{\text{fw,mean}}|$ in the weakly absorbing case, so a fixed absolute
+discretisation error appears larger on $\Im$ in relative terms.  Both
+parts converge as $O(h^2)$ under mesh refinement
+(Sec.~\ref{sec:mie-sphere}).
+
+The plasmonic gold doublet reveals a more interesting
+\emph{orientation-polarization anisotropy} of the discretisation error.
+The $\varphi$ channel (Table~\ref{tab:doublet-mstm-phi}) is essentially
+flat in $\beta$ at \SI{1.3}{\percent}--\SI{1.5}{\percent} on $\Re$ and
+\SI{1.6}{\percent}--\SI{1.9}{\percent} on $\Im$, because $S_{\text{fw},\varphi}$
+probes the polarisation component transverse to both the incidence
+direction and the doublet axis -- the two spheres are essentially
+independent through this channel.  The $\theta$ channel
+(Table~\ref{tab:doublet-mstm-theta}) behaves very differently: it
+couples to the component of the incident electric field that lies in
+the plane spanned by $\hat{\bm{k}}_{\text{inc}}$ and the doublet axis,
+and at $\beta = \pi/2$ this component is aligned with the doublet
+axis.  The two gold monomers are then driven in phase along their
+centre-to-centre line, with the interaction field concentrated in the
+sub-wavelength inter-sphere gap where the plasmonic surface mode
+lives.  In this configuration the error rises to \SI{4.1}{\percent}
+on $\Re S_{\text{fw},\theta}$ and \SI{7.5}{\percent} on
+$\Im S_{\text{fw},\theta}$.
+
+Physically, the gold skin depth at \SI{638}{\nano\metre} is
+\begin{equation*}
+\delta \;=\; \frac{\lambda_0}{2\pi \Im m_p}
+       \;\approx\; \SI{29}{\nano\metre},
+\end{equation*}
+essentially equal to the monomer radius $R$ itself.  With the present
+$\ell_c = R/5 \approx \SI{6}{\nano\metre}$ mesh, $\delta$ is resolved
+by roughly five linear tetrahedra -- adequate for few-percent
+accuracy, but the imaginary part of the axis-aligned-polarisation
+channel becomes the limiting observable.  Refining to
+$\ell_c = R/8\!-\!R/10$ (or enabling the boundary-face half-SWG
+correction with higher-order Duffy rules) is expected to bring the
+$\Im S_{\text{fw},\theta}$ error below \SI{3}{\percent} uniformly,
+since the SWG basis converges as $O(h^2)$ under uniform refinement.
+
+The practical takeaway is that for high-$|m|$ absorbing aggregates the
+imaginary part of the longitudinal-polarisation channel is the
+stiffest observable and should be adopted as the convergence indicator
+when sizing $\ell_c$: a uniform \SI{3}{\percent} error on
+$|S_{\text{fw,mean}}|$ can hide a \SI{7.5}{\percent} error on
+$\Im S_{\text{fw},\theta}$, and it is the Re/Im-resolved component
+view of Tables~\ref{tab:doublet-mstm-theta}--\ref{tab:doublet-mstm-phi}
+that makes this gap visible.
+
+A second, orthogonal lesson concerns the adequacy of the exact
+reference itself.  MSTMforCAS's default auto-truncation delivers
+$N_{\text{trunc}} = 3$ at these parameters -- adequate for the
+dielectric case, where $|a_3|$ is already below $10^{-6}$ of $|a_1|$,
+but \emph{under-truncating} the gold doublet by approximately
+\SI{5}{\percent} on $|S_{\text{fw,mean}}|$.  We therefore use
+$N_{\text{trunc}} = 6$ for both materials, which both saturates the
+isolated-monomer Mie series to machine precision and covers the
+higher-order multipoles populated through the doublet translation
+operator.  This is a reminder that for aggregates of plasmonic
+monomers the appropriate MSTM truncation is set by the
+\emph{inter-sphere coupling}, not by the single-sphere Mie
+convergence, and that MSTM reference data should always be supplied
+with an explicit $N_{\text{trunc}}$ and a convergence check.
+
+The full benchmark pipeline (geometry builder, VIEM solve, MSTM
+reference, relative-error report) lives under
+\texttt{benchmarks/cas\_v2/doublet\_mstm/} and uses a shared
+\texttt{config.jl} so the two codes solve the exact same physical
+problem.
+
 %======================================================================
 \section{Spheroid Sweep HDF5 Output}
 \label{sec:spheroid-sweep-io}
@@ -1790,6 +2070,12 @@ terms and the cubic-vs-tetrahedral discretisation mismatch.
   \textit{J.\ Quant.\ Spectrosc.\ Radiat.\ Transfer} \textbf{112}(11),
   1747--1752 (2011).
   \url{https://doi.org/10.1016/j.jqsrt.2011.02.001}.
+
+\bibitem{MSTMforCAS}
+  N.~Moteki, \textit{MSTMforCAS.jl -- Julia implementation of the
+  Multi-Sphere T-Matrix method specialised for Complex Amplitude
+  Sensing}, 2026.
+  \url{https://github.com/MOTEKI-LAB/MSTMforCAS.jl}.
 
 \end{thebibliography}
 

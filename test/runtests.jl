@@ -25,5 +25,6 @@ using BlockVIEM
     include("test_block_krylov.jl")
     include("test_spheroid_sweep_io.jl")
     include("test_gre_mesh.jl")
+    include("test_aggregate_mesh.jl")
     include("test_anisotropic.jl")
 end

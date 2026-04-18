@@ -20,6 +20,7 @@ include("mesh.jl")
 include("swg.jl")
 include("gmsh_io.jl")
 include("gre_mesh.jl")
+include("aggregate_mesh.jl")
 
 # RT1 reference element and physical basis
 include("reference_rt1.jl")
@@ -47,6 +48,13 @@ export AbstractDivBasis, SWGBasis, build_swg_basis, n_basis, evaluate, divergenc
 export RT1Basis, build_rt1_basis, build_tet_to_dofs
 export read_msh
 export GREParams, gre_semi_axes, adaptive_lc, gre_surface, gre_mesh, gre_mesh_with_field
+export SphereAggregate, n_monomers, monomer_volume_sum,
+       aggregate_bounding_radius, aggregate_centroid, recenter!
+export neck_ratio_to_overlap, overlap_to_neck_ratio, pair_neck_radius
+export ptsa_h5_key, load_ptsa_h5, list_ptsa_keys
+export make_linear_chain, make_planar_array,
+       make_fcc_cluster, make_bcc_cluster, make_hcp_cluster
+export adaptive_lc_aggregate, mesh_sphere_aggregate
 
 # Public API (Phase 2)
 export TetQuadRule, TET_QUAD_1PT, TET_QUAD_4PT, TET_QUAD_5PT, TET_QUAD_64PT, TET_QUAD_125PT
