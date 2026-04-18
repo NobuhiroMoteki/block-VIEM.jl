@@ -61,12 +61,17 @@ end
         # this small every pair falls inside the near radius, so the
         # precorrection covers the entire K and AIM reproduces dense Z
         # to machine precision.
+        #
+        # AIM uses upper-triangle symmetric storage of the precorrection
+        # (K_direct averaged over both orderings), so the dense reference
+        # must likewise use `symmetrize=true` to match bit-for-bit.
         mesh = unit_cube_mesh_op()
         basis = build_swg_basis(mesh)
         N = n_basis(basis)
         k0 = 0.5; eps_p = 2.0 + 0.1im
 
-        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p)
+        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                      symmetrize = true)
         op = build_aim_operator(basis; k0 = k0, eps_p = eps_p,
                                 pitch = 0.25, padding = 3)
 
@@ -85,7 +90,8 @@ end
         N = n_basis(basis)
         k0 = 0.5; eps_p = 2.0 + 0.1im
 
-        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p)
+        Z = assemble_impedance_matrix(basis; k0 = k0, eps_p = eps_p,
+                                      symmetrize = true)
         x = ComplexF64[(i + 0.3im) for i in 1:N]
         y_direct = Z * x
 

@@ -917,37 +917,57 @@ function assemble_half_swg_correction(basis::AbstractDivBasis;
     # by construction. Assemble across rows into global (I, J, V) vectors.
     row_buffers = Vector{Tuple{Vector{Int}, Vector{ComplexF64}}}(undef, N)
 
+    # Upper-triangle-only storage with both-orderings averaging.
+    # K^B + K^C + K^D is complex-symmetric in the continuous limit; the
+    # discrete outer-Gauss / inner-Duffy quadrature breaks symmetry by
+    # the quadrature gap (~1e-6 dielectric, larger for plasmonic hotspots).
+    # Averaging K_extra(m,n) with K_extra(n,m) matches the dense
+    # `symmetrize=true` convention exactly.  The MVP in `aim_mvp`
+    # reconstructs the lower triangle via (K + Kᵀ − D) x.
+    compute_K_extra = function (m::Int, n::Int,
+                                m_is_bnd::Bool, n_is_bnd::Bool,
+                                tets_m, tets_n)
+        K = zero(ComplexF64)
+        if n_is_bnd
+            for tm in tets_m
+                tm == 0 && continue
+                K += _bulk_surface_pair(basis, m, n, tm, k0_c,
+                                          outer_rule, tri_rule,
+                                          tri_duffy_rule)
+            end
+        end
+        if m_is_bnd
+            for tn in tets_n
+                tn == 0 && continue
+                K += _surface_bulk_pair(basis, m, n, tn, k0_c,
+                                          outer_rule, duffy_rule,
+                                          tri_rule, tri_duffy_rule)
+            end
+        end
+        if m_is_bnd && n_is_bnd
+            K += _surface_surface_pair(basis, m, n, k0_c,
+                                         tri_rule, tri_duffy_rule)
+        end
+        return K
+    end
+
     Threads.@threads for m in 1:N
         tets_m = support_tets(basis, m)
         m_is_bnd = basis.is_boundary[m]
         Js = Int[]
         Vs = ComplexF64[]
-        @inbounds for n in 1:N
+        @inbounds for n in m:N
             n_is_bnd = basis.is_boundary[n]
             (m_is_bnd || n_is_bnd) || continue
-            K_extra = zero(ComplexF64)
             tets_n = support_tets(basis, n)
-            if n_is_bnd
-                for tm in tets_m
-                    tm == 0 && continue
-                    K_extra += _bulk_surface_pair(basis, m, n, tm, k0_c,
-                                                    outer_rule, tri_rule,
-                                                    tri_duffy_rule)
-                end
+            K_mn = compute_K_extra(m, n, m_is_bnd, n_is_bnd, tets_m, tets_n)
+            K_avg = if m == n
+                K_mn
+            else
+                K_nm = compute_K_extra(n, m, n_is_bnd, m_is_bnd, tets_n, tets_m)
+                (K_mn + K_nm) / 2
             end
-            if m_is_bnd
-                for tn in tets_n
-                    tn == 0 && continue
-                    K_extra += _surface_bulk_pair(basis, m, n, tn, k0_c,
-                                                    outer_rule, duffy_rule,
-                                                    tri_rule, tri_duffy_rule)
-                end
-            end
-            if m_is_bnd && n_is_bnd
-                K_extra += _surface_surface_pair(basis, m, n, k0_c,
-                                                   tri_rule, tri_duffy_rule)
-            end
-            val = scale * K_extra
+            val = scale * K_avg
             if val != 0
                 push!(Js, n)
                 push!(Vs, val)

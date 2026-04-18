@@ -351,6 +351,12 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
         push!(pairs, p)
     end
     unique!(pairs)
+    # Z is complex-symmetric under reciprocity (isotropic + diagonal-aniso ε).
+    # Store only upper-triangle (m ≤ n) entries; the MVP reconstructs the
+    # lower triangle as (K + Kᵀ − D) x.  Halves sparse-matrix memory and
+    # the stencil inner-sum work; K_direct is computed for both orderings
+    # and averaged so the result matches `symmetrize=true` on the dense path.
+    filter!(p -> p[1] <= p[2], pairs)
     N = n_basis(basis)
 
     col_to_rows = Dict{Int,Vector{Int}}()
@@ -441,12 +447,24 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
             end
             # Bulk-only weighted radiation kernel — must match the
             # anisotropic AIM kernel so the difference cancels far-field.
+            # For off-diagonal entries (m < n) compute both orderings and
+            # average, matching the dense `symmetrize=true` convention.
+            # K_AIM is exactly symmetric (G_toep circulant-symmetric), so
+            # only the Duffy direct term needs averaging.
             K_direct_mn = _bulk_radiation_kernel_weighted(
                               basis, m, n, k0_c, kappa_v, kappa_avg,
                               outer_rule, duffy_rule)
+            K_direct_avg = if m == n
+                K_direct_mn
+            else
+                K_direct_nm = _bulk_radiation_kernel_weighted(
+                                  basis, n, m, k0_c, kappa_v, kappa_avg,
+                                  outer_rule, duffy_rule)
+                (K_direct_mn + K_direct_nm) / 2
+            end
             push!(Is, m)
             push!(Js, n)
-            push!(Vs, K_direct_mn - s)
+            push!(Vs, K_direct_avg - s)
         end
     end
     return sparse(Is, Js, Vs, N, N)
@@ -461,22 +479,60 @@ end
 
 Pre-computed data for the AIM matrix-vector product. Construct via
 [`build_aim_operator`](@ref) and apply via [`aim_mvp`](@ref).
+
+`precorrection` and `half_swg_extra` store only the **upper triangle**
+(entries (m, n) with m ≤ n). The MVP reconstructs the full symmetric
+action as `(K + Kᵀ − Diagonal(diag_K)) * x`.  Z is complex-symmetric
+under reciprocity (isotropic and diagonal-anisotropic ε), so this is
+algebraically exact up to quadrature tolerance.  Halves sparse-matrix
+memory vs the previous both-triangles storage.
 """
 struct AIMOperator
     projection::AIMProjection
     G_hat::Array{ComplexF64,3}
     mass::SparseMatrixCSC{Float64,Int}
+    # Upper-triangle precorrection (K_direct − K_AIM, averaged over both
+    # orderings to match the dense `symmetrize=true` convention).
     precorrection::SparseMatrixCSC{ComplexF64,Int}
+    diag_precorrection::Vector{ComplexF64}
     # Stage 2.7: half-SWG surface-correction terms (K^B + K^C + K^D),
-    # already scaled by -(κ_avg/ε_bg). Zero sparse matrix for interior-
-    # only bases. See §9 of `.claude/technical_note.md`.
+    # already scaled by -(κ_avg/ε_bg). Upper triangle only; zero sparse
+    # matrix for interior-only bases. See §9 of `.claude/technical_note.md`.
     half_swg_extra::SparseMatrixCSC{ComplexF64,Int}
+    diag_half_swg_extra::Vector{ComplexF64}
     k0::ComplexF64
     eps_bg::ComplexF64
     # Anisotropic parameters (3-component vectors; equal for isotropic)
     kappa_v::SVector{3,ComplexF64}
     kappa_avg::ComplexF64
     inv_eps_v::SVector{3,ComplexF64}
+end
+
+# Apply y += scale * (A + Aᵀ − Diagonal(diag_A)) * x for upper-triangle A.
+# Used for both precorrection and half_swg_extra, in vector and block forms.
+@inline function _sym_upper_axpy!(y::AbstractVector, A::SparseMatrixCSC,
+                                  diag_A::AbstractVector, x::AbstractVector,
+                                  scale::Number)
+    mul!(y, A, x, scale, one(eltype(y)))
+    mul!(y, transpose(A), x, scale, one(eltype(y)))
+    @inbounds for i in eachindex(diag_A)
+        y[i] -= scale * diag_A[i] * x[i]
+    end
+    return y
+end
+
+@inline function _sym_upper_axpy!(Y::AbstractMatrix, A::SparseMatrixCSC,
+                                  diag_A::AbstractVector, X::AbstractMatrix,
+                                  scale::Number)
+    mul!(Y, A, X, scale, one(eltype(Y)))
+    mul!(Y, transpose(A), X, scale, one(eltype(Y)))
+    N, L = size(X)
+    @inbounds for j in 1:L
+        for i in 1:N
+            Y[i, j] -= scale * diag_A[i] * X[i, j]
+        end
+    end
+    return Y
 end
 
 """
@@ -532,7 +588,14 @@ function build_aim_operator(basis::AbstractDivBasis;
                                                tri_rule = tri_rule,
                                                tri_duffy_rule = tri_duffy_rule)
     _, eps_bg_c, inv_eps_v, kappa_v, kappa_avg = _aniso_params(eps_p, eps_bg)
-    return AIMOperator(proj, G_hat, mass, precorr, half_extra,
+    N = n_basis(basis)
+    diag_pre = Vector{ComplexF64}(diag(precorr))
+    diag_half = Vector{ComplexF64}(diag(half_extra))
+    length(diag_pre) == N || error("diag_precorrection length mismatch")
+    length(diag_half) == N || error("diag_half_swg_extra length mismatch")
+    return AIMOperator(proj, G_hat, mass,
+                       precorr, diag_pre,
+                       half_extra, diag_half,
                        ComplexF64(k0), eps_bg_c, kappa_v, kappa_avg, inv_eps_v)
 end
 
@@ -554,13 +617,15 @@ function aim_mvp(op::AIMOperator, x::AbstractVector)
     if !all(iszero, op.kappa_v)
         K_aim_x = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
                                         op.kappa_v, op.kappa_avg, x)
-        K_near_x = op.precorrection * x
         y .-= (1 / op.eps_bg) .* K_aim_x
-        y .-= (1 / op.eps_bg) .* K_near_x
+        # Near-field precorrection: upper-triangle storage, symmetric action.
+        _sym_upper_axpy!(y, op.precorrection, op.diag_precorrection, x,
+                         -(1 / op.eps_bg))
     end
     # Half-SWG surface correction: already includes the -(κ_avg/ε_bg) scale.
     if nnz(op.half_swg_extra) > 0
-        y .+= op.half_swg_extra * x
+        _sym_upper_axpy!(y, op.half_swg_extra, op.diag_half_swg_extra, x,
+                         one(ComplexF64))
     end
     return y
 end
@@ -588,10 +653,12 @@ function aim_mvp(op::AIMOperator, X::AbstractMatrix)
                                        op.kappa_v, op.kappa_avg, xj)
             @views Y[:, j] .-= inv_eb .* Kf
         end
-        Y .-= inv_eb .* (op.precorrection * X)
+        _sym_upper_axpy!(Y, op.precorrection, op.diag_precorrection, X,
+                         -inv_eb)
     end
     if nnz(op.half_swg_extra) > 0
-        Y .+= op.half_swg_extra * X
+        _sym_upper_axpy!(Y, op.half_swg_extra, op.diag_half_swg_extra, X,
+                         one(ComplexF64))
     end
     return Y
 end
