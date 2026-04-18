@@ -286,6 +286,51 @@ quality.  The adaptive mesh size `adaptive_lc(p; ...)` takes the minimum
 of a wavelength constraint, a geometry constraint (`c/3`), and the
 surface-deformation correlation length (`0.1c`).
 
+#### Visualising discretised targets
+
+[viz/visualize_gre.jl](viz/visualize_gre.jl) renders the tetrahedral
+target of a GRE particle at a given laboratory-frame orientation
+(mirroring `run_gaussian_ellipsoid.ipynb` in block-DDA_Py). The
+semi-transparent wireframe shows the discretised surface triangles;
+black/red/blue arrows mark the lab-frame z/x/y axes (z = incident beam
+direction):
+
+```julia
+# from the viz/ environment
+include("viz/visualize_gre.jl")
+
+p = GREParams(
+    0.30,   # r_v_base [μm]
+    2.0,    # bc_ratio
+    1.0,    # ab_ratio
+    0.10,   # beta
+)
+visualize_gre(p, (0, 45, 0);                 # ZYZ Euler angles in degrees
+              output_path = "gre.png",
+              lc          = 0.04)             # coarser mesh for clarity
+```
+
+Batch generation of the README gallery:
+
+```bash
+julia --project=viz viz/visualize_gre.jl
+# writes PNGs to viz/figs/
+```
+
+Five representative shapes at `r_v_base = 0.30 μm`, rendered with a
+coarser-than-physics mesh (`lc = c / 2.5`) purely for wireframe
+readability:
+
+| sphere (`bc=1, ab=1, β=0`)         | oblate (`bc=3, ab=1, β=0`)             | triaxial (`bc=2, ab=1.5, β=0`)                  |
+| :--------------------------------: | :------------------------------------: | :---------------------------------------------: |
+| ![sphere](viz/figs/gre_sphere.png) | ![oblate](viz/figs/gre_oblate_bc3.png) | ![triaxial](viz/figs/gre_triaxial_bc2_ab15.png) |
+| Euler = (0°, 0°, 0°)               | Euler = (0°, 60°, 0°)                  | Euler = (30°, 45°, 0°)                          |
+
+| GRE (`bc=2, ab=1, β=0.10`)                | GRE (`bc=1.5, ab=1.5, β=0.20`)                  |
+| :---------------------------------------: | :---------------------------------------------: |
+| ![gre_b010](viz/figs/gre_beta010_bc2.png) | ![gre_b020](viz/figs/gre_beta020_bc15_ab15.png) |
+| Euler = (0°, 45°, 0°)                     | Euler = (20°, 60°, 10°)                         |
+
 ### Parameter-sweep HDF5 I/O
 
 For multi-dimensional parameter sweeps (`wl_0 × m_p × r_v_base ×
