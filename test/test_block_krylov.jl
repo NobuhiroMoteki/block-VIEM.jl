@@ -87,14 +87,14 @@ end
         # AIM block Krylov vs dense LU: agreement is capped by AIM's
         # ~5% intrinsic MVP approximation error at this mesh resolution.
         for i in eachindex(ref)
-            @test isapprox(out[i].S_fw, ref[i].S_fw; rtol = 0.05)
+            @test isapprox(out[i].S_fw_mean, ref[i].S_fw_mean; rtol = 0.05)
             @test isapprox(out[i].S_bk, ref[i].S_bk; rtol = 0.05)
         end
         # Rotation invariance on the sphere: all orientations agree.
-        S_fw_0 = out[1].S_fw
+        S_fw_mean_0 = out[1].S_fw_mean
         S_bk_0 = out[1].S_bk
         for r in out[2:end]
-            @test isapprox(r.S_fw, S_fw_0; rtol = 0.02)
+            @test isapprox(r.S_fw_mean, S_fw_mean_0; rtol = 0.02)
             @test isapprox(r.S_bk, S_bk_0; rtol = 0.02)
         end
         if method === :aim_bicgstab
@@ -104,7 +104,7 @@ end
             # the same tolerance, so their CAS observables must match
             # to well below the AIM discretization error.
             for i in eachindex(out_bicgstab)
-                @test isapprox(out[i].S_fw, out_bicgstab[i].S_fw; rtol = 1e-5)
+                @test isapprox(out[i].S_fw_mean, out_bicgstab[i].S_fw_mean; rtol = 1e-5)
                 @test isapprox(out[i].S_bk, out_bicgstab[i].S_bk; rtol = 1e-5)
             end
         end

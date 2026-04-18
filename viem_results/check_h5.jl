@@ -218,14 +218,14 @@ h5open(filename, "r") do f
     # ── Mie reference ────────────────────────────────────────────────────
     C_abs_mie = read(sd["C_abs_mie"])[idx6...]
     C_ext_mie = read(sd["C_ext_mie"])[idx6...]
-    S_fw_mie  = read(sd["S_fw_PCAS_mie"])[idx6...]
+    S_fw_mean_mie = read(sd["S_fw_PCAS_mie"])[idx6...]
     S_bk_mie  = read(sd["S_bk_OCBS_mie"])[idx6...]
 
     println("\n=== Mie reference (volume-equivalent sphere) ===")
-    @printf("  C_abs_mie   = %.4e um^2\n", C_abs_mie)
-    @printf("  C_ext_mie   = %.4e um^2\n", C_ext_mie)
-    @printf("  S_fw_mie    = %.4g\n", S_fw_mie)
-    @printf("  S_bk_mie    = %.4g\n", S_bk_mie)
+    @printf("  C_abs_mie       = %.4e um^2\n", C_abs_mie)
+    @printf("  C_ext_mie       = %.4e um^2\n", C_ext_mie)
+    @printf("  S_fw_mean_mie   = %.4g\n", S_fw_mean_mie)
+    @printf("  S_bk_mie        = %.4g\n", S_bk_mie)
 
     # ── VIEM vs Mie comparison ───────────────────────────────────────────
     println("\n=== VIEM (orientation mean) vs Mie ===")
@@ -267,8 +267,8 @@ h5open(filename, "r") do f
 
     _cmp_real("C_abs [um^2]",    C_abs,   C_abs_mie)
     _cmp_real("C_ext [um^2]",    C_ext,   C_ext_mie)
-    _cmp_ri(  "S_fw_theta [um]", S_fw_th, S_fw_mie)
-    _cmp_ri(  "S_fw_phi [um]",   S_fw_ph, S_fw_mie)
+    _cmp_ri(  "S_fw_theta [um]", S_fw_th, S_fw_mean_mie)
+    _cmp_ri(  "S_fw_phi [um]",   S_fw_ph, S_fw_mean_mie)
     _cmp_ri(  "S_bk [um]",       S_bk,    S_bk_mie)
 end
 

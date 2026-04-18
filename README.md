@@ -55,12 +55,12 @@ so downstream analysis pipelines work with either without modification.
   Both dense (LU) and AIM-BiCGSTAB solvers achieve sub-1 % on all
   five observables at N = 2134 half-SWG DOFs:
 
-  | lc [um] | N    | method       | C_ext  | C_abs  | C_sca  | S_fw   | S_bk   | time  |
-  |---------|------|--------------|--------|--------|--------|--------|--------|-------|
-  | 0.020   | 2134 | dense (LU)   | 0.65 % | 0.01 % | 0.75 % | 0.58 % | 0.28 % | 17 s  |
-  | 0.020   | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 % | 0.11 % | 43 s  |
-  | 0.014   | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 % | 0.15 % | 68 s  |
-  | 0.014   | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 % | 0.07 % | 105 s |
+  | lc [um] | N    | method       | C_ext  | C_abs  | C_sca  | S_fw_mean | S_bk   | time  |
+  |---------|------|--------------|--------|--------|--------|-----------|--------|-------|
+  | 0.020   | 2134 | dense (LU)   | 0.65 % | 0.01 % | 0.75 % | 0.58 %    | 0.28 % | 17 s  |
+  | 0.020   | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 %    | 0.11 % | 43 s  |
+  | 0.014   | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 %    | 0.15 % | 68 s  |
+  | 0.014   | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 %    | 0.07 % | 105 s |
 
 - **Spheroid symmetry** (`benchmarks/cas_v2/spheroid_ar3.jl`): the
   analytical α-expansion `S_θ(α) = A + B·exp(+2jα)` holds at machine
@@ -183,7 +183,7 @@ results = solve_cas_v2_orientations(
     m_m  = 1.0,                  # background refractive index
     m_p  = 1.5 + 0.01im,        # particle refractive index (Im > 0 = absorbing)
 )
-# results[i].S_fw, results[i].S_bk, results[i].S_fw_theta, ...
+# results[i].S_fw_mean, results[i].S_bk, results[i].S_fw_theta, ...
 ```
 
 For **anisotropic** particles, pass `m_p` as a 3-element vector

@@ -211,7 +211,7 @@ function compute_mie_reference(wl_0, m_m, r_v_base, m_p_xyz)
     m_p_avg = ComplexF64(sum(m_p_xyz) / length(m_p_xyz))
     cs = mie_cross_sections(; wl_0=wl_0, m_m=m_m, r_p=r_v_base, m_p=m_p_avg)
     cas = mie_cas_observables(; wl_0=wl_0, m_m=m_m, r_p=r_v_base, m_p=m_p_avg)
-    return cs.C_abs, cs.C_ext, cas.S_fw, cas.S_bk
+    return cs.C_abs, cs.C_ext, cas.S_fw_mean, cas.S_bk
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -351,7 +351,7 @@ function main()
                 _log("  solve: $(Printf.@sprintf("%.1fs", t_solve))")
 
                 # ── Mie reference ────────────────────────────────────────
-                C_abs_mie, C_ext_mie, S_fw_mie, S_bk_mie =
+                C_abs_mie, C_ext_mie, S_fw_mean_mie, S_bk_mie =
                     compute_mie_reference(wl_0, m_m, r_v_base, m_p_xyz)
 
                 # ── Write Euler angles ───────────────────────────────────
@@ -371,7 +371,7 @@ function main()
                 sd["S_bk_OCBS"][idx6..., :]          = S_bk
                 sd["C_abs_mie"][idx6...]              = C_abs_mie
                 sd["C_ext_mie"][idx6...]              = C_ext_mie
-                sd["S_fw_PCAS_mie"][idx6...]          = S_fw_mie
+                sd["S_fw_PCAS_mie"][idx6...]          = S_fw_mean_mie
                 sd["S_bk_OCBS_mie"][idx6...]          = S_bk_mie
 
                 n_done += 1

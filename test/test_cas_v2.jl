@@ -73,7 +73,7 @@ end
     end
 end
 
-@testset "CAS-v2 vs Mie sphere (S_fw, S_bk)" begin
+@testset "CAS-v2 vs Mie sphere (S_fw_mean, S_bk)" begin
     radius = 0.5
     wl_0 = 4.0
     m_m = 1.0
@@ -113,7 +113,7 @@ end
     mie = mie_cas_observables(; wl_0 = wl_0, m_m = m_m, r_p = r_ve, m_p = m_p)
 
     @info "CAS-v2 vs Mie (sphere)" lc N=n_basis(basis) r_ve x=mie.x
-    @info "  Forward (PCAS)" S_fw_VIEM=cas.S_fw S_fw_Mie=mie.S_fw
+    @info "  Forward (PCAS)" S_fw_mean_VIEM=cas.S_fw_mean S_fw_mean_Mie=mie.S_fw_mean
     @info "    theta-channel" S_fw_theta=cas.S_fw_theta
     @info "    phi-channel"   S_fw_phi=cas.S_fw_phi
     @info "  Backward (OCBS)" S_bk_VIEM=cas.S_bk S_bk_Mie=mie.S_bk
@@ -122,10 +122,10 @@ end
     @test isapprox(cas.S_fw_theta, cas.S_fw_phi; rtol = 0.01)
 
     # After the 2026-04-13 physics-convention switch in green.jl/incident.jl/
-    # postprocess.jl, both Re and Im of S_fw converge with mesh refinement.
-    re_err_fw = abs(real(cas.S_fw) - real(mie.S_fw)) / abs(real(mie.S_fw))
-    im_err_fw = abs(imag(cas.S_fw) - imag(mie.S_fw)) / abs(imag(mie.S_fw))
-    @info "  S_fw relative error" re_err_fw im_err_fw
+    # postprocess.jl, both Re and Im of S_fw_mean converge with mesh refinement.
+    re_err_fw = abs(real(cas.S_fw_mean) - real(mie.S_fw_mean)) / abs(real(mie.S_fw_mean))
+    im_err_fw = abs(imag(cas.S_fw_mean) - imag(mie.S_fw_mean)) / abs(imag(mie.S_fw_mean))
+    @info "  S_fw_mean relative error" re_err_fw im_err_fw
     @test re_err_fw < 0.01
     @test im_err_fw < 0.01
 
@@ -134,12 +134,12 @@ end
     @test re_err_bk < 0.05
 
     # Magnitude agreement (sign-convention-independent).
-    @test isapprox(abs(cas.S_fw), abs(mie.S_fw); rtol = 0.05)
+    @test isapprox(abs(cas.S_fw_mean), abs(mie.S_fw_mean); rtol = 0.05)
     @test isapprox(abs(cas.S_bk), abs(mie.S_bk); rtol = 0.05)
 end
 
-@testset "CAS-v2 sphere refinement: Im(S_fw) → Mie" begin
-    # Demonstrate that Im(S_fw) converges to Mie as the mesh is refined.
+@testset "CAS-v2 sphere refinement: Im(S_fw_mean) → Mie" begin
+    # Demonstrate that Im(S_fw_mean) converges to Mie as the mesh is refined.
     radius = 0.5
     wl_0 = 4.0
     m_m = 1.0
@@ -167,9 +167,9 @@ end
         cas = compute_cas_observables(basis, D; orientation = ori,
                                        k0 = k0, eps_p = eps_p, eps_bg = eps_bg)
         mie = mie_cas_observables(; wl_0 = wl_0, m_m = m_m, r_p = r_ve, m_p = m_p)
-        im_err = abs(imag(cas.S_fw) - imag(mie.S_fw)) / abs(imag(mie.S_fw))
+        im_err = abs(imag(cas.S_fw_mean) - imag(mie.S_fw_mean)) / abs(imag(mie.S_fw_mean))
         push!(im_errs, im_err)
-        @info "refinement" lc N=n_basis(basis) Re_VIEM=real(cas.S_fw) Re_Mie=real(mie.S_fw) Im_VIEM=imag(cas.S_fw) Im_Mie=imag(mie.S_fw) im_err
+        @info "refinement" lc N=n_basis(basis) Re_VIEM=real(cas.S_fw_mean) Re_Mie=real(mie.S_fw_mean) Im_VIEM=imag(cas.S_fw_mean) Im_Mie=imag(mie.S_fw_mean) im_err
     end
     @test im_errs[end] < im_errs[1]
 end
@@ -199,14 +199,14 @@ end
                                          method = :dense)
     @test length(results) == length(euler_list)
 
-    # Sphere is rotation-invariant: all S_fw should agree across orientations.
-    S_fw_0 = results[1].S_fw
+    # Sphere is rotation-invariant: all S_fw_mean should agree across orientations.
+    S_fw_mean_0 = results[1].S_fw_mean
     S_bk_0 = results[1].S_bk
-    @info "sphere multi-orientation S_fw" S_fw_0
+    @info "sphere multi-orientation S_fw_mean" S_fw_mean_0
     # Coarse mesh (lc=0.30, ~400 DOFs) is not perfectly spherically symmetric,
     # so the rotation invariance is limited by mesh asymmetry. ~2% tolerance.
     for r in results[2:end]
-        @test isapprox(r.S_fw, S_fw_0; rtol = 0.02)
+        @test isapprox(r.S_fw_mean, S_fw_mean_0; rtol = 0.02)
         @test isapprox(r.S_bk, S_bk_0; rtol = 0.02)
     end
 
@@ -217,7 +217,7 @@ end
                                               duffy_rule = duffy_reference_rule(7),
                                               method = :dense)
     for (r, rp) in zip(results, results_phys)
-        @test isapprox(rp.S_fw, r.S_fw; rtol = 1e-12)
+        @test isapprox(rp.S_fw_mean, r.S_fw_mean; rtol = 1e-12)
         @test isapprox(rp.S_bk, r.S_bk; rtol = 1e-12)
     end
 
@@ -259,11 +259,11 @@ end
                                          duffy_rule = duffy_reference_rule(7),
                                          method = :dense)
     for (rr, rp) in zip(res_raw, res_phys)
-        @test isapprox(rp.S_fw, rr.S_fw; rtol = 1e-12)
+        @test isapprox(rp.S_fw_mean, rr.S_fw_mean; rtol = 1e-12)
         @test isapprox(rp.S_bk, rr.S_bk; rtol = 1e-12)
     end
 
     # Sanity: rotation invariance still holds for non-unit m_m.
-    @test isapprox(res_phys[2].S_fw, res_phys[1].S_fw; rtol = 0.02)
+    @test isapprox(res_phys[2].S_fw_mean, res_phys[1].S_fw_mean; rtol = 0.02)
     @test isapprox(res_phys[2].S_bk, res_phys[1].S_bk; rtol = 0.02)
 end

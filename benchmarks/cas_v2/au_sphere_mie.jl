@@ -14,7 +14,7 @@
 # AIM-BiCGSTAB solvers at each mesh, reporting accuracy and timing
 # against the analytic Mie reference:
 #   - C_ext, C_abs, C_sca cross sections
-#   - S_fw (PCAS forward)
+#   - S_fw_mean (PCAS forward)
 #   - S_bk (OCBS backward)
 #
 # Run with:
@@ -77,7 +77,7 @@ mie_S  = mie_cas_observables(; wl_0 = WL_0, m_m = M_M, r_p = RADIUS, m_p = M_P)
 @printf("    Q_ext = %.4f,  C_ext = %.6e μm²\n", mie_x.Q_ext, mie_x.C_ext)
 @printf("    Q_abs = %.4f,  C_abs = %.6e μm²\n", mie_x.Q_abs, mie_x.C_abs)
 @printf("    Q_sca = %.4f,  C_sca = %.6e μm²\n", mie_x.Q_sca, mie_x.C_sca)
-@printf("    S_fw  = %+.6f %+.6f i\n", real(mie_S.S_fw), imag(mie_S.S_fw))
+@printf("    S_fw_mean = %+.6f %+.6f i\n", real(mie_S.S_fw_mean), imag(mie_S.S_fw_mean))
 @printf("    S_bk  = %+.6f %+.6f i\n", real(mie_S.S_bk), imag(mie_S.S_bk))
 
 # ── Helper: compute errors vs Mie at the actual mesh r_ve ────────────────────
@@ -100,13 +100,13 @@ function compute_errors(basis, D_coeffs, cas_result, mesh)
         err_Cext = abs(scat.C_ext - mie_x_eff.C_ext) / mie_x_eff.C_ext,
         err_Cabs = abs(scat.C_abs - mie_x_eff.C_abs) / mie_x_eff.C_abs,
         err_Csca = abs(scat.C_sca - mie_x_eff.C_sca) / mie_x_eff.C_sca,
-        err_Sfw  = abs(cas_result.S_fw - mie_S_eff.S_fw) / abs(mie_S_eff.S_fw),
+        err_Sfw  = abs(cas_result.S_fw_mean - mie_S_eff.S_fw_mean) / abs(mie_S_eff.S_fw_mean),
         err_Sbk  = abs(cas_result.S_bk - mie_S_eff.S_bk) / abs(mie_S_eff.S_bk),
         C_ext = scat.C_ext, C_abs = scat.C_abs, C_sca = scat.C_sca,
-        S_fw = cas_result.S_fw, S_bk = cas_result.S_bk,
+        S_fw_mean = cas_result.S_fw_mean, S_bk = cas_result.S_bk,
         C_ext_mie = mie_x_eff.C_ext, C_abs_mie = mie_x_eff.C_abs,
         C_sca_mie = mie_x_eff.C_sca,
-        S_fw_mie = mie_S_eff.S_fw, S_bk_mie = mie_S_eff.S_bk,
+        S_fw_mean_mie = mie_S_eff.S_fw_mean, S_bk_mie = mie_S_eff.S_bk,
     )
 end
 
@@ -118,7 +118,7 @@ const DUFFY = duffy_reference_rule(5)
 println("\n" * "-" ^ 90)
 @printf("  %-7s %-5s %-14s %-10s %-10s %-10s %-9s %-9s %-8s\n",
         "lc", "N", "method", "C_ext err", "C_abs err", "C_sca err",
-        "S_fw err", "S_bk err", "t_total")
+        "S_fw_mean err", "S_bk err", "t_total")
 println("  " * "-" ^ 88)
 
 for lc in LC_LIST

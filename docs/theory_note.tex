@@ -823,7 +823,7 @@ scattering amplitude $\bm{f}=\bm{F}/(4\pi)$. Equations
 quantities measured by the PCAS instrument. For convenience, their
 arithmetic mean
 \begin{equation}
-  \overline{S}_{\text{fw}}^{\text{PCAS}}
+  S_{\text{fw,mean}}^{\text{PCAS}}
     \;=\; \frac{S_{\text{fw},\theta}^{\text{PCAS}}
                 + S_{\text{fw},\phi}^{\text{PCAS}}}{2}
   \label{eq:S-fw-combined}
@@ -914,7 +914,7 @@ typical AuNP scale. Mie reference values for the target sphere are
   Q_{\text{sca}} = 1.195,
 \]
 \[
-  S_{\text{fw}}^{\text{PCAS}} = +0.03877 + 0.01397\,i,
+  S_{\text{fw,mean}}^{\text{PCAS}} = +0.03877 + 0.01397\,i,
   \qquad
   S_{\text{bk}}^{\text{OCBS}} = +0.05946 + 0.01907\,i.
 \]
@@ -950,7 +950,7 @@ optical theorem) and the polarimetric amplitudes via
 \toprule
 $\ell_c\;[\si{\um}]$ & $N$ & Method
   & $C_\text{ext}$ [\%] & $C_\text{abs}$ [\%] & $C_\text{sca}$ [\%]
-  & $S_\text{fw}$ [\%] & $S_\text{bk}$ [\%] \\
+  & $S_\text{fw,mean}$ [\%] & $S_\text{bk}$ [\%] \\
 \midrule
 0.020 & 2134 & dense (LU)
              & 0.65 & 0.005 & 0.75 & 0.58 & 0.28 \\
@@ -980,7 +980,7 @@ Several observations follow from Table~\ref{tab:au-mie}.
         retrieval typically tolerates $\sim 2\%$ on the
         polarimetric amplitudes).
   \item The polarimetric amplitudes
-        $S_{\text{fw}}^{\text{PCAS}}$ and $S_{\text{bk}}^{\text{OCBS}}$
+        $S_{\text{fw,mean}}^{\text{PCAS}}$ and $S_{\text{bk}}^{\text{OCBS}}$
         are \emph{more accurate} than the optical-theorem cross
         sections at the same mesh, because the cross-section
         evaluation involves an additional far-field integral on the
@@ -1004,7 +1004,7 @@ Several observations follow from Table~\ref{tab:au-mie}.
 ($m_p = 1.5 + 0.01\,i$, Sec.~\ref{sec:mie-sphere}) and plasmonic
 ($m_p = 0.17525 + 3.4830\,i$, this section) Mie tests, the block-VIEM.jl
 half-SWG solver achieves $\le 1\,\%$ relative error on $C_{\text{ext}}$,
-$C_{\text{abs}}$, $C_{\text{sca}}$, $S_{\text{fw}}^{\text{PCAS}}$ and
+$C_{\text{abs}}$, $C_{\text{sca}}$, $S_{\text{fw,mean}}^{\text{PCAS}}$ and
 $S_{\text{bk}}^{\text{OCBS}}$ already at modest mesh sizes
 ($N \sim 2\times 10^{3}$ DoF), and the errors decay
 monotonically with refinement.

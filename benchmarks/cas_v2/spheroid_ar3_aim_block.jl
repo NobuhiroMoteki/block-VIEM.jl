@@ -121,10 +121,10 @@ t_gmr = @elapsed out_gmr = solve_cas_v2_orientations(
 println("\n" * "=" ^ 70)
 println("Comparison")
 println("=" ^ 70)
-println("  α           S_fw(dense)                S_fw(AIM bicgstab)         err")
+println("  α           S_fw_mean(dense)           S_fw_mean(AIM bicgstab)    err")
 for k in 1:L
-    ref_S = ref[k].S_fw
-    bcg_S = out_bcg[k].S_fw
+    ref_S = ref[k].S_fw_mean
+    bcg_S = out_bcg[k].S_fw_mean
     err = abs(ref_S - bcg_S) / abs(ref_S)
     @printf("  α=%-6.4f  %+8.5f%+8.5fim   %+8.5f%+8.5fim   %.2e\n",
             ALPHAS[k], real(ref_S), imag(ref_S),
@@ -134,12 +134,12 @@ end
 function _max_bcg_vs_gmr(out_bcg, out_gmr, L)
     m = 0.0
     for k in 1:L
-        d = abs(out_bcg[k].S_fw - out_gmr[k].S_fw) / abs(out_bcg[k].S_fw)
+        d = abs(out_bcg[k].S_fw_mean - out_gmr[k].S_fw_mean) / abs(out_bcg[k].S_fw_mean)
         m = max(m, d)
     end
     return m
 end
-@printf("\n  max |S_fw(bicgstab) − S_fw(gmres)| / |S_fw| = %.2e\n",
+@printf("\n  max |S_fw_mean(bicgstab) − S_fw_mean(gmres)| / |S_fw_mean| = %.2e\n",
         _max_bcg_vs_gmr(out_bcg, out_gmr, L))
 
 # ── Symmetry verification on the AIM block-BiCGSTAB solution ─────────────────

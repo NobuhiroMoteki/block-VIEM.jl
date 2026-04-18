@@ -337,7 +337,7 @@ end
 # Sign convention: VIEM uses the physics convention (e^{-iωt}) consistently
 # in green.jl, incident.jl, and far_field_amplitude after the 2026-04-13
 # convention switch. The CAS-v2 observables returned here are directly
-# comparable to block-DDA_Py and to the Mie reference (S_fw = (S11(0)+S22(0))/2
+# comparable to block-DDA_Py and to the Mie reference (S_fw_mean = (S11(0)+S22(0))/2
 # from `analytical_scattering_theories/homogeneous_sphere.py`).
 
 """
@@ -438,7 +438,7 @@ Per-orientation CAS-v2 forward and backward scattering observables, in the
 # Fields
 - `S_fw_theta::ComplexF64` — forward scattering amplitude, θ-channel
 - `S_fw_phi::ComplexF64`   — forward scattering amplitude, φ-channel
-- `S_fw::ComplexF64`       — PCAS observable, `(S_fw_theta + S_fw_phi)/2`
+- `S_fw_mean::ComplexF64`  — PCAS observable, `(S_fw_theta + S_fw_phi)/2`
 - `S_bk_theta::ComplexF64` — backward scattering amplitude, θ-channel
 - `S_bk_phi::ComplexF64`   — backward scattering amplitude, φ-channel
 - `S_bk::ComplexF64`       — OCBS observable, `(-S_bk_theta + S_bk_phi)/√2`
@@ -446,7 +446,7 @@ Per-orientation CAS-v2 forward and backward scattering observables, in the
 struct CASv2Result
     S_fw_theta::ComplexF64
     S_fw_phi::ComplexF64
-    S_fw::ComplexF64
+    S_fw_mean::ComplexF64
     S_bk_theta::ComplexF64
     S_bk_phi::ComplexF64
     S_bk::ComplexF64
@@ -498,14 +498,14 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
     # Forward (PCAS)
     S_fw_theta = inv_4pi * sqrt2 * _project_far_field(F_fw, orientation.theta_sca_fw)
     S_fw_phi   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_fw, orientation.phi_sca_fw)
-    S_fw       = (S_fw_theta + S_fw_phi) / 2
+    S_fw_mean  = (S_fw_theta + S_fw_phi) / 2
 
     # Backward (OCBS)
     S_bk_theta = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
     S_bk_phi   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
     S_bk       = (-S_bk_theta + S_bk_phi) / sqrt2
 
-    return CASv2Result(S_fw_theta, S_fw_phi, S_fw,
+    return CASv2Result(S_fw_theta, S_fw_phi, S_fw_mean,
                        S_bk_theta, S_bk_phi, S_bk)
 end
 

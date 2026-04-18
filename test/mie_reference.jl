@@ -124,10 +124,10 @@ Reference CAS-v2 forward and backward scattering observables for a
 homogeneous sphere, **physics convention** (matching block-DDA_Py
 `analytical_scattering_theories/homogeneous_sphere.mie_compute_q_and_s`).
 
-Returns `(; S_fw, S_bk, S1_fw, S2_fw, S1_bk, S2_bk, k)` where
-`S_fw = (S11(0)+S22(0))/2` and `S_bk = (-S11(π)+S22(π))/√2` with
+Returns `(; S_fw_mean, S_bk, S1_fw, S2_fw, S1_bk, S2_bk, k)` where
+`S_fw_mean = (S11(0)+S22(0))/2` and `S_bk = (-S11(π)+S22(π))/√2` with
 `S11 = S2/(-ik)`, `S22 = S1/(-ik)`. For a sphere `S1(0)=S2(0)`, so
-`S_fw = S1(0)/(-ik)` independent of polarization.
+`S_fw_mean = S1(0)/(-ik)` independent of polarization.
 """
 function mie_cas_observables(; wl_0::Real, m_m::Real, r_p::Real, m_p::Number)
     k_bg = 2π * m_m / wl_0
@@ -184,10 +184,10 @@ function mie_cas_observables(; wl_0::Real, m_m::Real, r_p::Real, m_p::Number)
     S11_fw = S2_fw / (-im * k_bg); S22_fw = S1_fw / (-im * k_bg)
     S11_bk = S2_bk / (-im * k_bg); S22_bk = S1_bk / (-im * k_bg)
 
-    S_fw = (S11_fw + S22_fw) / 2
+    S_fw_mean = (S11_fw + S22_fw) / 2
     S_bk = (-S11_bk + S22_bk) / sqrt(2.0)
 
-    return (; S_fw, S_bk,
+    return (; S_fw_mean, S_bk,
               S1_fw, S2_fw, S1_bk, S2_bk,
               S11_fw, S22_fw, S11_bk, S22_bk,
               k = k_bg, x, nstop)

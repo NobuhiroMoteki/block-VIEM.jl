@@ -141,14 +141,14 @@ else
     println("  ✗ FAIL (> 1e-2)")
 end
 
-# ── Print PCAS observables (S_fw) for each orientation ───────────────────────
-println("\n  PCAS forward observables S_fw = (S_θ + S_φ)/2:")
+# ── Print PCAS observables (S_fw_mean) for each orientation ──────────────────
+println("\n  PCAS forward observables S_fw_mean = (S_θ + S_φ)/2:")
 println("  " * "-" ^ 65)
-@printf("  %-10s %-12s %-22s %-22s\n", "α", "β", "S_fw", "S_bk")
+@printf("  %-10s %-12s %-22s %-22s\n", "α", "β", "S_fw_mean", "S_bk")
 for (k, α) in enumerate(ALPHAS)
     @printf("  α=%-6.4f  β=%-6.4f  %+8.5f%+8.5fim   %+8.5f%+8.5fim\n",
             α, BETA,
-            real(results[k].S_fw), imag(results[k].S_fw),
+            real(results[k].S_fw_mean), imag(results[k].S_fw_mean),
             real(results[k].S_bk), imag(results[k].S_bk))
 end
 
@@ -168,10 +168,10 @@ results_sph = solve_cas_v2_orientations(basis_sph, [(0.0, 0.0, 0.0)];
 mie = mie_cas_observables(; wl_0 = WL_0, m_m = M_M,
                             r_p = (3 * total_volume(mesh_sph) / (4π))^(1/3),
                             m_p = M_P)
-S_VIEM = results_sph[1].S_fw
-S_Mie  = mie.S_fw
-@printf("  S_fw VIEM:  %+9.6f %+9.6fim\n", real(S_VIEM), imag(S_VIEM))
-@printf("  S_fw Mie :  %+9.6f %+9.6fim\n", real(S_Mie),  imag(S_Mie))
+S_VIEM = results_sph[1].S_fw_mean
+S_Mie  = mie.S_fw_mean
+@printf("  S_fw_mean VIEM:  %+9.6f %+9.6fim\n", real(S_VIEM), imag(S_VIEM))
+@printf("  S_fw_mean Mie :  %+9.6f %+9.6fim\n", real(S_Mie),  imag(S_Mie))
 @printf("  Re rel.err = %.2e,  Im rel.err = %.2e\n",
         abs(real(S_VIEM) - real(S_Mie))/abs(real(S_Mie)),
         abs(imag(S_VIEM) - imag(S_Mie))/abs(imag(S_Mie)))
