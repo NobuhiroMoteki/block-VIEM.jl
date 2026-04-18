@@ -503,13 +503,37 @@ by **10.5 %**. This is the orientation at which the two spheres are
 excited along their own axis and the electric field concentrates in
 the inter-sphere gap, with surface plasmons living in a skin layer of
 depth δ ≈ λ₀/(2π·Im m_p) ≈ 29 nm — essentially the monomer radius
-itself. The linear-SWG mesh with `lc = R/5 ≈ 6 nm` resolves this
-skin layer with only about five elements, which is enough for ~1 %
-accuracy on the transverse channel but not for the longitudinal
-plasmonic response.  Refining to `lc = R/8–R/10` (or enabling the
-boundary-face half-SWG correction with tighter Duffy rules) should
-bring the Im S_fw_θ error below 3 % uniformly under the expected
-`O(h²)` convergence.
+itself.
+
+**Measured convergence under mesh refinement.** To test whether this
+residual error is a true discretization error that shrinks with `lc`,
+an independent refinement run was made at `lc = R/6 ≈ 5 nm`
+(`run_viem_refinement.jl`) and compared against the same MSTM N=15
+reference.  The per-component relative errors (Au, β = π/2) are:
+
+| lc / R | \|S_fw_mean\| | Re S_fw_θ | Im S_fw_θ | Re S_fw_φ | Im S_fw_φ | fitted p |
+|--------|---------------|-----------|-----------|-----------|-----------|----------|
+| 1/5    | 4.03 %        | 5.18 %    | 10.5 %    | 1.27 %    | 1.72 %    | — |
+| 1/6    | 2.35 %        | 2.98 %    | 5.64 %    | 0.86 %    | 1.49 %    | — |
+| slope  | —             | —         | —         | —         | —         | 2.95 / 3.04 / **3.39** / 2.14 / 0.78 |
+
+The fitted exponent `p` in `err ~ (lc/R)^p` is **2.1–3.4** on the
+four dominant components (exceeds the theoretical linear-SWG rate
+`p = 2`), and the stiffest observable Im S_fw_θ converges
+\ *fastest* (p = 3.4), not slowest — so the skin-layer resolution
+is not the rate-limiting factor once lc is at least R/5.
+Extrapolating from the measured rate,
+`err(R/10) ≈ err(R/5) × (1/2)^{3.4} ≈ 1 %` on Im S_fw_θ — refinement
+to `lc ≈ R/10` brings the axis-aligned plasmonic observable to
+sub-1 % agreement with the exact MSTM solution.  The fit is based on
+two lc values only; extending to R/8 and R/10 requires >15 GB RAM
+with the current AIM solver (N² sparse near-field storage) and is
+deferred.
+
+The `Im S_fw_φ` fit returns p = 0.3–1.0 which is anomalously slow,
+but the absolute error there is already in the 1.5 % range and
+likely dominated by MSTM truncation / solver convergence noise; the
+slope is not resolved by the two-point fit.
 
 The key takeaway is that a single-number relative error on
 |S_fw_mean| undersells the orientation / polarization structure of

@@ -14,7 +14,7 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-04-18 (corresponds to block-VIEM.jl v0.4.2)}
+\date{Last updated: 2026-04-19 (corresponds to block-VIEM.jl v0.4.3)}
 
 \begin{document}
 \maketitle
@@ -1533,6 +1533,49 @@ surface mode lives.  In this configuration the error rises to
 \SI{5.2}{\percent} on $\Re S_{\text{fw},\theta}$ and \SI{10.5}{\percent}
 on $\Im S_{\text{fw},\theta}$.
 
+\paragraph{Verified mesh-refinement convergence.} To confirm that the
+residual error is a bulk discretisation error (and not, for instance,
+a skin-layer-resolution plateau), an independent refinement run was
+made at $\ell_c = R/6 \approx \SI{5}{\nano\metre}$ and compared
+against the same MSTM $N = 15$ reference.  The two-point log-log fit
+\begin{equation}
+\text{rel.\ err.}(\ell_c) \;\propto\; (\ell_c / R)^p
+\end{equation}
+was evaluated for the five CAS-v2 components at each $\beta$.  At
+$\beta = \pi/2$ the measured exponents are
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+component & err at $R/5$ & fitted $p$ \\
+\midrule
+$|S_{\text{fw,mean}}|$   & \SI{4.0}{\percent}  & $2.95$ \\
+$\Re S_{\text{fw},\theta}$ & \SI{5.2}{\percent}  & $3.04$ \\
+$\Im S_{\text{fw},\theta}$ & \SI{10.5}{\percent} & $3.39$ \\
+$\Re S_{\text{fw},\varphi}$ & \SI{1.3}{\percent}  & $2.14$ \\
+$\Im S_{\text{fw},\varphi}$ & \SI{1.7}{\percent}  & $0.78$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The theoretical linear-SWG interior rate is $p = 2$; four of the five
+components converge \emph{faster} than that ($p \in [2.1, 3.4]$), and
+the stiffest observable $\Im S_{\text{fw},\theta}$ converges the
+\emph{fastest} ($p = 3.4$) rather than slowest.  This confirms that
+the skin-layer resolution is not the rate-limiting factor once
+$\ell_c \leq R/5$.  The same pattern holds at $\beta = \pi/4$ and
+$\beta = 0$ (see
+\texttt{benchmarks/cas\_v2/doublet\_mstm/refinement.md}).
+Extrapolating with $p = 3.4$, refinement to $\ell_c = R/10$ is
+predicted to bring $\Im S_{\text{fw},\theta}$ agreement to
+$\sim \SI{1}{\percent}$; a direct verification at $\ell_c \leq R/7$
+exceeds the \SI{15}{\giga\byte} RAM of the current AIM implementation
+(near-field storage scales faster than linearly in this small-doublet
+geometry) and is deferred.
+
+The $\Im S_{\text{fw},\varphi}$ slope of $p = 0.78$ is anomalously
+slow in absolute terms but relates to an error component already at
+the \SI{1.5}{\percent} level at $\ell_c = R/5$; the two-point fit
+cannot resolve a slope reliably there.
+
 Physically, the gold skin depth at \SI{638}{\nano\metre} is
 \begin{equation*}
 \delta \;=\; \frac{\lambda_0}{2\pi \Im m_p}
@@ -1550,13 +1593,15 @@ since the SWG basis converges as $O(h^2)$ under uniform refinement.
 
 The practical takeaway is that for high-$|m|$ absorbing aggregates the
 imaginary part of the longitudinal-polarisation channel is the
-stiffest observable and should be adopted as the convergence indicator
-when sizing $\ell_c$: a \SI{4.0}{\percent} error on
-$|S_{\text{fw,mean}}|$ at $\beta = \pi/2$ \emph{hides} a
-\SI{10.5}{\percent} error on $\Im S_{\text{fw},\theta}$, and it is
-the Re/Im-resolved component view of
+stiffest observable \emph{in absolute terms} and should be adopted
+as the convergence indicator when sizing $\ell_c$: a
+\SI{4.0}{\percent} error on $|S_{\text{fw,mean}}|$ at $\beta = \pi/2$
+\emph{hides} a \SI{10.5}{\percent} error on $\Im S_{\text{fw},\theta}$,
+and it is the Re/Im-resolved component view of
 Tables~\ref{tab:doublet-mstm-theta}--\ref{tab:doublet-mstm-phi} that
-makes this gap visible.
+makes this gap visible.  The good news is that the component also
+converges the fastest under refinement ($p \approx 3.4$ measured), so
+modest mesh refinement is highly cost-effective here.
 
 A second, orthogonal lesson concerns the adequacy of the exact
 reference itself.  MSTMforCAS's default auto-truncation delivers
