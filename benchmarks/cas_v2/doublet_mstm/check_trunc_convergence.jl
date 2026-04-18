@@ -34,11 +34,16 @@ end
 
 function main()
     k_medium = 2π * M_MEDIUM / WL_0
-    # Cap at N=6: N≥7 triggers downward-recurrence breakdown of the
-    # Mie Riccati-Bessel precomputation at x≈0.3 in MSTMforCAS@v0.x
-    # (see TMatrixSolver._precompute_T_values).  N=6 is the largest
-    # value that returns physically meaningful results here.
-    trunc_orders = (3, 4, 5, 6)
+    # Extended range now that MSTMforCAS ≥ 0.4.2 uses Miller's downward
+    # recurrence for ψ_n(x), so high-N is numerically stable even at
+    # x ≈ 0.3.  This sweep verifies whether any higher-order multipoles
+    # (populated through the doublet translation coupling) still
+    # contribute at the 1e-5 level beyond the single-sphere Mie floor
+    # at n ≈ 6 for Au.
+    # Post Miller fix (MSTMforCAS ≥ 0.4.2) we can go beyond N=6 provided
+    # nois[i] stays within mie_nmax(x) = 8; higher N triggers a separate
+    # unrelated bug in solve_tmatrix (mie_vecs undersized).
+    trunc_orders = (3, 4, 5, 6, 7, 8)
 
     println("MSTM VSWF truncation-order convergence (doublet benchmark)")
     println("  R=$R_MONOMER μm, gap=$GAP μm, λ₀=$WL_0 μm, x≈",
