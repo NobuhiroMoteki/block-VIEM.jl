@@ -1,5 +1,9 @@
 # block-VIEM.jl
 
+[![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FNobuhiroMoteki%2Fblock-VIEM.jl%2Fmain%2FProject.toml&query=%24.version&prefix=v&label=version&color=blue)](https://github.com/NobuhiroMoteki/block-VIEM.jl/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Julia ≥ 1.10](https://img.shields.io/badge/julia-%E2%89%A5%201.10-blueviolet.svg)](https://julialang.org/)
+
 A Julia implementation of the **Volume Integral Equation Method (VIEM)** for
 electromagnetic scattering by arbitrarily shaped, high-contrast dielectric
 particles (e.g., iron-oxide aggregates, rough gold nanoparticles).
