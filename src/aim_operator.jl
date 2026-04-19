@@ -696,7 +696,16 @@ Block (multi-RHS) form of [`aim_mvp`](@ref). For `X` of shape `(N, L)`,
 returns `Y = Z * X` of shape `(N, L)`, where `Z` is the AIM-accelerated
 impedance operator. Used by [`block_bicgstab`](@ref) for multi-orientation
 batch solves. The mass and precorrection terms are applied as sparse
-matrix–matrix products; the far-field FFT kernel is applied column-wise.
+matrix–matrix products; the far-field FFT kernel is applied column-wise
+and the columns are dispatched across `Threads.nthreads()` Julia
+threads.
+
+!!! note "Thread balance for block MVP"
+    The inner FFT (see [`fft_convolve`](@ref)) honours the global FFTW
+    thread count set by [`set_fft_threads`](@ref). For maximum
+    throughput when `L > 1`, reduce FFTW threads so that
+    `julia_threads × fftw_threads ≈ physical_cores`. A good rule:
+    `set_fft_threads(max(1, cld(Threads.nthreads(), L)))`.
 """
 function aim_mvp(op::AIMOperator, X::AbstractMatrix)
     N, L = size(X)
@@ -706,7 +715,12 @@ function aim_mvp(op::AIMOperator, X::AbstractMatrix)
     Y .*= inv_avg
     if !all(iszero, op.kappa_v)
         inv_eb = 1 / op.eps_bg
-        for j in 1:L
+        # aim_far_mvp_weighted allocates its own scratch and only reads
+        # shared data (proj.W*, G_hat, kappa_*). FFTW plan execution is
+        # thread-safe for disjoint input buffers, which is what we have
+        # here — each iteration reshapes its own `q` into a fresh 3-D
+        # buffer inside fft_convolve.
+        Threads.@threads for j in 1:L
             xj = @view X[:, j]
             Kf = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
                                        op.kappa_v, op.kappa_avg, xj)

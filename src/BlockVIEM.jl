@@ -15,6 +15,34 @@ See `.claude/technical_note.md` for the formulation reference.
 """
 module BlockVIEM
 
+using FFTW
+
+# Process-global FFTW thread pool — enabled once at module load so that
+# every `plan_fft!` / `fft!` created afterwards (in `aim_fft_workspace`,
+# `precompute_green_fft`, and `fft_convolve`) uses all Julia threads.
+# Must run before any FFT plan is cached; Julia starts `__init__` after
+# the module body is evaluated but before user code touches the plan
+# cache, so this is the correct hook. Override with `set_fft_threads`.
+function __init__()
+    FFTW.set_num_threads(max(1, Threads.nthreads()))
+    return nothing
+end
+
+"""
+    set_fft_threads(n::Integer) -> Int
+
+Set the FFTW thread pool size used by all AIM FFT convolutions.
+Returns the new count. Plans created before this call retain their
+original thread count (FFTW caches by size + thread count), so for a
+clean switch call this **before** building an `AIMOperator`.
+"""
+function set_fft_threads(n::Integer)
+    n >= 1 || throw(ArgumentError("n must be ≥ 1, got $n"))
+    FFTW.set_num_threads(Int(n))
+    return Int(n)
+end
+export set_fft_threads
+
 # Phase 1: Mesh / SWG basis
 include("mesh.jl")
 include("swg.jl")
