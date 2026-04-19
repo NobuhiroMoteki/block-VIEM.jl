@@ -1879,10 +1879,13 @@ $\beta = 0$ (see
 \texttt{benchmarks/cas\_v2/doublet\_mstm/refinement.md}).
 Extrapolating with $p = 3.4$, refinement to $\ell_c = R/10$ is
 predicted to bring $\Im S_{\text{fw},\theta}$ agreement to
-$\sim \SI{1}{\percent}$; a direct verification at $\ell_c \leq R/7$
-exceeds the \SI{15}{\giga\byte} RAM of the current AIM implementation
-(near-field storage scales faster than linearly in this small-doublet
-geometry) and is deferred.
+$\sim \SI{1}{\percent}$.  Phase A (Sec.~\ref{sec:aim-surface}) has
+reduced the AIM memory footprint to a near-linear
+$\mathcal{O}(N_{\text{dof}}^{1.03})$ scaling, so direct verification
+at $\ell_c = R/7$ already fits in \SI{263}{\mebi\byte}
+(Table~\ref{tab:phase-a-doublet}) and refinement to $R/10$ (projected
+\SI{760}{\mebi\byte}) is feasible on a \SI{16}{\giga\byte}
+workstation; the direct $R/10$ run is the next planned step.
 
 The $\Im S_{\text{fw},\varphi}$ slope of $p = 0.78$ is anomalously
 slow in absolute terms but relates to an error component already at
