@@ -228,6 +228,38 @@ end
         duffy_rule = duffy_reference_rule(7))
 end
 
+@testset "solve_cas_v2_orientations: projection + mass reuse" begin
+    # Parameter-sweep reuse path: passing a pre-built AIMProjection and
+    # mass matrix to the AIM block-BiCGSTAB solver must produce the
+    # same CAS-v2 observables as a fresh build at the same (k0, eps_p).
+    radius = 0.5
+    path = generate_sphere_mesh(radius, 0.30)
+    mesh = read_msh(path)
+    basis = build_swg_basis(mesh; include_boundary_faces = true)
+
+    wl_0 = 4.0; m_m = 1.0; m_p = 1.5 + 0.01im
+    euler_list = [(0.0, 0.0, 0.0), (0.3, 0.7, 0.5), (0.0, π/2, 0.0)]
+    pitch = 0.5 * mean_edge_length(mesh)
+
+    grid = aim_grid(mesh; pitch = pitch, padding = 4)
+    proj = build_aim_projection(basis, grid; poly_order = 2, stencil = 3)
+    mass = assemble_mass_matrix(basis)
+
+    res_fresh = solve_cas_v2_orientations(basis, euler_list;
+                                           wl_0 = wl_0, m_m = m_m, m_p = m_p,
+                                           method = :aim_bicgstab,
+                                           pitch = pitch, tol = 1e-8)
+    res_reuse = solve_cas_v2_orientations(basis, euler_list;
+                                           wl_0 = wl_0, m_m = m_m, m_p = m_p,
+                                           method = :aim_bicgstab,
+                                           pitch = pitch, tol = 1e-8,
+                                           projection = proj, mass = mass)
+    for (rf, rr) in zip(res_fresh, res_reuse)
+        @test isapprox(rr.S_fw_mean, rf.S_fw_mean; rtol = 1e-8)
+        @test isapprox(rr.S_bk,      rf.S_bk;      rtol = 1e-8)
+    end
+end
+
 @testset "solve_cas_v2_orientations: non-unit m_m (physical API)" begin
     # Cross-check that the physical (wl_0, m_m, m_p) path gives the same
     # physics as the equivalent "vacuum-scaled" raw form when we explicitly

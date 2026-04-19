@@ -40,6 +40,14 @@ const N_PW          = 10          # mesh: points per wavelength
 const DUFFY_ORDER   = 5           # Duffy quadrature order
 const AIM_PITCH_RATIO = 0.5      # AIM grid pitch = ratio × mean edge length
 const AIM_PADDING   = 4           # AIM grid padding (number of pitch cells)
+# When true, a single worst-case mesh (built with the shortest wl_0 and
+# largest |m_p| in the sweep) is used across every (wl_0, m_p) entry
+# within the same shape_idx, and the k0-independent projection +
+# mass matrices are built once per shape and reused.  Trades slightly
+# over-refined meshes at long-wl / small-|m_p| points for a large
+# setup speed-up across the inner (i_pair, i_mp) loop.  Set false to
+# restore the original per-(wl_0, m_p) mesh sizing.
+const REUSE_PROJECTION_PER_SHAPE = true
 const OUTPUT_FILE   = length(ARGS) >= 1 ? ARGS[1] :
                       joinpath(@__DIR__, "pcas_ocbs_simulated_data.hdf5")
 
@@ -94,13 +102,15 @@ end
 #  Common solve core: calls solve_cas_v2_orientations with return_D=true,
 #  then computes cross sections from D_block.
 # ══════════════════════════════════════════════════════════════════════════════
-function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh)
+function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh;
+                                projection = nothing, mass = nothing)
     k0 = ComplexF64(2π * m_m / wl_0)
     eps_p = _to_eps(m_p_xyz)
     eps_bg = ComplexF64(m_m)^2
     num_ori = length(euler_list)
 
-    # AIM pitch from mesh geometry (ignored when method == :dense)
+    # AIM pitch from mesh geometry (ignored when method == :dense or
+    # when a pre-built `projection` is supplied — its grid pitch wins).
     h_bar = mean_edge_length(mesh)
     pitch = AIM_PITCH_RATIO * h_bar
 
@@ -114,8 +124,10 @@ function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh)
         :symmetrize => true,
     )
     if SOLVER_METHOD !== :dense
-        method_kw[:pitch]   = pitch
-        method_kw[:padding] = AIM_PADDING
+        method_kw[:pitch]      = pitch
+        method_kw[:padding]    = AIM_PADDING
+        method_kw[:projection] = projection
+        method_kw[:mass]       = mass
     end
 
     cas_results, D_block = solve_cas_v2_orientations(
@@ -148,9 +160,11 @@ end
 # ══════════════════════════════════════════════════════════════════════════════
 #  Solve: general particle (all orientations)
 # ══════════════════════════════════════════════════════════════════════════════
-function run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz, euler_angles)
+function run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz, euler_angles;
+                          projection = nothing, mass = nothing)
     C_abs, C_ext, S_fw_th, S_fw_ph, S_bk =
-        _solve_and_postprocess(basis, euler_angles, wl_0, m_m, m_p_xyz, mesh)
+        _solve_and_postprocess(basis, euler_angles, wl_0, m_m, m_p_xyz, mesh;
+                               projection = projection, mass = mass)
     return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, true
 end
 
@@ -158,7 +172,8 @@ end
 #  Solve: spheroid (α-expansion, solve only N_beta orientations)
 # ══════════════════════════════════════════════════════════════════════════════
 function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
-                           N_alpha, N_beta, N_gamma)
+                           N_alpha, N_beta, N_gamma;
+                           projection = nothing, mass = nothing)
     num_full = N_alpha * N_beta * N_gamma
 
     # Beta-only grid for solve (α=0, γ=0)
@@ -167,7 +182,8 @@ function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
     euler_beta_only = [(0.0, β, 0.0) for β in beta_vals]
 
     C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0 =
-        _solve_and_postprocess(basis, euler_beta_only, wl_0, m_m, m_p_xyz, mesh)
+        _solve_and_postprocess(basis, euler_beta_only, wl_0, m_m, m_p_xyz, mesh;
+                               projection = projection, mass = mass)
 
     _log("    [spheroid, L=$N_beta]: converged ✓")
 
@@ -271,6 +287,19 @@ function main()
         n_skip = 0
         n_total = N_pairs * N_m_p * N_rv * N_bc * N_ab * N_bt
 
+        # Worst-case mesh sizing for projection/mass reuse across the
+        # inner (i_pair, i_mp) loop: gre_mesh's adaptive lc is
+        # monotonically decreasing in `wl_0 / max|m_p|`, so using the
+        # smallest `wl_0` and the largest `|m_p|` anywhere in the sweep
+        # yields a mesh that resolves every (wl_0, m_p) slot.
+        wl_0_min_sweep = minimum(wl_m_m_pairs[:, 1])
+        m_p_max_global = maximum(abs.(vec(m_p_xyz_list)))
+        if REUSE_PROJECTION_PER_SHAPE
+            _log("Reuse mode: 1 mesh + projection + mass per shape_idx " *
+                 "(worst-case wl_0=$(Printf.@sprintf("%.4f", wl_0_min_sweep)), " *
+                 "|m_p|_max=$(Printf.@sprintf("%.4f", m_p_max_global)))")
+        end
+
         for i_rv in 1:N_rv, i_bc in 1:N_bc, i_ab in 1:N_ab, i_bt in 1:N_bt
             r_v_base  = r_v_base_list[i_rv]
             bc_ratio  = bc_ratio_list[i_bc]
@@ -282,6 +311,42 @@ function main()
 
             # Write r_ve (geometric, same for all wl/m_p for this shape)
             sd["r_ve"][shape_idx...] = r_v_base
+
+            # ── Per-shape mesh + projection + mass (reuse mode) ──────
+            shape_mesh       = nothing
+            shape_basis      = nothing
+            shape_r_ve       = nothing
+            shape_projection = nothing
+            shape_mass       = nothing
+            if REUSE_PROJECTION_PER_SHAPE
+                m_p_worst_xyz = fill(ComplexF64(m_p_max_global), 3)
+                t_mesh = @elapsed begin
+                    shape_mesh, shape_basis, shape_r_ve = build_particle(
+                        r_v_base, bc_ratio, ab_ratio, gre_beta,
+                        wl_0_min_sweep, m_p_worst_xyz)
+                end
+                h_bar_shape = mean_edge_length(shape_mesh)
+                pitch_shape = AIM_PITCH_RATIO * h_bar_shape
+                _log("shape=$shape_idx  mesh: $(n_tets(shape_mesh)) tets, " *
+                     "$(n_basis(shape_basis)) DOFs, " *
+                     "r_ve=$(Printf.@sprintf("%.5f", shape_r_ve)), " *
+                     "pitch=$(Printf.@sprintf("%.4f", pitch_shape)) " *
+                     "($(Printf.@sprintf("%.1fs", t_mesh)))")
+                if SOLVER_METHOD !== :dense
+                    t_setup = @elapsed begin
+                        grid = aim_grid(shape_basis.mesh;
+                                         pitch = pitch_shape,
+                                         padding = AIM_PADDING)
+                        shape_projection = build_aim_projection(
+                            shape_basis, grid; poly_order = 2, stencil = 3)
+                        shape_mass = assemble_mass_matrix(shape_basis)
+                    end
+                    _log("  projection + mass cached " *
+                         "($(Printf.@sprintf("%.1fs", t_setup)))")
+                end
+                # r_ve from actual mesh volume (same across inner loop)
+                sd["r_ve"][shape_idx...] = shape_r_ve
+            end
 
             for i_pair in 1:N_pairs, i_mp in 1:N_m_p
                 wl_0    = wl_m_m_pairs[i_pair, 1]
@@ -298,7 +363,6 @@ function main()
                     continue
                 end
 
-                # ── Build mesh + basis ───────────────────────────────────
                 println("─" ^ 64)
                 mode_tag = spheroid_mode ? " [spheroid, L_solve=$N_beta]" : ""
                 _log("idx=$idx6  wl_0=$(Printf.@sprintf("%.4f", wl_0)) μm  " *
@@ -306,19 +370,23 @@ function main()
                 _log("  r_v=$r_v_base  bc=$bc_ratio  ab=$ab_ratio  " *
                      "β=$gre_beta  N_ori=$num_orientations$mode_tag")
 
-                t_mesh = @elapsed begin
-                    mesh, basis, r_ve = build_particle(
-                        r_v_base, bc_ratio, ab_ratio, gre_beta, wl_0, m_p_xyz)
+                # ── Build mesh + basis (unless reused from shape) ────────
+                local mesh, basis, r_ve
+                if REUSE_PROJECTION_PER_SHAPE
+                    mesh, basis, r_ve = shape_mesh, shape_basis, shape_r_ve
+                else
+                    t_mesh = @elapsed begin
+                        mesh, basis, r_ve = build_particle(
+                            r_v_base, bc_ratio, ab_ratio, gre_beta, wl_0, m_p_xyz)
+                    end
+                    h_bar = mean_edge_length(mesh)
+                    _log("  mesh: $(n_tets(mesh)) tets, $(n_basis(basis)) DOFs, " *
+                         "r_ve=$(Printf.@sprintf("%.5f", r_ve)), " *
+                         "h̄=$(Printf.@sprintf("%.4f", h_bar)), " *
+                         "pitch=$(Printf.@sprintf("%.4f", AIM_PITCH_RATIO * h_bar)) " *
+                         "($(Printf.@sprintf("%.1fs", t_mesh)))")
+                    sd["r_ve"][shape_idx...] = r_ve
                 end
-                h_bar = mean_edge_length(mesh)
-                _log("  mesh: $(n_tets(mesh)) tets, $(n_basis(basis)) DOFs, " *
-                     "r_ve=$(Printf.@sprintf("%.5f", r_ve)), " *
-                     "h̄=$(Printf.@sprintf("%.4f", h_bar)), " *
-                     "pitch=$(Printf.@sprintf("%.4f", AIM_PITCH_RATIO * h_bar)) " *
-                     "($(Printf.@sprintf("%.1fs", t_mesh)))")
-
-                # Update r_ve from actual mesh volume
-                sd["r_ve"][shape_idx...] = r_ve
 
                 # ── Solve ────────────────────────────────────────────────
                 # On failure, fill with NaN and continue to next condition
@@ -333,11 +401,15 @@ function main()
                     if spheroid_mode
                         C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, _ =
                             run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
-                                              N_alpha, N_beta, N_gamma)
+                                              N_alpha, N_beta, N_gamma;
+                                              projection = shape_projection,
+                                              mass = shape_mass)
                     else
                         C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, _ =
                             run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz,
-                                             euler_angles)
+                                             euler_angles;
+                                             projection = shape_projection,
+                                             mass = shape_mass)
                     end
                 catch e
                     if e isa InterruptException

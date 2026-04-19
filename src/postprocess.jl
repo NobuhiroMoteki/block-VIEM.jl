@@ -648,7 +648,9 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    tol::Float64 = 1e-6,
                                    maxiter::Integer = 200,
                                    verbose::Bool = false,
-                                   return_D::Bool = false)
+                                   return_D::Bool = false,
+                                   projection::Union{AIMProjection,Nothing} = nothing,
+                                   mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing)
     k0_c, eps_p_c, eps_bg_c = _resolve_physical_inputs(wl_0, m_m, m_p,
                                                        k0, eps_p, eps_bg)
     # `k0_c` is the wavenumber in the background medium, matching
@@ -674,8 +676,11 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
             @views D_block[:, i] .= F \ b
         end
     elseif method === :aim_bicgstab || method === :aim_gmres
-        # Auto-detect pitch from mean edge length if not supplied
-        if pitch === nothing
+        # Auto-detect pitch from mean edge length if not supplied. When
+        # the caller supplies a pre-built `projection`, its own grid
+        # pitch is used and this value is ignored by
+        # `build_aim_operator`.
+        if pitch === nothing && projection === nothing
             pitch = 0.5 * mean_edge_length(basis.mesh)
         end
         N = n_basis(basis)
@@ -694,7 +699,9 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                 eps_bg = eps_bg_c,
                                 pitch = pitch, padding = padding,
                                 outer_rule = outer_rule,
-                                duffy_rule = duffy_rule)
+                                duffy_rule = duffy_rule,
+                                projection = projection,
+                                mass = mass)
         A = _AIMLinOp(op, N)
         sub = method === :aim_bicgstab ? :bicgstab : :gmres
         res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
