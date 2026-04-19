@@ -404,6 +404,13 @@ julia --project=. viem_results/check_h5.jl
   `gre_beta == 0`): solves only `N_beta` orientations at α = 0, then
   fills the full `(N_alpha × N_beta × N_gamma)` grid analytically via
   `S_θ(α) = A + B·exp(+2jα)`
+- **Reuses projection + mass matrices** across the inner
+  `(wl_0, m_p)` loop. Each `shape_idx` builds one worst-case mesh
+  (using the shortest `wl_0` and largest `|m_p|` anywhere in the
+  sweep) and caches its `AIMProjection` / mass matrix; every inner
+  iteration then rebuilds only the Green FFT and the precorrection.
+  Set `REUSE_PROJECTION_PER_SHAPE = false` at the top of the script
+  to restore per-(wl_0, m_p) adaptive mesh sizing instead.
 - **Resume**: skips already-computed conditions (checks `S_fw_PCAS_mie`)
 - **Failure handling**: on solver error, fills NaN and continues to the
   next condition (matching block-DDA_Py); only Ctrl+C stops the sweep
