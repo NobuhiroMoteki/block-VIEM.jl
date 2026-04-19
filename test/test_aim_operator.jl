@@ -105,6 +105,34 @@ end
     end
 end
 
+@testset "AIM operator: projection + mass reuse" begin
+    # Regression for the wavelength/material-sweep reuse path: building
+    # the operator with pre-computed projection and mass must match a
+    # clean build bit-for-bit at the same (k0, eps_p).
+    mesh = unit_cube_mesh_op()
+    basis = build_swg_basis(mesh)
+    N = n_basis(basis)
+
+    grid = aim_grid(basis.mesh; pitch = 0.25, padding = 3)
+    proj = build_aim_projection(basis, grid; poly_order = 2, stencil = 3)
+    mass = assemble_mass_matrix(basis)
+
+    k0 = 0.5; eps_p = 2.0 + 0.1im
+    op_fresh = build_aim_operator(basis; k0 = k0, eps_p = eps_p,
+                                   pitch = 0.25, padding = 3)
+    op_reuse = build_aim_operator(basis; k0 = k0, eps_p = eps_p,
+                                   projection = proj, mass = mass)
+
+    x = ComplexF64[(i + 0.3im) for i in 1:N]
+    y_fresh = aim_mvp(op_fresh, x)
+    y_reuse = aim_mvp(op_reuse, x)
+    @test norm(y_fresh - y_reuse) / norm(y_fresh) < 1e-13
+
+    # Missing pitch without projection must throw
+    @test_throws ArgumentError build_aim_operator(basis; k0 = k0,
+                                                    eps_p = eps_p)
+end
+
 @testset "AIM operator: static limit (κ=0)" begin
     mesh = unit_cube_mesh_op()
     basis = build_swg_basis(mesh)

@@ -619,6 +619,17 @@ Mixing the two forms, or supplying neither complete set, raises an
 intrinsic ZYZ convention, matching `scipy.spatial.transform.Rotation`
 and block-DDA_Py.
 """
+function _project_rhs_column!(B::AbstractMatrix{ComplexF64}, col::Int,
+                              basis::AbstractDivBasis,
+                              u_inc, e0_inc, k_bg, outer_rule)
+    rhs = project_plane_wave(basis; k_hat = u_inc, E0 = e0_inc,
+                              k_bg = k_bg, rule = outer_rule)
+    @inbounds for r in 1:size(B, 1)
+        B[r, col] = rhs[r]
+    end
+    return nothing
+end
+
 function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    euler_angles::AbstractVector;
                                    wl_0::Union{Real,Nothing}   = nothing,
@@ -669,11 +680,16 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
         end
         N = n_basis(basis)
         B = Matrix{ComplexF64}(undef, N, L)
+        # Each orientation's RHS is an independent volume integral.
+        # Dispatch one task per column so they run in parallel; pass
+        # the loop variables explicitly to `_project_rhs_column!` to
+        # avoid closure pitfalls with @spawn.
+        tasks = Task[]
         for (i, ori) in enumerate(orientations)
-            B[:, i] = project_plane_wave(basis; k_hat = ori.u_inc,
-                                         E0 = ori.e0_inc, k_bg = k_bg,
-                                         rule = outer_rule)
+            push!(tasks, Threads.@spawn _project_rhs_column!(
+                B, i, basis, ori.u_inc, ori.e0_inc, k_bg, outer_rule))
         end
+        foreach(wait, tasks)
         op = build_aim_operator(basis; k0 = k0_c, eps_p = eps_p_c,
                                 eps_bg = eps_bg_c,
                                 pitch = pitch, padding = padding,

@@ -447,18 +447,72 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
         end
     end
 
-    Is = Int[]
-    Js = Int[]
-    Vs = ComplexF64[]
-    sizehint!(Is, length(pairs))
-    sizehint!(Js, length(pairs))
-    sizehint!(Vs, length(pairs))
+    # Parallel over near_cols.  Each task owns its own (Is, Js, Vs)
+    # triplet arrays and reads the shared stencil caches (idx_*, v_*)
+    # plus the Green tensor — all read-only after init.  We pass the
+    # buffers as explicit function arguments so the spawned closure
+    # cannot accidentally share state across tasks (the same pattern as
+    # `_projection_chunk!` in src/aim_projection.jl).  Interleave
+    # columns across chunks so that high-connectivity columns (which
+    # dominate the inner work) are roughly balanced across tasks.
+    nthr_def  = max(1, Threads.nthreads())
+    n_chunks  = min(nthr_def, length(near_cols))
+    col_chunks = [near_cols[k:n_chunks:end] for k in 1:n_chunks]
+    est_per    = cld(length(pairs), max(1, n_chunks))
+    Is_t = [sizehint!(Int[],         est_per) for _ in 1:n_chunks]
+    Js_t = [sizehint!(Int[],         est_per) for _ in 1:n_chunks]
+    Vs_t = [sizehint!(ComplexF64[],  est_per) for _ in 1:n_chunks]
 
-    # Phase A: the κ_avg prefactor scales the whole scalar kernel
-    # (K^A scalar + K^B + K^C + K^D). For isotropic ε this is exact; for
-    # diagonal-aniso ε it incurs an O(Δκ/κ) bias on the surface terms, the
-    # same order already accepted in `assemble_half_swg_correction`.
-    for n in near_cols
+    prev_blas_nthr = LinearAlgebra.BLAS.get_num_threads()
+    LinearAlgebra.BLAS.set_num_threads(1)
+    try
+        tasks = Task[]
+        for k in 1:n_chunks
+            isempty(col_chunks[k]) && continue
+            t = Threads.@spawn _precorrection_chunk!(
+                basis, k0_c, kappa_v, kappa_avg,
+                outer_rule, duffy_rule, tri_rule, tri_duffy_rule,
+                col_chunks[k], col_to_rows,
+                n_per, idx_i, idx_j, idx_k,
+                v_x, v_y, v_z, v_div_eff,
+                G_toep, k0_sq, N2x, N2y, N2z,
+                Is_t[k], Js_t[k], Vs_t[k])
+            push!(tasks, t)
+        end
+        foreach(wait, tasks)
+    finally
+        LinearAlgebra.BLAS.set_num_threads(prev_blas_nthr)
+    end
+
+    Is = reduce(vcat, Is_t)
+    Js = reduce(vcat, Js_t)
+    Vs = reduce(vcat, Vs_t)
+    return sparse(Is, Js, Vs, N, N)
+end
+
+# Worker for the parallel `assemble_precorrection` loop. The arguments
+# are all either per-task output buffers (Is, Js, Vs) or read-only
+# shared data (basis, quadrature rules, stencil caches, Green tensor).
+function _precorrection_chunk!(basis::AbstractDivBasis,
+                               k0_c::ComplexF64,
+                               kappa_v::SVector{3,ComplexF64},
+                               kappa_avg::ComplexF64,
+                               outer_rule::TetQuadRule,
+                               duffy_rule::DuffyQuadRule,
+                               tri_rule::TriQuadRule,
+                               tri_duffy_rule::TriDuffyRule,
+                               cols::AbstractVector{Int},
+                               col_to_rows::Dict{Int,Vector{Int}},
+                               n_per::Vector{Int},
+                               idx_i::Matrix{Int}, idx_j::Matrix{Int}, idx_k::Matrix{Int},
+                               v_x::Matrix{ComplexF64}, v_y::Matrix{ComplexF64},
+                               v_z::Matrix{ComplexF64}, v_div_eff::Matrix{ComplexF64},
+                               G_toep::Array{ComplexF64,3},
+                               k0_sq::ComplexF64,
+                               N2x::Int, N2y::Int, N2z::Int,
+                               Is::Vector{Int}, Js::Vector{Int},
+                               Vs::Vector{ComplexF64})
+    for n in cols
         nn = n_per[n]
         n_is_bnd = _is_boundary_dof(basis, n)
         for m in col_to_rows[n]
@@ -480,17 +534,12 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                     G = G_toep[a_idx + 1, b_idx + 1, c_idx + 1]
                     vx_n = v_x[b, n]; vy_n = v_y[b, n]; vz_n = v_z[b, n]
                     ve_n = v_div_eff[b, n]
-                    # Anisotropic: k0² Σ_α κ_α w_mα w_nα − κ_avg v_eff_m v_eff_n.
-                    # v_eff = v_div − v_surf folds in the Phase A surface
-                    # projection so K_AIM here is the full K^A+B+C+D_AIM.
                     dot_w = kappa_v[1] * vx_m * vx_n +
                             kappa_v[2] * vy_m * vy_n +
                             kappa_v[3] * vz_m * vz_n
                     s += (k0_sq * dot_w - kappa_avg * ve_m * ve_n) * G
                 end
             end
-            # Bulk K^A direct (always needed), averaged over (m,n)/(n,m) to
-            # match the dense `symmetrize=true` convention.
             K_direct_mn = _bulk_radiation_kernel_weighted(
                               basis, m, n, k0_c, kappa_v, kappa_avg,
                               outer_rule, duffy_rule)
@@ -502,11 +551,6 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                                   outer_rule, duffy_rule)
                 (K_direct_mn + K_direct_nm) / 2
             end
-            # Surface kernels K^B + K^C + K^D direct (Phase A): only
-            # contribute when at least one endpoint is a boundary DOF.
-            # `_radiation_kernel_weighted` composes K_total = K^A_bulk +
-            # κ_avg × K^{B+C+D}; precorrection stores (K_total_direct −
-            # K_AIM_full) so we add with +κ_avg here to mirror that form.
             if m_is_bnd || n_is_bnd
                 Ks_mn = _half_swg_surface_kernel(basis, m, n, k0_c,
                                                   outer_rule, duffy_rule,
@@ -526,7 +570,7 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
             push!(Vs, K_direct_avg - s)
         end
     end
-    return sparse(Is, Js, Vs, N, N)
+    return nothing
 end
 
 # ---------------------------------------------------------------------------
@@ -604,17 +648,30 @@ end
                        poly_order::Integer = 2,
                        stencil_size::Integer = 3,
                        outer_rule::TetQuadRule = TET_QUAD_5PT,
-                       duffy_rule::DuffyQuadRule = duffy_reference_rule(5))
+                       duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
+                       projection::Union{AIMProjection,Nothing} = nothing,
+                       mass::Union{SparseMatrixCSC,Nothing} = nothing)
         -> AIMOperator
 
 One-shot constructor for the complete AIM operator: builds the grid,
 projection matrices, Green FFT, mass matrix, and precorrection.
+
+**Reuse across parameter sweeps.**  The projection `W` matrices and the
+mass matrix depend only on `(basis, grid, poly_order, stencil_size)`
+and on `outer_rule`, *not* on `k0` or `ε_p`.  For wavelength or
+material sweeps, build them once and pass them back in through the
+`projection` and `mass` keyword arguments — the constructor will skip
+the corresponding setup (`build_aim_projection`, `assemble_mass_matrix`)
+and only rebuild the `k0`-dependent pieces (Green FFT and
+precorrection).  When `projection` is supplied the `pitch`, `padding`,
+`poly_order`, `stencil_size`, and `tri_rule` keywords are ignored
+because they are already baked into the provided object.
 """
 function build_aim_operator(basis::AbstractDivBasis;
                             k0::Number,
                             eps_p = 1,
                             eps_bg::Number = 1,
-                            pitch::Float64,
+                            pitch::Union{Float64,Nothing} = nothing,
                             padding::Integer = 3,
                             poly_order::Integer = 2,
                             stencil_size::Integer = 3,
@@ -622,16 +679,25 @@ function build_aim_operator(basis::AbstractDivBasis;
                             outer_rule::TetQuadRule = TET_QUAD_5PT,
                             duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                             tri_rule::TriQuadRule = tri_collapsed_rule(4),
-                            tri_duffy_rule::TriDuffyRule = tri_duffy_reference_rule(6))
-    grid = aim_grid(basis.mesh; pitch = pitch, padding = padding)
-    proj = build_aim_projection(basis, grid;
-                                poly_order = poly_order,
-                                stencil = stencil_size,
-                                rule = outer_rule,
-                                tri_rule = tri_rule)
-    G_toep = build_green_toeplitz(grid, k0)
+                            tri_duffy_rule::TriDuffyRule = tri_duffy_reference_rule(6),
+                            projection::Union{AIMProjection,Nothing} = nothing,
+                            mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing)
+    if projection === nothing
+        pitch === nothing && throw(ArgumentError(
+            "build_aim_operator: `pitch` is required when `projection` is not supplied"))
+        grid = aim_grid(basis.mesh; pitch = pitch, padding = padding)
+        proj = build_aim_projection(basis, grid;
+                                    poly_order = poly_order,
+                                    stencil = stencil_size,
+                                    rule = outer_rule,
+                                    tri_rule = tri_rule)
+    else
+        proj = projection
+    end
+    G_toep = build_green_toeplitz(proj.grid, k0)
     G_hat = precompute_green_fft(G_toep)
-    mass = assemble_mass_matrix(basis; rule = outer_rule)
+    mass_m = mass === nothing ?
+        assemble_mass_matrix(basis; rule = outer_rule) : mass
     # Phase A: precorrection now folds in K^B + K^C + K^D direct for
     # near pairs involving a boundary DOF, and the AIM far-field covers
     # the same kernels via the (Wdiv − Wsurf) effective scalar channel.
@@ -652,7 +718,7 @@ function build_aim_operator(basis::AbstractDivBasis;
     length(diag_pre) == N || error("diag_precorrection length mismatch")
     half_extra = spzeros(ComplexF64, N, N)
     diag_half = zeros(ComplexF64, N)
-    return AIMOperator(proj, G_hat, mass,
+    return AIMOperator(proj, G_hat, mass_m,
                        precorr, diag_pre,
                        half_extra, diag_half,
                        ComplexF64(k0), eps_bg_c, kappa_v, kappa_avg, inv_eps_v)

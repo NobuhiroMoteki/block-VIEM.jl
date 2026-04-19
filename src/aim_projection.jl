@@ -15,7 +15,7 @@
 # Reference: technical_note.md §5 / aim plan and CLAUDE.md Phase 3.
 
 using SparseArrays
-using LinearAlgebra: dot
+using LinearAlgebra: dot, BLAS
 
 """
     AIMProjection
@@ -231,40 +231,16 @@ The grid `padding` must be large enough that every basis stencil falls
 inside the grid; otherwise the moment system becomes deficient and the
 constructor throws.
 """
-function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
-                              poly_order::Integer = 2,
-                              stencil::Integer = 3,
-                              rule::TetQuadRule = TET_QUAD_5PT,
-                              tri_rule::TriQuadRule = tri_collapsed_rule(4))
-    P = Int(poly_order)
-    M_sten = Int(stencil)
-    M_sten^3 >= n_moments(P) ||
-        throw(ArgumentError("stencil^3 = $(M_sten^3) is smaller than the number of moments $(n_moments(P)) for poly_order=$P"))
-    indices = multi_indices(P)
-    nmom = length(indices)
-    N = n_basis(basis)
-    n_grid_total = n_grid_points(grid)
-
-    Is = Int[]
-    Js = Int[]
-    Vx = Float64[]
-    Vy = Float64[]
-    Vz = Float64[]
-    Vdiv = Float64[]
-    Vsurf = Float64[]
-    nz_est = N * M_sten^3
-    sizehint!(Is, nz_est)
-    sizehint!(Js, nz_est)
-    sizehint!(Vx, nz_est)
-    sizehint!(Vy, nz_est)
-    sizehint!(Vz, nz_est)
-    sizehint!(Vdiv, nz_est)
-    sizehint!(Vsurf, nz_est)
-
+function _projection_chunk!(basis, grid, rng::AbstractUnitRange{Int},
+                            indices, nmom::Int, M_sten::Int,
+                            rule::TetQuadRule, tri_rule::TriQuadRule,
+                            zero_mom::Vector{Float64},
+                            Is::Vector{Int}, Js::Vector{Int},
+                            Vx::Vector{Float64}, Vy::Vector{Float64},
+                            Vz::Vector{Float64}, Vdiv::Vector{Float64},
+                            Vsurf::Vector{Float64})
     Phi = Matrix{Float64}(undef, nmom, M_sten^3)
-    zero_mom = zeros(Float64, nmom)
-
-    for n in 1:N
+    for n in rng
         c = basis_centroid(basis, n)
         M_target = basis_moments(basis, n, c, indices, rule)
         M_div_target = divergence_moments(basis, n, c, indices, rule)
@@ -279,16 +255,13 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
         Phi_view = view(Phi, :, 1:n_sten)
         @inbounds for j in 1:n_sten
             r_j = grid_point_at_linear(grid, sten[j])
-            for k in 1:nmom
-                Phi_view[k, j] = _monomial(r_j, c, indices[k])
+            for kk in 1:nmom
+                Phi_view[kk, j] = _monomial(r_j, c, indices[kk])
             end
         end
 
-        # Solve Φ w = M_target for w (n_sten × 3) in the minimum-norm sense.
-        w_vec = Phi_view \ M_target        # (n_sten × 3)
-        w_div = Phi_view \ M_div_target    # (n_sten,)
-        # Surface channel: zero target for interior DOFs => zero weights
-        # (avoid unnecessary LAPACK call; non-boundary rows stay empty).
+        w_vec  = Phi_view \ M_target        # (n_sten × 3)
+        w_div  = Phi_view \ M_div_target    # (n_sten,)
         w_surf = _is_boundary_dof(basis, n) ?
             Phi_view \ M_surf_target : zeros(Float64, n_sten)
 
@@ -302,6 +275,72 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
             push!(Vsurf, w_surf[j])
         end
     end
+    return nothing
+end
+
+function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
+                              poly_order::Integer = 2,
+                              stencil::Integer = 3,
+                              rule::TetQuadRule = TET_QUAD_5PT,
+                              tri_rule::TriQuadRule = tri_collapsed_rule(4))
+    P = Int(poly_order)
+    M_sten = Int(stencil)
+    M_sten^3 >= n_moments(P) ||
+        throw(ArgumentError("stencil^3 = $(M_sten^3) is smaller than the number of moments $(n_moments(P)) for poly_order=$P"))
+    indices = multi_indices(P)
+    nmom = length(indices)
+    N = n_basis(basis)
+    n_grid_total = n_grid_points(grid)
+
+    # Parallel COO assembly.  SparseMatrixCSC push is not thread-safe,
+    # and `@threads :static` + `threadid()` indexing is fragile under
+    # Julia 1.12 (LAPACK yield points can migrate tasks even in :static
+    # mode), so we partition `1:N` into contiguous chunks and spawn one
+    # task per chunk via an explicit worker function — passing each
+    # task's buffers as arguments is the only way to guarantee the
+    # closure does not share state across tasks.
+    zero_mom = zeros(Float64, nmom)
+    nthr_def  = max(1, Threads.nthreads())
+    n_chunks  = min(nthr_def, N)
+    chunk_sz  = cld(N, n_chunks)
+    chunks    = [((k-1)*chunk_sz + 1):min(k*chunk_sz, N) for k in 1:n_chunks]
+    nz_est_per = cld(N * M_sten^3, n_chunks)
+    Is_t    = [sizehint!(Int[],     nz_est_per) for _ in 1:n_chunks]
+    Js_t    = [sizehint!(Int[],     nz_est_per) for _ in 1:n_chunks]
+    Vx_t    = [sizehint!(Float64[], nz_est_per) for _ in 1:n_chunks]
+    Vy_t    = [sizehint!(Float64[], nz_est_per) for _ in 1:n_chunks]
+    Vz_t    = [sizehint!(Float64[], nz_est_per) for _ in 1:n_chunks]
+    Vdiv_t  = [sizehint!(Float64[], nz_est_per) for _ in 1:n_chunks]
+    Vsurf_t = [sizehint!(Float64[], nz_est_per) for _ in 1:n_chunks]
+
+    # Force LAPACK `\` to run single-threaded inside the parallel region
+    # to avoid nthreads × BLAS_threads oversubscription.
+    prev_blas_nthr = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        tasks = Task[]
+        for k in 1:n_chunks
+            rng = chunks[k]
+            isempty(rng) && continue
+            t = Threads.@spawn _projection_chunk!(
+                basis, grid, rng, indices, nmom, M_sten, rule, tri_rule,
+                zero_mom,
+                Is_t[k], Js_t[k], Vx_t[k], Vy_t[k], Vz_t[k],
+                Vdiv_t[k], Vsurf_t[k])
+            push!(tasks, t)
+        end
+        foreach(wait, tasks)
+    finally
+        BLAS.set_num_threads(prev_blas_nthr)
+    end
+
+    Is    = reduce(vcat, Is_t)
+    Js    = reduce(vcat, Js_t)
+    Vx    = reduce(vcat, Vx_t)
+    Vy    = reduce(vcat, Vy_t)
+    Vz    = reduce(vcat, Vz_t)
+    Vdiv  = reduce(vcat, Vdiv_t)
+    Vsurf = reduce(vcat, Vsurf_t)
 
     Wx = sparse(Is, Js, Vx, N, n_grid_total)
     Wy = sparse(Is, Js, Vy, N, n_grid_total)
