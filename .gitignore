@@ -54,8 +54,7 @@
 # Keep omega files (small, describe the test conditions)
 !/benchmarks/runs/omega_*.txt
 
-# Reference PDFs (large, not redistributable). Kept locally under
-# .claude/reference/ for Claude Code's RAG context; excluded from git
-# history to keep the repository under GitHub's recommended file-size
-# limit.
-/.claude/reference/
+# Claude Code / Gemini AI workspace: technical notes, RAG references,
+# per-project agent settings, scratchpads.  Kept locally only; never
+# published to the public repository.
+/.claude/
