@@ -964,6 +964,7 @@ total & $t_{\text{setup}}$ & $t_{\text{solve}}$ \\
 $R/5$ & \num{11501} & \num{1610} & \num{4.9}  & \num{67.2}  & \num{96.8}  & \num{105} & \num{201} \\
 $R/6$ & \num{18919} & \num{2254} & \num{8.1}  & \num{116.5} & \num{164.2} & \num{179} & \num{363} \\
 $R/7$ & \num{29636} & \num{3176} & \num{12.6} & \num{189.0} & \num{262.7} & \num{299} & \num{718} \\
+$R/8$ & \num{45585} & \num{4210} & \num{19.4} & \num{300.7} & \num{413.3} & \num{410} & \num{925} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1848,49 +1849,58 @@ on $\Im S_{\text{fw},\theta}$.
 
 \paragraph{Verified mesh-refinement convergence.} To confirm that the
 residual error is a bulk discretisation error (and not, for instance,
-a skin-layer-resolution plateau), an independent refinement run was
-made at $\ell_c = R/6 \approx \SI{5}{\nano\metre}$ and compared
-against the same MSTM $N = 15$ reference.  The two-point log-log fit
+a skin-layer-resolution plateau), four Phase A refinement runs were
+made at $\ell_c = R/k$ for $k = 5, 6, 7, 8$ and compared against the
+same MSTM $N = 15$ reference (raw data
+\texttt{benchmarks/cas\_v2/doublet\_mstm/phase\_a\_memory.json},
+error-table generator
+\texttt{compute\_refinement\_errors.py}).  The log-log fit
 \begin{equation}
 \text{rel.\ err.}(\ell_c) \;\propto\; (\ell_c / R)^p
 \end{equation}
-was evaluated for the five CAS-v2 components at each $\beta$.  At
-$\beta = \pi/2$ the measured exponents are
+is evaluated for the five CAS-v2 components at $\beta = \pi/2$:
 \begin{center}
-\begin{tabular}{lcc}
+\small
+\begin{tabular}{l c c c c c}
 \toprule
-component & err at $R/5$ & fitted $p$ \\
+component &
+\multicolumn{4}{c}{relative error at $\ell_c = R/k$} &
+fitted $p$ \\
+\cmidrule(lr){2-5}
+ & $k = 5$ & $k = 6$ & $k = 7$ & $k = 8$ & (4-pt) \\
 \midrule
-$|S_{\text{fw,mean}}|$   & \SI{4.0}{\percent}  & $2.95$ \\
-$\Re S_{\text{fw},\theta}$ & \SI{5.2}{\percent}  & $3.04$ \\
-$\Im S_{\text{fw},\theta}$ & \SI{10.5}{\percent} & $3.39$ \\
-$\Re S_{\text{fw},\varphi}$ & \SI{1.3}{\percent}  & $2.14$ \\
-$\Im S_{\text{fw},\varphi}$ & \SI{1.7}{\percent}  & $0.78$ \\
+$|S_{\text{fw,mean}}|$    & \num{4.36}\,\% & \num{2.73}\,\% & \num{1.94}\,\% & \num{1.60}\,\% & $2.16$ \\
+$\Re S_{\text{fw},\theta}$   & \num{5.61}\,\% & \num{3.47}\,\% & \num{2.44}\,\% & \num{2.05}\,\% & $2.17$ \\
+$\Im S_{\text{fw},\theta}$   & \num{10.72}\,\% & \num{6.43}\,\% & \num{4.62}\,\% & \num{4.07}\,\% & $2.10$ \\
+$\Re S_{\text{fw},\varphi}$ & \num{1.38}\,\% & \num{0.97}\,\% & \num{0.73}\,\% & \num{0.50}\,\% & $2.11$ \\
+$\Im S_{\text{fw},\varphi}$ & \num{2.03}\,\% & \num{1.82}\,\% & \num{1.38}\,\% & \num{0.58}\,\% & $2.49$ \\
 \bottomrule
 \end{tabular}
 \end{center}
-The theoretical linear-SWG interior rate is $p = 2$; four of the five
-components converge \emph{faster} than that ($p \in [2.1, 3.4]$), and
-the stiffest observable $\Im S_{\text{fw},\theta}$ converges the
-\emph{fastest} ($p = 3.4$) rather than slowest.  This confirms that
-the skin-layer resolution is not the rate-limiting factor once
-$\ell_c \leq R/5$.  The same pattern holds at $\beta = \pi/4$ and
-$\beta = 0$ (see
-\texttt{benchmarks/cas\_v2/doublet\_mstm/refinement.md}).
-Extrapolating with $p = 3.4$, refinement to $\ell_c = R/10$ is
-predicted to bring $\Im S_{\text{fw},\theta}$ agreement to
-$\sim \SI{1}{\percent}$.  Phase A (Sec.~\ref{sec:aim-surface}) has
-reduced the AIM memory footprint to a near-linear
-$\mathcal{O}(N_{\text{dof}}^{1.03})$ scaling, so direct verification
-at $\ell_c = R/7$ already fits in \SI{263}{\mebi\byte}
-(Table~\ref{tab:phase-a-doublet}) and refinement to $R/10$ (projected
-\SI{760}{\mebi\byte}) is feasible on a \SI{16}{\giga\byte}
-workstation; the direct $R/10$ run is the next planned step.
+The theoretical linear-SWG interior rate is $p = 2$, and the 4-point
+fit recovers it cleanly across every component: all five exponents
+lie in $[2.10, 2.49]$, with the stiffest observable
+$\Im S_{\text{fw},\theta}$ at $p = 2.10$ --- essentially the
+theoretical rate.  An earlier two-point fit using only $R/5$ and
+$R/6$ had given $p \in [0.78, 3.39]$ (with $\Im S_{\text{fw},\theta}$
+the \emph{fastest} at $p = 3.39$); that spread is now understood as a
+two-point artefact.  The clean $p \approx 2$ convergence holding
+uniformly across $\theta$ and $\varphi$ channels confirms that the
+skin-layer resolution is not a rate-limiting factor once
+$\ell_c \leq R/5$.
 
-The $\Im S_{\text{fw},\varphi}$ slope of $p = 0.78$ is anomalously
-slow in absolute terms but relates to an error component already at
-the \SI{1.5}{\percent} level at $\ell_c = R/5$; the two-point fit
-cannot resolve a slope reliably there.
+Phase A (Sec.~\ref{sec:aim-surface}) has reduced the AIM memory
+footprint to a near-linear $\mathcal{O}(N_{\text{dof}}^{1.02})$
+scaling (Table~\ref{tab:phase-a-doublet}), so the $R/7$ and $R/8$
+rows above fit in \SI{263}{\mebi\byte} and \SI{413}{\mebi\byte} of
+operator memory respectively.  Extrapolating the measured $p = 2.10$
+slope of $\Im S_{\text{fw},\theta}$ predicts
+$\SI{4.07}{\percent}\times(8/10)^{2.10}\approx\SI{2.6}{\percent}$ at
+$\ell_c = R/10$, and the $|S_{\text{fw,mean}}|$ error
+$\SI{1.60}{\percent}\times(8/10)^{2.16}\approx\SI{1.0}{\percent}$;
+the projected \SI{760}{\mebi\byte} operator memory at $R/10$ is
+feasible on a \SI{16}{\giga\byte} workstation, and that run is the
+next planned step.
 
 Physically, the gold skin depth at \SI{638}{\nano\metre} is
 \begin{equation*}

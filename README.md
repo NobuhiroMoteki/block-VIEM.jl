@@ -507,25 +507,40 @@ itself.
 
 **Measured convergence under mesh refinement.** To test whether this
 residual error is a true discretization error that shrinks with `lc`,
-an independent refinement run was made at `lc = R/6 ≈ 5 nm`
-(`run_viem_refinement.jl`) and compared against the same MSTM N=15
-reference.  The per-component relative errors (Au, β = π/2) are:
+four Phase A refinement runs were made at `lc = R/k` for `k = 5, 6, 7, 8`
+and compared against the MSTM N=15 reference (raw data:
+`benchmarks/cas_v2/doublet_mstm/phase_a_memory.json`, error-table
+generator: `compute_refinement_errors.py`). Per-component relative
+errors at Au, β = π/2:
 
-| lc / R | \|S_fw_mean\| | Re S_fw_θ | Im S_fw_θ | Re S_fw_φ | Im S_fw_φ | fitted p |
-|--------|---------------|-----------|-----------|-----------|-----------|----------|
-| 1/5    | 4.03 %        | 5.18 %    | 10.5 %    | 1.27 %    | 1.72 %    | — |
-| 1/6    | 2.35 %        | 2.98 %    | 5.64 %    | 0.86 %    | 1.49 %    | — |
-| slope  | —             | —         | —         | —         | —         | 2.95 / 3.04 / **3.39** / 2.14 / 0.78 |
+| lc / R | \|S_fw_mean\| | Re S_fw_θ | Im S_fw_θ | Re S_fw_φ | Im S_fw_φ |
+|--------|---------------|-----------|-----------|-----------|-----------|
+| 1/5    | 4.36 %        | 5.61 %    | 10.72 %   | 1.38 %    | 2.03 %    |
+| 1/6    | 2.73 %        | 3.47 %    | 6.43 %    | 0.97 %    | 1.82 %    |
+| 1/7    | 1.94 %        | 2.44 %    | 4.62 %    | 0.73 %    | 1.38 %    |
+| 1/8    | 1.60 %        | 2.05 %    | 4.07 %    | 0.50 %    | 0.58 %    |
 
-The fitted exponent `p` in `err ~ (lc/R)^p` is **2.1–3.4** on the
-four dominant components (exceeds the theoretical linear-SWG rate
-`p = 2`), and the stiffest observable Im S_fw_θ converges
-\ *fastest* (p = 3.4), not slowest — so the skin-layer resolution
-is not the rate-limiting factor once lc is at least R/5.
-Extrapolating from the measured rate,
-`err(R/10) ≈ err(R/5) × (1/2)^{3.4} ≈ 1 %` on Im S_fw_θ — refinement
-to `lc ≈ R/10` brings the axis-aligned plasmonic observable to
-sub-1 % agreement with the exact MSTM solution.
+Log-log least-squares fit of `err ~ (lc/R)^p` over the 4 points yields
+slopes
+
+| component | fitted p |
+|-----------|----------|
+| \|S_fw_mean\| | 2.16 |
+| Re S_fw_θ    | 2.17 |
+| Im S_fw_θ    | 2.10 |
+| Re S_fw_φ    | 2.11 |
+| Im S_fw_φ    | 2.49 |
+
+\-- **every observable converges at the theoretical linear-SWG rate
+`p ≈ 2`** (or faster, for Im S_fw_φ). An earlier two-point fit using
+only R/5 / R/6 had suggested `p ∈ [0.8, 3.4]` with Im S_fw_θ
+\ *fastest* (p = 3.4); that spread is now seen to be a two-point
+artefact. With the clean `p = 2.10` slope on the stiffest observable,
+extrapolation to `lc = R/10` predicts `Im S_fw_θ` error of
+`4.07 % × (8/10)^{2.10} ≈ 2.6 %`, and the `|S_fw_mean|` error of
+`1.60 % × (8/10)^{2.16} ≈ 1.0 %` — refinement to R/10 is the next
+planned step and is feasible on a 16 GB workstation thanks to the
+linear memory scaling of Phase A (see the memory table below).
 
 **Phase A memory scaling (surface-moment AIM).** The original AIM
 release (Phase-1a) stored the boundary kernels K^B + K^C + K^D in a
@@ -539,11 +554,12 @@ block; `half_swg_extra` is eliminated entirely. Measured on the Au
 doublet (Intel i7-1265U, 16 GB RAM, Julia 1.11, single-threaded
 solve, `benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl`):
 
-| lc / R | N DOF  | N_bnd | Wsurf   | precorrection | total tracked | t_setup | t_solve (3 or.) |
-|--------|--------|-------|---------|---------------|---------------|---------|-----------------|
-| 1/5    | 11 501 |  1 610 | 4.9 MiB | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s           |
-| 1/6    | 18 919 |  2 254 | 8.1 MiB | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s           |
-| 1/7    | 29 636 |  3 176 | 12.6 MiB| 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s           |
+| lc / R | N DOF  | N_bnd | Wsurf    | precorrection | total tracked | t_setup | t_solve (3 or.) |
+|--------|--------|-------|----------|---------------|---------------|---------|-----------------|
+| 1/5    | 11 501 |  1 610 | 4.9 MiB  | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s           |
+| 1/6    | 18 919 |  2 254 | 8.1 MiB  | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s           |
+| 1/7    | 29 636 |  3 176 | 12.6 MiB | 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s           |
+| 1/8    | 45 585 |  4 210 | 19.4 MiB | 300.7 MiB     | **413.3 MiB** | 410 s   | 925 s           |
 
 `total tracked` is `Base.summarysize(AIMOperator)` — the in-memory
 footprint of every sparse matrix, the FFT kernel, and the mass
@@ -551,14 +567,14 @@ matrix. For comparison, Phase-1a `half_swg_extra` alone on this
 geometry was 486 MiB at R/5 and 1 074 MiB at R/6 (memory-plan
 measurement, pre-Phase-A); Phase A delivers **5.0× / 6.5× / 11×**
 total-memory reduction at R/5 / R/6 / R/7 respectively. Asymptotic
-scaling: `total tracked` grows as O(N^{1.03}) between R/5 and R/7 —
+scaling: `total tracked` grows as O(N^{1.02}) across R/5 → R/8 —
 essentially linear in N, matching the Phase A design target
 (Phase-1a scaled as O(N^{5/3})).
 
-With sub-300 MiB memory budgets through R/7, further refinement to
-R/8 and R/10 is now feasible on a 16 GB workstation and is the
-next planned step to close the 5.6 % residual Im S_fw_θ error at
-β = π/2.
+The R/8 solve completed in sub-450 MiB operator memory (RSS peak
+3.8 GiB during the 3-orientation block-BiCGSTAB), so the next
+refinement step to R/10 (projected ~760 MiB operator memory) is
+feasible on the same 16 GB workstation.
 
 The `Im S_fw_φ` fit returns p = 0.3–1.0 which is anomalously slow,
 but the absolute error there is already in the 1.5 % range and
