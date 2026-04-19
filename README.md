@@ -53,7 +53,9 @@ so downstream analysis pipelines work with either without modification.
   Johnson & Christy 1972 gold at wl_0 = 0.638 um
   (m_p = 0.17525 + 3.4830i, eps_p = -12.10 + 1.22i, x = 0.63).
   Both dense (LU) and AIM-BiCGSTAB solvers achieve sub-1 % on all
-  five observables at N = 2134 half-SWG DOFs:
+  five observables at N = 2134 half-SWG DOFs (single-threaded wall
+  times; see § *Parallel execution* for the 2–3 × speed-up at 4+
+  Julia threads):
 
   | lc [um] | N    | method       | C_ext  | C_abs  | C_sca  | S_fw_mean | S_bk   | time  |
   |---------|------|--------------|--------|--------|--------|-----------|--------|-------|
@@ -104,7 +106,9 @@ refractive-index contrast and particle geometry.
 For weakly scattering particles (e.g. mineral dust, m_p ~ 1.5), DDA
 is far more efficient. Benchmark on a Mie sphere (r = 1 um,
 m_p = 1.5 + 0.01i, wl_0 = 10 um, x = 0.63, single orientation,
-Intel i7-1265U):
+Intel i7-1265U, single-threaded — `t_setup` drops by ~2.5 × on a
+4-thread machine after the parallel setup in v0.5.x; see
+§ *Parallel execution*):
 
 | Code          | N DOF  | C_abs error | t_setup  | t_solve  | memory  |
 |---------------|--------|-------------|----------|----------|---------|
@@ -115,9 +119,9 @@ Intel i7-1265U):
 | block-VIEM.jl | 7 868  | 1.4 %       | 145.8 s  | 2.7 s    | 991 MB  |
 
 DDA achieves 1.7 % accuracy with 302 dipoles in under 0.1 s.
-VIEM requires ~2 000 DOFs and 25 s of setup for comparable accuracy.
-The DDA cubic lattice has an exact FFT-MVP with no near-field
-precorrection, so setup cost is effectively zero.
+VIEM requires ~2 000 DOFs and ~10 s of setup (4 threads) for
+comparable accuracy. The DDA cubic lattice has an exact FFT-MVP with
+no near-field precorrection, so setup cost is effectively zero.
 
 **Recommendation:** For |m_p/m_m| < 2 and moderate aspect ratios,
 block-DDA_Py is the right tool.
@@ -245,6 +249,49 @@ The `return_D=true` keyword causes `solve_cas_v2_orientations` to return
 `(results, D_block)` instead of just `results`, giving access to the raw
 D-field expansion coefficients for computing cross sections or other
 post-processing.
+
+### Parallel execution
+
+Launch Julia with `-t N` (or set `JULIA_NUM_THREADS=N`) and all of
+the following run in parallel automatically:
+
+- **Setup** — `assemble_precorrection` (the dominant setup cost,
+  ≳90 % of `build_aim_operator` wall time at N ≳ 10³) and
+  `build_aim_projection` partition their outer loops into one
+  `Threads.@spawn` task per chunk. Per-task COO buffers are merged
+  into the final sparse matrices at the end. Near-field Z-matrix and
+  half-SWG assembly are similarly threaded (`Threads.@threads`).
+- **Block MVP** — `aim_mvp(op, X)` dispatches the `L` right-hand-side
+  columns across Julia threads; each column's FFT convolution runs
+  concurrently.
+- **FFT convolutions** — FFTW's own thread pool is initialised at
+  module load to `Threads.nthreads()`. Override with
+  `BlockVIEM.set_fft_threads(n)`; for block MVPs with `L` RHSs a good
+  balance is `set_fft_threads(max(1, cld(Threads.nthreads(), L)))`.
+- **Far-field radiation** and **multi-orientation RHS construction**
+  run one `Threads.@spawn` task per direction / orientation.
+
+Measured on a 20-core Intel Xeon against Sphere_1675 (N = 3041
+half-SWG DoFs), 4 threads vs. serial: `assemble_precorrection`
+2.5 ×, block MVP (`L` = 4) 2.2 ×, block MVP (`L` = 8) 2.6 ×.
+
+**Reuse across parameter sweeps.** `build_aim_operator` accepts
+pre-computed `projection` and `mass` keyword arguments, which are
+`k₀` / `ε_p`-independent. For wavelength or material sweeps, build
+them once and pass them back in — only the Green FFT and
+precorrection are rebuilt on each new `(k₀, ε_p)`:
+
+```julia
+grid = aim_grid(basis.mesh; pitch = pitch, padding = 4)
+proj = build_aim_projection(basis, grid; poly_order = 2, stencil = 3)
+mass = assemble_mass_matrix(basis)
+
+for λ in wavelengths
+    op = build_aim_operator(basis; k0 = 2π / λ, eps_p = eps_p,
+                             projection = proj, mass = mass)
+    # ... solve and post-process
+end
+```
 
 ### Gaussian Random Ellipsoid (GRE) shapes
 
@@ -552,7 +599,10 @@ far-field via a single new scalar projection `Wsurf` and absorbs the
 near-field corrections into the existing sparse `precorrection`
 block; `half_swg_extra` is eliminated entirely. Measured on the Au
 doublet (Intel i7-1265U, 16 GB RAM, Julia 1.11, single-threaded
-solve, `benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl`):
+solve — pre-parallelization baseline; with the v0.5.x threaded
+setup and block MVP, `t_setup` and `t_solve` drop by ~2–3 × at 4+
+Julia threads, see § *Parallel execution*;
+`benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl`):
 
 | lc / R | N DOF  | N_bnd | Wsurf    | precorrection | total tracked | t_setup | t_solve (3 or.) |
 |--------|--------|-------|----------|---------------|---------------|---------|-----------------|

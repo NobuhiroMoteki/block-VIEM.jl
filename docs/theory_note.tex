@@ -938,8 +938,12 @@ footprint of each \texttt{AIMOperator} component and the setup/solve
 wall times for the Au doublet benchmark
 (\mbox{$R_{\text{monomer}} = 30$~nm}, gap \SI{3}{nm}, $\lambda_0 =
 \SI{638}{nm}$, Johnson--Christy~\cite{JohnsonChristy1972} gold,
-Intel i7-1265U, \SI{16}{GB} RAM, Julia~1.11, single-threaded solve,
-script \texttt{benchmarks/cas\_v2/doublet\_mstm/phase\_a\_memory\_study.jl}).
+Intel i7-1265U, \SI{16}{GB} RAM, Julia~1.11, single-threaded
+pre-parallelization baseline --- with the v0.5.x threaded setup and
+block MVP (Sec.~\ref{sec:parallel}) the \texttt{t\_setup} and
+\texttt{t\_solve} columns drop by a factor of $2$--$3$ at 4+ Julia
+threads; script
+\texttt{benchmarks/cas\_v2/doublet\_mstm/phase\_a\_memory\_study.jl}).
 Each row corresponds to a refinement level $\ell_c = R/k$. For
 comparison, Phase-1a stored \texttt{half\_swg\_extra} as a dense
 $N_{\text{bnd}} \times N_{\text{dof}}$ sparse matrix which on the same
@@ -1013,16 +1017,86 @@ the sparse mass and precorrection contributions suffices in our tests.
 %----------------------------------------------------------------------
 
 Because the impedance matrix $Z$ depends only on the particle geometry
-and permittivity, it can be assembled and factorised once and then
-reused across many orientations: each orientation changes only the
-right-hand side $\bm{b}$. The function
-\texttt{solve\_cas\_v2\_orientations} assembles $Z$, computes its LU
-factorisation, and then back-substitutes for every
-$(\alpha_\ell,\beta_\ell,\gamma_\ell)$ in the input list, returning one
-\texttt{CASv2Result} per orientation. For spheroids this is particularly
-efficient: only the $\alpha = 0$ orientation needs an independent solve
-for each $\beta$, and the remaining $\alpha$ values are obtained by the
-analytical expansion of Sec.~\ref{sec:alpha-expansion}.
+and permittivity, it can be assembled once and then reused across many
+orientations: each orientation changes only the right-hand side
+$\bm{b}$. The function \texttt{solve\_cas\_v2\_orientations} is the
+user-facing entry point; by default it selects
+\texttt{method=:aim\_bicgstab}, which builds the AIM operator
+(Sec.~\ref{sec:aim}) once and then solves the block system
+$\mathbf{Z}\mathbf{X}=\mathbf{B}$ for all orientations simultaneously
+via a single block-Krylov iteration
+(Sec.~\ref{sec:block-krylov}). For small problems
+($N_{\text{dof}}\lesssim 10^3$) \texttt{method=:dense} falls back to
+the textbook assemble-$Z$-and-LU-factorise path, back-substituting for
+every $(\alpha_\ell,\beta_\ell,\gamma_\ell)$ in the input list. For
+spheroids either route is especially efficient: only the $\alpha = 0$
+orientation needs an independent solve for each $\beta$, and the
+remaining $\alpha$ values are obtained by the analytical expansion of
+Sec.~\ref{sec:alpha-expansion}.
+
+%----------------------------------------------------------------------
+\subsection{Parallel execution}
+\label{sec:parallel}
+%----------------------------------------------------------------------
+
+Every computationally significant loop in the setup, MVP, and
+post-processing paths is parallelised for shared-memory multi-core
+execution. The user controls the number of worker threads with
+\texttt{julia -t N} (or the \texttt{JULIA\_NUM\_THREADS} environment
+variable); no other configuration is required.
+
+\paragraph{Setup.}
+The precorrection assembly (Sec.~\ref{sec:aim-precorrection}) is the
+dominant setup cost for any realistic problem ---
+$\gtrsim$\SI{90}{\percent} of \texttt{build\_aim\_operator} wall time
+at $N_{\text{dof}}\gtrsim 10^3$. Its outer near-column loop is
+partitioned into chunks and launched as independent
+\texttt{Threads.@spawn} tasks; each task accumulates its own COO
+triplets and the resulting \texttt{SparseMatrixCSC} is built once
+from the concatenated lists. The same pattern parallelises
+\texttt{build\_aim\_projection} (basis loop) and the near-field
+impedance assembly used by the dense path. BLAS is forced to a
+single thread inside the parallel region to avoid nested
+oversubscription from LAPACK calls (the monomial-matrix
+least-squares solves inside \texttt{build\_aim\_projection}). On an
+Intel Xeon 20-core machine against a $N_{\text{swg}}\!=\!3041$
+sphere mesh, \texttt{assemble\_precorrection} drops from
+\SI{25.9}{\second} (1 thread) to \SI{10.5}{\second} (4 threads,
+$2.5\times$) and \SI{8.9}{\second} (10 threads, $2.9\times$).
+
+\paragraph{Block MVP.}
+The column loop in \texttt{aim\_mvp(op, X)} is parallelised: each of
+the $L$ right-hand-side columns is dispatched as its own task, so
+for a machine with $N_{\text{thr}}$ Julia threads the FFT work of
+the block MVP runs at effective width
+$\min(L,N_{\text{thr}})$. Details in
+Sec.~\ref{sec:block-krylov}.
+
+\paragraph{FFT.}
+FFTW maintains its own thread pool; at module load
+\texttt{BlockVIEM} sets it to \texttt{Threads.nthreads()} via
+\texttt{FFTW.set\_num\_threads}. The exported
+\texttt{BlockVIEM.set\_fft\_threads(n)} resets it at run time. The
+recommended balance for a block MVP with $L$ columns is
+\begin{equation}
+  n_{\text{FFT}} \;=\;
+    \max\!\bigl(1,\;\lceil N_{\text{thr}} / L\rceil\bigr),
+  \label{eq:fft-threads-rule}
+\end{equation}
+so that the column and FFT parallelism together saturate the cores
+without oversubscription.
+
+\paragraph{Parameter-sweep reuse.}
+The projection matrices $\mathbf{W}_{x,y,z},
+\mathbf{W}_{\text{div}},\mathbf{W}_{\text{surf}}$ and the mass
+matrix $\mathbf{M}$ depend only on the mesh, the grid pitch and
+padding, and the polynomial order --- not on $k_0$ or $\epsilon_p$.
+The \texttt{build\_aim\_operator} constructor accepts keyword
+arguments \texttt{projection} and \texttt{mass} so that wavelength
+or material sweeps can build those pieces once and reuse them,
+rebuilding only the Green-function FFT kernel and the precorrection
+for each new $(k_0,\epsilon_p)$. The MVP is bit-identical between
+the fresh and reused paths (tolerance $< 10^{-13}$).
 
 %======================================================================
 \section{Scattering Observables}
@@ -2054,9 +2128,15 @@ The AIM operator supports the multi-RHS form
 where $\mathbf{M},\mathbf{K}_{\text{near}},\mathbf{K}_{\text{half-SWG}}$
 are sparse and their matrix--matrix products cost $\mathcal{O}(\text{nnz}\cdot L)$
 in a single BLAS call. The far-field convolution
-$\mathbf{K}_{\text{AIM}}(\mathbf{X})$ is applied column-by-column via
-the same FFT plans, so the FFT setup cost is amortized across all $L$
-columns at no extra memory.
+$\mathbf{K}_{\text{AIM}}(\mathbf{X})$ is applied column-by-column and
+the $L$ columns are dispatched across the available Julia threads via
+\texttt{Threads.@spawn}; the FFT plans themselves are shared and use
+the process-wide FFTW thread pool, so the three levels of parallelism
+--- column, FFT, and iteration --- can be balanced as
+$n_{\text{col}}\!\times\!n_{\text{FFT}} \approx n_{\text{cores}}$ via
+\texttt{BlockVIEM.set\_fft\_threads}. For a single 20-core machine at
+$L=8$ we measure a $2.6\times$ per-column speed-up over the serial
+baseline.
 
 \paragraph{Block BiCGSTAB.}
 The default solver follows Tadano, Sakurai and Kuramashi~\cite{TSK2009}
