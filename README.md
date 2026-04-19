@@ -107,7 +107,7 @@ For weakly scattering particles (e.g. mineral dust, m_p ~ 1.5), DDA
 is far more efficient. Benchmark on a Mie sphere (r = 1 um,
 m_p = 1.5 + 0.01i, wl_0 = 10 um, x = 0.63, single orientation,
 Intel i7-1265U, single-threaded — `t_setup` drops by ~2.5 × on a
-4-thread machine after the parallel setup in v0.5.x; see
+4-thread machine after the parallel setup added in v0.6.0; see
 § *Parallel execution*):
 
 | Code          | N DOF  | C_abs error | t_setup  | t_solve  | memory  |
@@ -606,7 +606,7 @@ far-field via a single new scalar projection `Wsurf` and absorbs the
 near-field corrections into the existing sparse `precorrection`
 block; `half_swg_extra` is eliminated entirely. Measured on the Au
 doublet (Intel i7-1265U, 16 GB RAM, Julia 1.11, single-threaded
-solve — pre-parallelization baseline; with the v0.5.x threaded
+solve — pre-parallelization baseline; with the v0.6.0 threaded
 setup and block MVP, `t_setup` and `t_solve` drop by ~2–3 × at 4+
 Julia threads, see § *Parallel execution*;
 `benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl`):
