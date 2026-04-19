@@ -10,16 +10,24 @@
 #   K x ≈ K_AIM(x)  +  K_near x
 #
 # K_AIM is computed via FFT convolution (O(N log N)):
-#   K_AIM(x) = k0² Σ_α Wα^T G_conv(Wα x)  −  Wdiv^T G_conv(Wdiv x)
+#   K_AIM(x) = k0² Σ_α Wα   G_conv(Wα^T x)
+#              − (Wdiv − Wsurf)   G_conv((Wdiv − Wsurf)^T x)
+# where the (Wdiv − Wsurf) effective channel folds the bulk scalar
+# divergence with the boundary surface density σ = f·n̂ so that the
+# full kernel K^A + K^B + K^C + K^D is evaluated through a single
+# scalar FFT pass (Phase A / theory_note.tex §5.5; Anastassiu 1998).
+# For interior-only bases, Wsurf = 0 and this reduces to Phase-1a.
 #
 # K_near is a sparse precorrection matrix:
 #   K_near[m,n] = K_direct[m,n] − K_AIM_element[m,n]  for near pairs
 #   K_near[m,n] = 0                                     for far pairs
 #
 # Near pairs: basis pairs (m, n) that share at least one tetrahedron
-# (i.e., the same pairs that contribute to the mass matrix).
+# (i.e., the same pairs that contribute to the mass matrix), plus pairs
+# whose centroid separation is within `near_radius`.
 #
-# Phase 3.5–3.8 of BlockVIEM.jl.
+# Phase 3.5–3.8 of BlockVIEM.jl; Phase A (2026-04-19) adds the
+# surface-moment channel to cover K^B + K^C + K^D.
 
 using SparseArrays
 using LinearAlgebra
@@ -165,11 +173,17 @@ end
 Compute the far-field radiation kernel action `K_AIM x` using AIM:
 
 ```
-K_AIM(x) = k0² Σ_α Wα^T G_conv(Wα x)  −  Wdiv^T G_conv(Wdiv x)
+K_AIM(x) = k0² Σ_α Wα G_conv(Wα^T x)
+         − (Wdiv − Wsurf) G_conv((Wdiv − Wsurf)^T x)
 ```
 
 where `Σ_α` runs over {x, y, z} Cartesian components, `G_conv` is the
-Toeplitz convolution via FFT, and `x` is a length-`N_basis` complex vector.
+Toeplitz convolution via FFT, and `x` is a length-`N_basis` complex
+vector. The effective scalar channel `Wdiv − Wsurf` folds the bulk
+divergence with the boundary surface density σ = f·n̂ so that the
+full radiation kernel `K^A + K^B + K^C + K^D` is covered by a single
+FFT pass (Phase A, theory_note.tex §5.5). For interior-only bases,
+`Wsurf = 0` and this reduces to the Phase-1a formula.
 
 `G_hat` is the pre-computed FFT of the Toeplitz kernel from
 [`precompute_green_fft`](@ref).
@@ -191,11 +205,15 @@ function aim_far_mvp(proj::AIMProjection, G_hat::Array{ComplexF64,3},
         y .+= k0_sq .* (W * vec(conv_3d))
     end
 
-    # Divergence channel: − Wdiv G_conv(Wdiv^T x)
-    q_div = proj.Wdiv' * x
-    q_div_3d = reshape(Vector{ComplexF64}(q_div), Nx, Ny, Nz)
-    conv_div_3d = fft_convolve(G_hat, q_div_3d)
-    y .-= proj.Wdiv * vec(conv_div_3d)
+    # Effective scalar channel: − (Wdiv − Wsurf) G_conv((Wdiv − Wsurf)^T x).
+    # Realised as two sparse matvecs in projection and interpolation; the
+    # FFT between them is shared across both contributions.
+    q_scalar = (proj.Wdiv' * x) .- (proj.Wsurf' * x)
+    q_scalar_3d = reshape(Vector{ComplexF64}(q_scalar), Nx, Ny, Nz)
+    conv_scalar_3d = fft_convolve(G_hat, q_scalar_3d)
+    conv_scalar_vec = vec(conv_scalar_3d)
+    y .-= proj.Wdiv * conv_scalar_vec
+    y .+= proj.Wsurf * conv_scalar_vec
 
     return y
 end
@@ -204,11 +222,14 @@ end
     aim_far_mvp_weighted(proj, G_hat, k0, kappa_v, kappa_avg, x) -> Vector
 
 Anisotropic AIM far-field MVP: applies per-component κ_α to vector
-channels and κ_avg to the divergence channel.
+channels and κ_avg to the effective scalar channel.
 
-    y = k0² Σ_α κ_α Wα G_conv(Wα^T x) − κ_avg Wdiv G_conv(Wdiv^T x)
+    y = k0² Σ_α κ_α Wα G_conv(Wα^T x)
+      − κ_avg (Wdiv − Wsurf) G_conv((Wdiv − Wsurf)^T x)
 
-For isotropic `κ_α = κ`, this equals `κ × aim_far_mvp(...)`.
+For isotropic `κ_α = κ`, this equals `κ × aim_far_mvp(...)`. The
+`Wsurf` surface-density contribution (Phase A) is folded into the
+scalar channel to cover K^B + K^C + K^D.
 """
 function aim_far_mvp_weighted(proj::AIMProjection, G_hat::Array{ComplexF64,3},
                                k0::Number,
@@ -227,10 +248,12 @@ function aim_far_mvp_weighted(proj::AIMProjection, G_hat::Array{ComplexF64,3},
         y .+= (k0_sq * kap) .* (W * vec(conv_3d))
     end
 
-    q_div = proj.Wdiv' * x
-    q_div_3d = reshape(Vector{ComplexF64}(q_div), Nx, Ny, Nz)
-    conv_div_3d = fft_convolve(G_hat, q_div_3d)
-    y .-= kappa_avg .* (proj.Wdiv * vec(conv_div_3d))
+    q_scalar = (proj.Wdiv' * x) .- (proj.Wsurf' * x)
+    q_scalar_3d = reshape(Vector{ComplexF64}(q_scalar), Nx, Ny, Nz)
+    conv_scalar_3d = fft_convolve(G_hat, q_scalar_3d)
+    conv_scalar_vec = vec(conv_scalar_3d)
+    y .-= kappa_avg .* (proj.Wdiv * conv_scalar_vec)
+    y .+= kappa_avg .* (proj.Wsurf * conv_scalar_vec)
 
     return y
 end
@@ -273,18 +296,20 @@ function aim_radiation_element(proj::AIMProjection, G_hat::Array{ComplexF64,3},
         end
     end
 
-    # Divergence channel
-    wm_div = proj.Wdiv[m, :]
-    wn_div = proj.Wdiv[n, :]
-    q_div = zeros(ComplexF64, Nx, Ny, Nz)
-    for (j, v) in zip(findnz(wn_div)...)
+    # Effective scalar channel: −(Wdiv − Wsurf) G (Wdiv − Wsurf)^T.
+    # Wsurf has zero rows for interior DOFs, so for interior (m, n) this
+    # degenerates to the Phase-1a bulk divergence contribution.
+    wm_eff = proj.Wdiv[m, :] - proj.Wsurf[m, :]
+    wn_eff = proj.Wdiv[n, :] - proj.Wsurf[n, :]
+    q_scalar = zeros(ComplexF64, Nx, Ny, Nz)
+    for (j, v) in zip(findnz(wn_eff)...)
         ci = CartesianIndices((Nx, Ny, Nz))[j]
-        q_div[ci] = v
+        q_scalar[ci] = v
     end
-    conv_div = fft_convolve(G_hat, q_div)
-    for (j, v) in zip(findnz(wm_div)...)
+    conv_scalar = fft_convolve(G_hat, q_scalar)
+    for (j, v) in zip(findnz(wm_eff)...)
         ci = CartesianIndices((Nx, Ny, Nz))[j]
-        s -= v * conv_div[ci]
+        s -= v * conv_scalar[ci]
     end
     return s
 end
@@ -331,7 +356,9 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                                 eps_bg::Number = 1,
                                 near_radius::Union{Float64,Nothing} = nothing,
                                 outer_rule::TetQuadRule = TET_QUAD_5PT,
-                                duffy_rule::DuffyQuadRule = duffy_reference_rule(5))
+                                duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
+                                tri_rule::TriQuadRule = tri_collapsed_rule(4),
+                                tri_duffy_rule::TriDuffyRule = tri_duffy_reference_rule(6))
     # Distance-based near-field. Default = 2 * stencil_extent, empirically
     # 0.5% AIM-vs-dense error on sphere meshes at P=2, M=3, pitch=0.5·h̄.
     #
@@ -340,6 +367,13 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
     # real-space Green's function G_toep at the folded displacement. This
     # gives ~2× speedup over the FFT-per-column path at N~2600 and much
     # more as N grows, while matching the FFT path to machine precision.
+    #
+    # Phase A: the scalar channel uses the effective weights
+    # (v_div − v_surf) so K_AIM[m,n] = K^A_AIM[m,n] + K^{B+C+D}_AIM[m,n].
+    # The K_direct side is correspondingly augmented with the boundary
+    # kernels K^B+K^C+K^D for pairs where at least one of (m,n) is a
+    # boundary half-SWG DOF; for interior-only pairs Wsurf = 0 and this
+    # reduces to the Phase-1a bulk-only correction.
     #
     # The `G_hat` positional arg is ignored here (we need the real-space
     # G_toep instead) but kept for API compatibility with build_aim_operator.
@@ -375,22 +409,24 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
     G_toep = build_green_toeplitz(grid, k0_c)
 
     # Cache per-basis stencil: Cartesian indices + channel values.
-    # All four W matrices share the same nonzero pattern (built in one
+    # All five W matrices share the same nonzero pattern (built in one
     # pass in build_aim_projection), so we walk Wx_T and look up the
-    # other channels at the same grid positions.
-    Wx, Wy, Wz, Wdiv = proj.Wx, proj.Wy, proj.Wz, proj.Wdiv
+    # other channels at the same grid positions.  v_div_eff stores the
+    # charge-neutral combination (v_div − v_surf) so the inner loop uses
+    # a single scalar weight per (stencil, basis) entry.
+    Wx, Wy, Wz, Wdiv, Wsurf = proj.Wx, proj.Wy, proj.Wz, proj.Wdiv, proj.Wsurf
     Wx_T = copy(transpose(Wx))
 
     stencil_max = proj.stencil^3
     n_per = Vector{Int}(undef, N)
     ci_all = CartesianIndices((Nx, Ny, Nz))
-    idx_i  = Matrix{Int}(undef, stencil_max, N)
-    idx_j  = Matrix{Int}(undef, stencil_max, N)
-    idx_k  = Matrix{Int}(undef, stencil_max, N)
-    v_x    = Matrix{ComplexF64}(undef, stencil_max, N)
-    v_y    = Matrix{ComplexF64}(undef, stencil_max, N)
-    v_z    = Matrix{ComplexF64}(undef, stencil_max, N)
-    v_div  = Matrix{ComplexF64}(undef, stencil_max, N)
+    idx_i     = Matrix{Int}(undef, stencil_max, N)
+    idx_j     = Matrix{Int}(undef, stencil_max, N)
+    idx_k     = Matrix{Int}(undef, stencil_max, N)
+    v_x       = Matrix{ComplexF64}(undef, stencil_max, N)
+    v_y       = Matrix{ComplexF64}(undef, stencil_max, N)
+    v_z       = Matrix{ComplexF64}(undef, stencil_max, N)
+    v_div_eff = Matrix{ComplexF64}(undef, stencil_max, N)
 
     for b in 1:N
         col_ptr_x = Wx_T.colptr
@@ -407,7 +443,7 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
             v_x[k, b] = Wx_T.nzval[p]
             v_y[k, b] = Wy[b, lin]
             v_z[k, b] = Wz[b, lin]
-            v_div[k, b] = Wdiv[b, lin]
+            v_div_eff[k, b] = Wdiv[b, lin] - Wsurf[b, lin]
         end
     end
 
@@ -418,15 +454,21 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
     sizehint!(Js, length(pairs))
     sizehint!(Vs, length(pairs))
 
+    # Phase A: the κ_avg prefactor scales the whole scalar kernel
+    # (K^A scalar + K^B + K^C + K^D). For isotropic ε this is exact; for
+    # diagonal-aniso ε it incurs an O(Δκ/κ) bias on the surface terms, the
+    # same order already accepted in `assemble_half_swg_correction`.
     for n in near_cols
         nn = n_per[n]
+        n_is_bnd = _is_boundary_dof(basis, n)
         for m in col_to_rows[n]
             mm = n_per[m]
+            m_is_bnd = _is_boundary_dof(basis, m)
             s = zero(ComplexF64)
             @inbounds for a in 1:mm
                 im_ = idx_i[a, m]; jm_ = idx_j[a, m]; km_ = idx_k[a, m]
                 vx_m = v_x[a, m]; vy_m = v_y[a, m]; vz_m = v_z[a, m]
-                vd_m = v_div[a, m]
+                ve_m = v_div_eff[a, m]
                 for b in 1:nn
                     in_ = idx_i[b, n]; jn_ = idx_j[b, n]; kn_ = idx_k[b, n]
                     di = im_ - in_
@@ -437,20 +479,18 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                     c_idx = dk >= 0 ? dk : dk + N2z
                     G = G_toep[a_idx + 1, b_idx + 1, c_idx + 1]
                     vx_n = v_x[b, n]; vy_n = v_y[b, n]; vz_n = v_z[b, n]
-                    vd_n = v_div[b, n]
-                    # Anisotropic: k0² Σ_α κ_α w_mα w_nα − κ_avg w_div_m w_div_n
+                    ve_n = v_div_eff[b, n]
+                    # Anisotropic: k0² Σ_α κ_α w_mα w_nα − κ_avg v_eff_m v_eff_n.
+                    # v_eff = v_div − v_surf folds in the Phase A surface
+                    # projection so K_AIM here is the full K^A+B+C+D_AIM.
                     dot_w = kappa_v[1] * vx_m * vx_n +
                             kappa_v[2] * vy_m * vy_n +
                             kappa_v[3] * vz_m * vz_n
-                    s += (k0_sq * dot_w - kappa_avg * vd_m * vd_n) * G
+                    s += (k0_sq * dot_w - kappa_avg * ve_m * ve_n) * G
                 end
             end
-            # Bulk-only weighted radiation kernel — must match the
-            # anisotropic AIM kernel so the difference cancels far-field.
-            # For off-diagonal entries (m < n) compute both orderings and
-            # average, matching the dense `symmetrize=true` convention.
-            # K_AIM is exactly symmetric (G_toep circulant-symmetric), so
-            # only the Duffy direct term needs averaging.
+            # Bulk K^A direct (always needed), averaged over (m,n)/(n,m) to
+            # match the dense `symmetrize=true` convention.
             K_direct_mn = _bulk_radiation_kernel_weighted(
                               basis, m, n, k0_c, kappa_v, kappa_avg,
                               outer_rule, duffy_rule)
@@ -461,6 +501,25 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
                                   basis, n, m, k0_c, kappa_v, kappa_avg,
                                   outer_rule, duffy_rule)
                 (K_direct_mn + K_direct_nm) / 2
+            end
+            # Surface kernels K^B + K^C + K^D direct (Phase A): only
+            # contribute when at least one endpoint is a boundary DOF.
+            # `_radiation_kernel_weighted` composes K_total = K^A_bulk +
+            # κ_avg × K^{B+C+D}; precorrection stores (K_total_direct −
+            # K_AIM_full) so we add with +κ_avg here to mirror that form.
+            if m_is_bnd || n_is_bnd
+                Ks_mn = _half_swg_surface_kernel(basis, m, n, k0_c,
+                                                  outer_rule, duffy_rule,
+                                                  tri_rule, tri_duffy_rule)
+                Ks_avg = if m == n
+                    Ks_mn
+                else
+                    Ks_nm = _half_swg_surface_kernel(basis, n, m, k0_c,
+                                                      outer_rule, duffy_rule,
+                                                      tri_rule, tri_duffy_rule)
+                    (Ks_mn + Ks_nm) / 2
+                end
+                K_direct_avg += kappa_avg * Ks_avg
             end
             push!(Is, m)
             push!(Js, n)
@@ -568,31 +627,31 @@ function build_aim_operator(basis::AbstractDivBasis;
     proj = build_aim_projection(basis, grid;
                                 poly_order = poly_order,
                                 stencil = stencil_size,
-                                rule = outer_rule)
+                                rule = outer_rule,
+                                tri_rule = tri_rule)
     G_toep = build_green_toeplitz(grid, k0)
     G_hat = precompute_green_fft(G_toep)
     mass = assemble_mass_matrix(basis; rule = outer_rule)
+    # Phase A: precorrection now folds in K^B + K^C + K^D direct for
+    # near pairs involving a boundary DOF, and the AIM far-field covers
+    # the same kernels via the (Wdiv − Wsurf) effective scalar channel.
+    # `half_swg_extra` therefore becomes an empty sparse placeholder on
+    # the AIM path (kept in the struct for backward compatibility so
+    # that external callers reading the field keep working).
     precorr = assemble_precorrection(basis, proj, G_hat;
                                      k0 = k0,
                                      eps_p = eps_p, eps_bg = eps_bg,
                                      near_radius = near_radius,
                                      outer_rule = outer_rule,
-                                     duffy_rule = duffy_rule)
-    # Half-SWG surface correction (K^B + K^C + K^D). Returns an empty
-    # sparse matrix when the basis has no boundary DOFs, so the cost is
-    # zero on the standard interior-only SWG path.
-    half_extra = assemble_half_swg_correction(basis;
-                                               k0 = k0, eps_p = eps_p, eps_bg = eps_bg,
-                                               outer_rule = outer_rule,
-                                               duffy_rule = duffy_rule,
-                                               tri_rule = tri_rule,
-                                               tri_duffy_rule = tri_duffy_rule)
+                                     duffy_rule = duffy_rule,
+                                     tri_rule = tri_rule,
+                                     tri_duffy_rule = tri_duffy_rule)
     _, eps_bg_c, inv_eps_v, kappa_v, kappa_avg = _aniso_params(eps_p, eps_bg)
     N = n_basis(basis)
     diag_pre = Vector{ComplexF64}(diag(precorr))
-    diag_half = Vector{ComplexF64}(diag(half_extra))
     length(diag_pre) == N || error("diag_precorrection length mismatch")
-    length(diag_half) == N || error("diag_half_swg_extra length mismatch")
+    half_extra = spzeros(ComplexF64, N, N)
+    diag_half = zeros(ComplexF64, N)
     return AIMOperator(proj, G_hat, mass,
                        precorr, diag_pre,
                        half_extra, diag_half,

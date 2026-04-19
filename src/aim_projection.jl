@@ -27,7 +27,14 @@ SWG-to-grid projection matrices for the Adaptive Integral Method.
 - `Wx, Wy, Wz::SparseMatrixCSC` — sparse `N_basis × N_grid` matrices for
   the three Cartesian components of the SWG vector basis
 - `Wdiv::SparseMatrixCSC`       — sparse `N_basis × N_grid` matrix for the
-  scalar divergence `∇·f_n` (needed by the `-(∇·f_m)(∇'·f_n')G` term)
+  bulk scalar divergence `∇·f_n` (needed by the `-(∇·f_m)(∇'·f_n')G` term)
+- `Wsurf::SparseMatrixCSC`      — sparse `N_basis × N_grid` matrix for the
+  scalar boundary-face surface density `σ_n = f_n·n̂` on half-SWG basis
+  functions (Phase A, theory_note.tex §5.5). Zero rows for non-boundary
+  DOFs. Shares the same grid stencil and expansion centre `c_n` as
+  `Wdiv`, so the charge-neutral effective scalar projection is simply
+  `Wdiv - Wsurf` (Anastassiu 1998 thin-sheet-constraint + Q_vol+Q_surf=0
+  identity)
 - `poly_order::Int`             — polynomial order `P` actually used
 - `stencil::Int`                — stencil size `M` per axis
 """
@@ -37,6 +44,7 @@ struct AIMProjection
     Wy::SparseMatrixCSC{Float64,Int}
     Wz::SparseMatrixCSC{Float64,Int}
     Wdiv::SparseMatrixCSC{Float64,Int}
+    Wsurf::SparseMatrixCSC{Float64,Int}
     poly_order::Int
     stencil::Int
 end
@@ -155,10 +163,45 @@ function divergence_moments(basis::AbstractDivBasis, n::Integer, c::Vec3,
 end
 
 """
+    surface_moments(basis, n, c, indices, tri_rule) -> Vector{Float64}
+
+Target surface moments for the scalar density `σ_n = f_n·n̂` on boundary
+face `S_n`, expanded around centre `c`. Returns a vector of length
+`n_moments` holding
+
+    μ_n^{α,S} = ∫_{S_n} σ_n(r)(r - c)^{abc} dS,    (a,b,c) ∈ indices.
+
+By the half-SWG unit-flux property `σ_n(r) = 1` on `S_n` (zero
+elsewhere), so the integral reduces to a pure geometric monomial
+integral over the triangle, evaluated with `tri_rule`. Returns the zero
+vector when `n` is not a boundary SWG DOF (no surface contribution).
+
+Phase A / theory_note.tex §5.5.
+"""
+function surface_moments(basis::AbstractDivBasis, n::Integer, c::Vec3,
+                         indices::Vector{NTuple{3,Int}},
+                         tri_rule::TriQuadRule)
+    nmom = length(indices)
+    M = zeros(Float64, nmom)
+    _is_boundary_dof(basis, Int(n)) || return M
+    verts = boundary_face_vertices(basis, Int(n))
+    a = triangle_area(verts...)
+    @inbounds for i in 1:tri_rule.n
+        r = tri_bary_to_point(tri_rule.bary[i], verts)
+        wt = tri_rule.weights[i] * a
+        for k in eachindex(indices)
+            M[k] += wt * _monomial(r, c, indices[k])
+        end
+    end
+    return M
+end
+
+"""
     build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
                          poly_order::Integer = 2,
                          stencil::Integer = 3,
-                         rule::TetQuadRule = TET_QUAD_5PT)
+                         rule::TetQuadRule = TET_QUAD_5PT,
+                         tri_rule::TriQuadRule = tri_collapsed_rule(4))
         -> AIMProjection
 
 Construct the AIM projection from `basis` onto `grid` using polynomial
@@ -168,14 +211,21 @@ moments and 27 stencil points, which is the canonical AIM choice.
 
 For every basis function `n` the routine
 1. computes the volume-weighted centroid `c_n`,
-2. evaluates the target moments via [`basis_moments`](@ref),
-3. selects the centred `M^3` stencil through [`grid_stencil`](@ref),
-4. assembles the moment matrix `Φ` (rows = moments, cols = stencil pts),
-5. solves the underdetermined system `Φ w = M_target` in the
-   minimum-norm sense via Julia's `\\` (QR-based) for each Cartesian
-   component, and
-6. scatters the resulting weights into the sparse rows `Wx[n,:]`,
-   `Wy[n,:]`, `Wz[n,:]`.
+2. evaluates the bulk target moments via [`basis_moments`](@ref) and
+   [`divergence_moments`](@ref),
+3. for boundary half-SWG DOFs (Phase A), also evaluates the surface
+   target moments via [`surface_moments`](@ref),
+4. selects the centred `M^3` stencil through [`grid_stencil`](@ref),
+5. assembles the moment matrix `Φ` (rows = moments, cols = stencil pts),
+6. solves the underdetermined system `Φ w = M_target` in the
+   minimum-norm sense via Julia's `\\` (QR-based) for each channel, and
+7. scatters the resulting weights into the sparse rows `Wx[n,:]`,
+   `Wy[n,:]`, `Wz[n,:]`, `Wdiv[n,:]`, and (boundary only) `Wsurf[n,:]`.
+
+All five projection matrices share the same sparsity pattern so the
+effective charge-neutral scalar projection `Wdiv − Wsurf`
+(theory_note.tex §5.5, Anastassiu 1998 thin-sheet constraint) preserves
+the same pattern without any extra allocation.
 
 The grid `padding` must be large enough that every basis stencil falls
 inside the grid; otherwise the moment system becomes deficient and the
@@ -184,7 +234,8 @@ constructor throws.
 function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
                               poly_order::Integer = 2,
                               stencil::Integer = 3,
-                              rule::TetQuadRule = TET_QUAD_5PT)
+                              rule::TetQuadRule = TET_QUAD_5PT,
+                              tri_rule::TriQuadRule = tri_collapsed_rule(4))
     P = Int(poly_order)
     M_sten = Int(stencil)
     M_sten^3 >= n_moments(P) ||
@@ -200,6 +251,7 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
     Vy = Float64[]
     Vz = Float64[]
     Vdiv = Float64[]
+    Vsurf = Float64[]
     nz_est = N * M_sten^3
     sizehint!(Is, nz_est)
     sizehint!(Js, nz_est)
@@ -207,13 +259,17 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
     sizehint!(Vy, nz_est)
     sizehint!(Vz, nz_est)
     sizehint!(Vdiv, nz_est)
+    sizehint!(Vsurf, nz_est)
 
     Phi = Matrix{Float64}(undef, nmom, M_sten^3)
+    zero_mom = zeros(Float64, nmom)
 
     for n in 1:N
         c = basis_centroid(basis, n)
         M_target = basis_moments(basis, n, c, indices, rule)
         M_div_target = divergence_moments(basis, n, c, indices, rule)
+        M_surf_target = _is_boundary_dof(basis, n) ?
+            surface_moments(basis, n, c, indices, tri_rule) : zero_mom
 
         sten = grid_stencil(grid, c, M_sten)
         n_sten = length(sten)
@@ -231,6 +287,10 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
         # Solve Φ w = M_target for w (n_sten × 3) in the minimum-norm sense.
         w_vec = Phi_view \ M_target        # (n_sten × 3)
         w_div = Phi_view \ M_div_target    # (n_sten,)
+        # Surface channel: zero target for interior DOFs => zero weights
+        # (avoid unnecessary LAPACK call; non-boundary rows stay empty).
+        w_surf = _is_boundary_dof(basis, n) ?
+            Phi_view \ M_surf_target : zeros(Float64, n_sten)
 
         @inbounds for j in 1:n_sten
             push!(Is, n)
@@ -239,6 +299,7 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
             push!(Vy, w_vec[j, 2])
             push!(Vz, w_vec[j, 3])
             push!(Vdiv, w_div[j])
+            push!(Vsurf, w_surf[j])
         end
     end
 
@@ -246,5 +307,6 @@ function build_aim_projection(basis::AbstractDivBasis, grid::AIMGrid;
     Wy = sparse(Is, Js, Vy, N, n_grid_total)
     Wz = sparse(Is, Js, Vz, N, n_grid_total)
     Wdiv = sparse(Is, Js, Vdiv, N, n_grid_total)
-    return AIMProjection(grid, Wx, Wy, Wz, Wdiv, P, M_sten)
+    Wsurf = sparse(Is, Js, Vsurf, N, n_grid_total)
+    return AIMProjection(grid, Wx, Wy, Wz, Wdiv, Wsurf, P, M_sten)
 end

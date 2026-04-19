@@ -675,6 +675,262 @@ is $r_{\text{near}} = 2 \times (\text{stencil extent})$, verified in
 Phase-3 benchmarks to produce $<0.5\%$ relative error between the
 AIM-accelerated and the dense matrix--vector products.
 
+%----------------------------------------------------------------------
+\subsection{Surface-moment extension for $K^{B}$, $K^{C}$, $K^{D}$}
+\label{sec:aim-surface}
+%----------------------------------------------------------------------
+
+The projection of Sec.~\ref{sec:aim-moments} accelerates only the
+bulk--bulk kernel $K^{A}$ of Eq.~\eqref{eq:K-A}. The three boundary-face
+contributions $K^{B}, K^{C}, K^{D}$ of Eqs.~\eqref{eq:K-B}--\eqref{eq:K-D}
+are, in the Phase-1a release, stored as a separate sparse matrix
+\texttt{half\_swg\_extra} of dimension $N_{\text{bnd}} \times
+N_{\text{dof}}$, which for the iron-oxide doublet geometry dominates
+total live memory at $81$--$86\%$ (measured at R/5, R/6 mesh
+refinement). This subsection extends the moment-matching projection to
+the boundary-face supports so that $K^{B}, K^{C}, K^{D}$ share the same
+three-dimensional FFT convolution as $K^{A}$, reducing
+\texttt{half\_swg\_extra} to a sparse near-field correction block whose
+storage scales as $\mathcal{O}(N_{\text{bnd}})$ rather than
+$\mathcal{O}(N_{\text{bnd}} N_{\text{dof}})$. The construction follows
+Anastassiu \emph{et~al.}~\cite{Anastassiu1998}, which supplies the
+mathematical rigour (``thin-sheet constraint'') omitted from the
+original AIM presentation of Bleszynski \emph{et~al.}~\cite{Bleszynski1996}.
+
+\subsubsection*{Scalar surface density on a volumetric grid}
+
+Inspection of Eqs.~\eqref{eq:K-B}--\eqref{eq:K-D} shows that the three
+boundary kernels couple to a \emph{single} scalar surface density
+\begin{equation}
+  \sigma_n(\bm{r}) \equiv \bm{f}_n(\bm{r})\!\cdot\!\hat{\bm{n}}(\bm{r}),
+  \qquad \bm{r}\in S_n,
+  \label{eq:surf-density}
+\end{equation}
+supported on the single boundary triangle $S_n$ of basis $n$; by the
+half-SWG unit-flux property, $\sigma_n = 1$ on $S_n$ and vanishes
+elsewhere on $\partial\Omega$. Because the divergence theorem of
+Sec.~\ref{sec:K-BCD} has already contracted the vector basis
+$\bm{f}_n$ against the outward normal, the surface AIM projection
+requires neither Cartesian components nor a surface divergence of
+$\bm{f}_n$: only the scalar $\sigma_n$ appears. This is a substantial
+simplification over the four-channel RWG projection of
+Anastassiu~\cite{Anastassiu1998}, where no preceding integration by
+parts is performed.
+
+The triangle $S_n$ is a two-dimensional manifold embedded in the
+three-dimensional grid $\{\bm{g}_p\}$. A naive surface moment
+$\int_{S_n}\sigma_n\,(\bm{r}-\bm{c}_n)^{\bm{\alpha}}\,\dd^{2}r$
+determines the grid projection only for multi-indices $\bm{\alpha}$
+with zero normal component; moments with $\alpha_{\perp} \ge 1$ (where
+$\perp$ denotes the local direction along $\hat{\bm{n}}$) remain
+unconstrained, and the projection is consequently rank-deficient on a
+volumetric grid. Following Anastassiu~\cite{Anastassiu1998}, we
+\emph{thicken} $\sigma_n$ to a volumetric distribution by a normal
+delta,
+\begin{equation}
+  \tilde{\sigma}_n(\bm{r})
+    \equiv \sigma_n(\bm{r}_{\|})\,\delta(\xi_n),
+  \qquad
+  \xi_n = (\bm{r} - \bm{r}_{S_n})\!\cdot\!\hat{\bm{n}},
+  \label{eq:thickening}
+\end{equation}
+where $\bm{r}_{\|}$ is the tangential projection of $\bm{r}$ onto the
+plane of $S_n$ and $\bm{r}_{S_n}$ is any reference point on $S_n$. The
+three-dimensional moments of $\tilde{\sigma}_n$ are then
+\begin{equation}
+  \mu_n^{\bm{\alpha},S}
+    \;\equiv\; \int_{\mathbb{R}^{3}}
+      \tilde{\sigma}_n(\bm{r})\,
+      (\bm{r} - \bm{c}_n)^{\bm{\alpha}}\,\dd^{3}r
+    \;=\; \int_{S_n}
+      \sigma_n(\bm{r}_s)\,
+      (\bm{r}_s - \bm{c}_n)^{\bm{\alpha}}\,\dd^{2}r_s,
+  \label{eq:surf-moments}
+\end{equation}
+where the right-hand side is evaluated in the global Cartesian basis
+so that components along $\hat{\bm{n}}$ with $\alpha_{\perp} \ge 1$
+automatically vanish and enter the linear system
+\eqref{eq:surf-matching} below as the ``thin-sheet constraint''
+\begin{equation}
+  \sum_{q\in\mathcal{S}^{S}_n}\Lambda^{S}_{nq}\,
+    \bigl(\bm{g}_q - \bm{c}_n\bigr)^{\bm{\alpha}} = 0
+  \quad\text{for all}\ \bm{\alpha}\ \text{with}\ \alpha_{\perp}\ge 1,
+  \label{eq:thin-sheet}
+\end{equation}
+forcing the projected point sources to collapse to a zero-thickness
+sheet in the grid's far-field representation.
+
+\subsubsection*{Moment matching}
+
+In direct analogy with the bulk matching equation
+\eqref{eq:aim-matching}, the surface projection weights
+$\{\Lambda^{S}_{nq}\}_{q \in \mathcal{S}^{S}_n}$ are determined by
+\begin{equation}
+  \sum_{q \in \mathcal{S}^{S}_n}
+    \Lambda^{S}_{nq}\,(\bm{g}_q - \bm{c}_n)^{\bm{\alpha}}
+  = \mu_n^{\bm{\alpha},S},
+  \qquad \forall\,\abs{\bm{\alpha}} \le n_{\text{st}},
+  \label{eq:surf-matching}
+\end{equation}
+where $\mathcal{S}^{S}_n$ is a cubic stencil of
+$M_{\text{st}} = (n_{\text{st}}+1)^{3}$ grid nodes centred on the
+triangle centroid $\bm{c}_n$. The stencil size and grid are identical
+to the bulk case of Sec.~\ref{sec:aim-grid}, so the surface and bulk
+contributions share a single FFT plan. Only a single scalar linear
+system per boundary face must be solved; the Vandermonde-type matrix
+$\bigl[(\bm{g}_q-\bm{c}_n)^{\bm{\alpha}}\bigr]$ is of size
+$\binom{n_{\text{st}}+3}{3}\times M_{\text{st}}$ and is independent of
+the kernel $G$, so it is factored once and reused for every boundary
+face.
+
+\subsubsection*{Far-field product via the shared FFT}
+
+With the bulk vector weights $W^{\text{vec},\alpha}_{np}$ (three
+Cartesian components), the bulk divergence weights $W^{\div}_{np}$,
+and the new surface weights $\Lambda^{S}_{nq}$, the full far-field MVP
+$\bm{y}^{\text{far}} = K^{\text{far}}\bm{x}$ proceeds through a single
+grid pass. Define three source projections
+\begin{equation}
+  q^{\text{vec},\alpha}_p = \sum_{n} W^{\text{vec},\alpha}_{np}\,x_n,
+  \qquad
+  q^{\div}_p = \sum_{n} W^{\div}_{np}\,x_n,
+  \qquad
+  q^{S}_p = \sum_{n\in\mathcal{N}_{\text{bnd}}}
+    \Lambda^{S}_{np}\,x_n,
+  \label{eq:aim-surf-proj}
+\end{equation}
+where $\mathcal{N}_{\text{bnd}}$ is the index set of half-SWG basis
+functions with a boundary face. A single three-dimensional FFT
+convolution with the Green-function kernel is then applied
+independently to each scalar source field,
+\begin{equation}
+  Q^{\bullet}_p = \sum_{p'} G(\bm{g}_p - \bm{g}_{p'})\,q^{\bullet}_{p'},
+  \qquad
+  \bullet\in\{\text{vec},\alpha;\ \div;\ S\},
+  \label{eq:aim-surf-fft}
+\end{equation}
+reusing the precomputed FFT of $G$ exactly as in
+Sec.~\ref{sec:aim-fft}. Finally, the test-side interpolation combines
+the vector and two scalar grid channels,
+\begin{equation}
+\begin{aligned}
+  y_m^{\text{far}}
+  &= k_0^{2}\sum_{\alpha}\sum_{p\in\mathcal{S}_m}
+     W^{\text{vec},\alpha}_{mp}\,Q^{\text{vec},\alpha}_p
+  \;+\; \sum_{p\in\mathcal{S}_m}
+     W^{\div}_{mp}\,
+     \bigl(Q^{S}_p - Q^{\div}_p\bigr) \\
+  &\quad+\; \bigl[m\in\mathcal{N}_{\text{bnd}}\bigr]
+     \sum_{p\in\mathcal{S}_m^{S}}
+     \Lambda^{S}_{mp}\,
+     \bigl(Q^{\div}_p - Q^{S}_p\bigr),
+\end{aligned}
+  \label{eq:aim-surf-mvp}
+\end{equation}
+where the first line accumulates $K^{A,\text{far}}$ and (via
+$Q^{S}-Q^{\div}$) $K^{B,\text{far}}$ minus the divergence-divergence
+piece of $K^{A}$, and the second line adds $K^{C,\text{far}}$ and
+$K^{D,\text{far}}$ for test functions on a boundary face (Iverson
+bracket $[\,\cdot\,]$). The symmetric appearance of
+$Q^{\div}-Q^{S}$ on both sides reflects the charge-neutrality identity
+$Q_{\text{vol}} + Q_{\text{surf}} = 0$ of
+Sec.~\ref{sec:charge-neutrality}: the bulk divergence and the
+boundary-face normal flux are the two halves of a single conserved
+charge distribution, and the AIM projection preserves this
+cancellation on the grid.
+
+No additional FFT is required compared to the bulk-only pipeline of
+Sec.~\ref{sec:aim-fft}: the surface channel is absorbed as one extra
+scalar grid array, for a total of $3 + 2 = 5$ scalar FFTs per MVP
+(three vector components, one bulk divergence, and one surface
+density) versus $3 + 1 = 4$ in Phase-1a.
+
+\subsubsection*{Near-field correction}
+
+For pairs $(m,n)$ with at least one of $\{m,n\}$ on a boundary face
+and $\norm{\bm{c}_m - \bm{c}_n}\le r_{\text{near}}$, the far-field
+approximation in Eq.~\eqref{eq:aim-surf-mvp} is insufficient. In
+direct analogy with the bulk precorrection of
+Sec.~\ref{sec:aim-precorrection}, we store the difference between the
+Duffy-integrated $K^{B/C/D}_{mn}$ of Sec.~\ref{sec:K-BCD} and its
+AIM-reconstructed far-field value in a sparse correction block
+$K^{S,\text{pc}}$. The storage scales as
+$\mathcal{O}(N_{\text{bnd}}\,\langle M^{S}_{\text{near}}\rangle)$,
+where $\langle M^{S}_{\text{near}}\rangle$ is the mean number of
+near-neighbours per boundary face. For a mesh with characteristic
+edge length $\ell_c$ and near radius
+$r_{\text{near}} = 2 \times (\text{stencil extent})$, this count is
+$\mathcal{O}(1)$, so $K^{S,\text{pc}} = \mathcal{O}(N_{\text{bnd}})$.
+On compact objects with
+$N_{\text{bnd}} = \mathcal{O}(N_{\text{dof}}^{2/3})$, this is a
+reduction from $\mathcal{O}(N_{\text{dof}}^{5/3})$
+(\texttt{half\_swg\_extra} in Phase-1a) to
+$\mathcal{O}(N_{\text{dof}}^{2/3})$---an asymptotic factor of
+$N_{\text{dof}}$.
+
+\subsubsection*{Closed-form surface moment evaluation}
+
+The surface moment integral \eqref{eq:surf-moments} over a planar
+triangle $S_n$ admits a closed-form recursive evaluation in simplex
+coordinates, eliminating quadrature error entirely. Let
+$(\bm{r}_1, \bm{r}_2, \bm{r}_3)$ be the triangle vertices,
+$(\xi,\eta)$ the affine simplex coordinates of the unit isosceles
+triangle $T_0 = \{0\le\xi,\eta;\ \xi+\eta\le 1\}$, so that
+$\bm{r}_s = \bm{r}_1 + \xi(\bm{r}_2-\bm{r}_1) + \eta(\bm{r}_3-\bm{r}_1)$.
+Each monomial factor $(r_\beta - c_{n,\beta})$, $\beta\in\{x,y,z\}$,
+becomes linear in $(\xi,\eta)$,
+$r_\beta - c_{n,\beta}
+ = \mu^{(\beta)}_{10}\xi + \mu^{(\beta)}_{01}\eta + \mu^{(\beta)}_{00}$,
+and the order-$Q = \abs{\bm{\alpha}}$ moment reduces to a bivariate
+polynomial integral
+\begin{equation}
+  J^{(Q)}_{\bm{\alpha}}
+    = \int_{T_0}
+      \prod_{q=1}^{Q}
+      \bigl(\mu^{(\beta_q)}_{10}\,\xi + \mu^{(\beta_q)}_{01}\,\eta
+            + \mu^{(\beta_q)}_{00}\bigr)\,
+      \dd\xi\,\dd\eta
+    = \sum_{i=0}^{Q}\!\sum_{j=0}^{Q}
+      \lambda^{(Q)}_{ij}\,\frac{i!\,j!}{(i+j+2)!},
+  \label{eq:simplex-moment}
+\end{equation}
+where $\beta_q$ runs over the multi-index $\bm{\alpha}$ entry by entry
+(so $Q$ factors appear in total). The polynomial coefficients
+$\lambda^{(Q)}_{ij}$ are generated by the recursion
+\begin{equation}
+  \lambda^{(Q+1)}_{ij}
+    = \lambda^{(Q)}_{i-1,j}\,\mu^{(\beta_{Q+1})}_{10}
+    + \lambda^{(Q)}_{i,j-1}\,\mu^{(\beta_{Q+1})}_{01}
+    + \lambda^{(Q)}_{i,j}  \,\mu^{(\beta_{Q+1})}_{00},
+    \qquad \lambda^{(0)}_{00} = 1,
+  \label{eq:simplex-recursion}
+\end{equation}
+with $\lambda^{(Q)}_{ij} = 0$ whenever $i<0$ or $j<0$. The final
+surface moment is recovered by multiplying $J^{(Q)}_{\bm{\alpha}}$ by
+the Jacobian $2\abs{S_n}$. The cost per boundary face is
+$\mathcal{O}(n_{\text{st}}^{4})$ operations with no numerical
+quadrature, eliminating one of the two truncation-error sources in the
+Phase-1a projection (the bulk tetrahedral moments retain a
+Gauss-cubature error of $\sim 10^{-12}$ which dominates machine
+epsilon but is well below the AIM far-field truncation at
+$n_{\text{st}} = 2$).
+
+\subsubsection*{Summary of Phase A impedance}
+
+With the surface projection in place, the complete AIM-accelerated
+impedance equation \eqref{eq:aim-mvp} is augmented to
+\begin{equation}
+  \bm{y} = \bigl(D_M
+      - \tfrac{\kappa}{\epsilon_{\text{bg}}}
+        \bigl(K^{\text{far}} + K^{\text{pc}} + K^{S,\text{pc}}\bigr)
+    \bigr)\,\bm{x},
+  \label{eq:aim-mvp-phaseA}
+\end{equation}
+where $K^{\text{far}}$ now evaluates all four kernel contributions
+$K^{A}+K^{B}+K^{C}+K^{D}$ via Eq.~\eqref{eq:aim-surf-mvp} and
+$K^{S,\text{pc}}$ is the sparse surface-near-field correction. The
+Phase-1a \texttt{half\_swg\_extra} matrix is removed entirely.
+
 %======================================================================
 \section{Solvers}
 \label{sec:solver}
@@ -2087,6 +2343,13 @@ terms and the cubic-vs-tetrahedral discretisation mismatch.
   scattering and radiation problems,''
   \textit{Radio Sci.} \textbf{31}(5), 1225--1251 (1996).
   \url{https://doi.org/10.1029/96RS02504}.
+
+\bibitem{Anastassiu1998}
+  H.~T.~Anastassiu, M.~Smelyanskiy, S.~Bindiganavale, and J.~L.~Volakis,
+  ``Scattering from relatively flat surfaces using the adaptive integral
+  method,''
+  \textit{Radio Sci.} \textbf{33}(1), 7--16 (1998).
+  \url{https://doi.org/10.1029/97RS02104}.
 
 \bibitem{Purcell1973}
   E.~M.~Purcell and C.~R.~Pennypacker,
