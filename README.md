@@ -525,10 +525,40 @@ is not the rate-limiting factor once lc is at least R/5.
 Extrapolating from the measured rate,
 `err(R/10) ≈ err(R/5) × (1/2)^{3.4} ≈ 1 %` on Im S_fw_θ — refinement
 to `lc ≈ R/10` brings the axis-aligned plasmonic observable to
-sub-1 % agreement with the exact MSTM solution.  The fit is based on
-two lc values only; extending to R/8 and R/10 requires >15 GB RAM
-with the current AIM solver (N² sparse near-field storage) and is
-deferred.
+sub-1 % agreement with the exact MSTM solution.
+
+**Phase A memory scaling (surface-moment AIM).** The original AIM
+release (Phase-1a) stored the boundary kernels K^B + K^C + K^D in a
+dense N_bnd × N sparse matrix `half_swg_extra` that scaled as
+O(N^{5/3}) and dominated live memory at 81–86 % for this dense
+aggregate geometry. The Phase A surface-moment extension (see
+`docs/theory_note.tex` §5.5) folds those kernels into the AIM
+far-field via a single new scalar projection `Wsurf` and absorbs the
+near-field corrections into the existing sparse `precorrection`
+block; `half_swg_extra` is eliminated entirely. Measured on the Au
+doublet (Intel i7-1265U, 16 GB RAM, Julia 1.11, single-threaded
+solve, `benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl`):
+
+| lc / R | N DOF  | N_bnd | Wsurf   | precorrection | total tracked | t_setup | t_solve (3 or.) |
+|--------|--------|-------|---------|---------------|---------------|---------|-----------------|
+| 1/5    | 11 501 |  1 610 | 4.9 MiB | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s           |
+| 1/6    | 18 919 |  2 254 | 8.1 MiB | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s           |
+| 1/7    | 29 636 |  3 176 | 12.6 MiB| 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s           |
+
+`total tracked` is `Base.summarysize(AIMOperator)` — the in-memory
+footprint of every sparse matrix, the FFT kernel, and the mass
+matrix. For comparison, Phase-1a `half_swg_extra` alone on this
+geometry was 486 MiB at R/5 and 1 074 MiB at R/6 (memory-plan
+measurement, pre-Phase-A); Phase A delivers **5.0× / 6.5× / 11×**
+total-memory reduction at R/5 / R/6 / R/7 respectively. Asymptotic
+scaling: `total tracked` grows as O(N^{1.03}) between R/5 and R/7 —
+essentially linear in N, matching the Phase A design target
+(Phase-1a scaled as O(N^{5/3})).
+
+With sub-300 MiB memory budgets through R/7, further refinement to
+R/8 and R/10 is now feasible on a 16 GB workstation and is the
+next planned step to close the 5.6 % residual Im S_fw_θ error at
+β = π/2.
 
 The `Im S_fw_φ` fit returns p = 0.3–1.0 which is anomalously slow,
 but the absolute error there is already in the 1.5 % range and

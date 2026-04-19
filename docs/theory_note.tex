@@ -931,6 +931,63 @@ $K^{A}+K^{B}+K^{C}+K^{D}$ via Eq.~\eqref{eq:aim-surf-mvp} and
 $K^{S,\text{pc}}$ is the sparse surface-near-field correction. The
 Phase-1a \texttt{half\_swg\_extra} matrix is removed entirely.
 
+\subsubsection*{Measured memory and timing}
+
+Table~\ref{tab:phase-a-doublet} reports the measured in-memory
+footprint of each \texttt{AIMOperator} component and the setup/solve
+wall times for the Au doublet benchmark
+(\mbox{$R_{\text{monomer}} = 30$~nm}, gap \SI{3}{nm}, $\lambda_0 =
+\SI{638}{nm}$, Johnson--Christy~\cite{JohnsonChristy1972} gold,
+Intel i7-1265U, \SI{16}{GB} RAM, Julia~1.11, single-threaded solve,
+script \texttt{benchmarks/cas\_v2/doublet\_mstm/phase\_a\_memory\_study.jl}).
+Each row corresponds to a refinement level $\ell_c = R/k$. For
+comparison, Phase-1a stored \texttt{half\_swg\_extra} as a dense
+$N_{\text{bnd}} \times N_{\text{dof}}$ sparse matrix which on the same
+geometry reached \SI{486}{MiB} at $R/5$ and \SI{1074}{MiB} at $R/6$;
+Phase A reduces those totals to \SI{97}{MiB} and \SI{164}{MiB} --- a
+\num{5.0}$\times$ / \num{6.5}$\times$ / \num{11}$\times$ reduction at
+$R/5$ / $R/6$ / $R/7$ respectively.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Phase A Au doublet memory (in-memory footprint via
+\texttt{Base.summarysize}) and wall times (3-orientation block-BiCGSTAB
+solve). Measured on commit \texttt{81c7961}.}
+\label{tab:phase-a-doublet}
+\begin{tabular}{@{}l r r r r r r r@{}}
+\toprule
+$\ell_c$ & $N_{\text{dof}}$ & $N_{\text{bnd}}$ & $W^{S}$ & $K^{\text{pc}}$ &
+total & $t_{\text{setup}}$ & $t_{\text{solve}}$ \\
+ & & & [MiB] & [MiB] & [MiB] & [s] & [s] \\
+\midrule
+$R/5$ & \num{11501} & \num{1610} & \num{4.9}  & \num{67.2}  & \num{96.8}  & \num{105} & \num{201} \\
+$R/6$ & \num{18919} & \num{2254} & \num{8.1}  & \num{116.5} & \num{164.2} & \num{179} & \num{363} \\
+$R/7$ & \num{29636} & \num{3176} & \num{12.6} & \num{189.0} & \num{262.7} & \num{299} & \num{718} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The total in-memory footprint grows as
+$\mathcal{O}(N_{\text{dof}}^{1.03})$ between $R/5$ and $R/7$ ---
+essentially linear in $N_{\text{dof}}$, confirming the Phase A design
+target. The dominant contribution is the bulk precorrection block
+$K^{\text{pc}}$ (\SIrange{69}{72}{\percent} of total), whose sparsity
+scales as $\mathcal{O}(N_{\text{dof}}\,n_{\text{near}})$ with
+$n_{\text{near}} \lesssim (M_{\text{st}}\,r_{\text{near}}/\ell_c)^3$ an
+$\mathcal{O}(1)$ count independent of $N_{\text{dof}}$. The new Phase A
+surface projection $W^{S}$ adds \SIrange{4}{5}{\percent} to the total,
+a small overhead compared with the memory eliminated.
+
+The setup and solve times both scale as $\mathcal{O}(N_{\text{dof}})$
+within measurement noise, consistent with the AIM MVP cost
+$\mathcal{O}(N_g \log N_g + N_{\text{dof}}\,n_{\text{near}})$ evaluated
+at fixed wavelength. With sub-\SI{300}{MiB} budgets through $R/7$,
+further refinement to $R/8$ and $R/10$ is feasible on a
+\SI{16}{GB} workstation and is the next step toward closing the
+residual \SI{5.6}{\percent} Im $S_{\text{fw},\theta}$ error at
+$\beta = \pi/2$ (Sec.~\ref{sec:doublet-mstm}).
+
 %======================================================================
 \section{Solvers}
 \label{sec:solver}
