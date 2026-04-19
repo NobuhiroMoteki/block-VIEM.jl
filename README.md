@@ -35,16 +35,28 @@ so downstream analysis pipelines work with either without modification.
    block-DDA_Py (Muinonen & Pieniluoma 2011, JQSRT). Tetrahedral meshes
    are generated automatically via Gmsh with adaptive mesh size based on
    wavelength, geometry, and surface-deformation correlation length.
-6. **CAS-v2 observables.** Computes the polarized complex forward-scattering
+6. **Sphere-aggregate targets.** Fused clusters of spheres are handled
+   as first-class geometries (`SphereAggregate`, `mesh_sphere_aggregate`).
+   Built-in constructors cover linear chains, planar arrays, and
+   FCC / BCC / HCP clusters (`make_linear_chain`, `make_planar_array`,
+   `make_fcc_cluster`, `make_bcc_cluster`, `make_hcp_cluster`);
+   arbitrary monomer-center/radius lists (e.g. random fractal-like
+   aggregates from the `aggregate_generator_PTSA` HDF5 files) are
+   loaded via `load_ptsa_h5`. Overlap between adjacent monomers is
+   specified through an interpretable `neck_ratio` (contact-circle
+   radius ÷ monomer radius). A single conforming tetrahedral mesh
+   spans the entire aggregate so the internal D-field is resolved
+   across every neck.
+7. **CAS-v2 observables.** Computes the polarized complex forward-scattering
    amplitudes `S(0)_theta`, `S(0)_phi` (PCAS) and the complex
    backward-scattering amplitude `S(180)` (OCBS), plus `C_ext`, `C_abs`,
    `C_sca`.
-7. **Production sweep with resume.** `run_viem.jl` performs multi-dimensional
+8. **Production sweep with resume.** `run_viem.jl` performs multi-dimensional
    parameter sweeps (wavelength x refractive index x shape x orientation),
    writes results to HDF5 in the block-DDA_Py-compatible schema, and
    resumes from partially completed files. On solver failure, fills NaN and
    continues (matching block-DDA_Py).
-8. **Mie reference.** Each sweep condition is compared to the Mie solution
+9. **Mie reference.** Each sweep condition is compared to the Mie solution
    for the volume-equivalent sphere with axis-averaged refractive index.
 
 ### Validation
