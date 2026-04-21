@@ -46,7 +46,7 @@ struct BlockSolveResult
 end
 
 """
-    block_bicgstab(A, B::AbstractMatrix; tol = 1e-6, maxiter = 200,
+    block_bicgstab(A, B::AbstractMatrix; tol = 1e-5, maxiter = 100,
                    verbose = false) -> BlockSolveResult
 
 Block BiCGSTAB for `A X = B`, with `X`, `B` of shape `(N, L)`. `A` must
@@ -64,8 +64,8 @@ The columns of `B` should be linearly independent; if two columns are
 parallel, Block BiCGSTAB can break down in the `L×L` solve on `RV` — use
 [`block_gmres`](@ref) in that case.
 """
-function block_bicgstab(A, B::AbstractMatrix; tol::Real = 1e-6,
-                        maxiter::Integer = 200, verbose::Bool = false)
+function block_bicgstab(A, B::AbstractMatrix; tol::Real = 1e-5,
+                        maxiter::Integer = 100, verbose::Bool = false)
     N, L = size(B)
     Bc = Matrix{ComplexF64}(B)
     Bnorm = norm(Bc)
@@ -106,7 +106,7 @@ function block_bicgstab(A, B::AbstractMatrix; tol::Real = 1e-6,
 end
 
 """
-    block_gmres(A, B::AbstractMatrix; tol = 1e-6, maxiter = 200,
+    block_gmres(A, B::AbstractMatrix; tol = 1e-5, maxiter = 100,
                 verbose = false) -> BlockSolveResult
 
 Unrestarted Block GMRES for `A X = B`, with `X`, `B` of shape `(N, L)`.
@@ -122,8 +122,8 @@ for very long runs, use [`block_bicgstab`](@ref) instead.
 Intended as a robust fallback when BiCGSTAB breakdowns / stagnates on
 rank-deficient RHS blocks.
 """
-function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-6,
-                     maxiter::Integer = 200, verbose::Bool = false)
+function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
+                     maxiter::Integer = 100, verbose::Bool = false)
     N, L = size(B)
     Bc = Matrix{ComplexF64}(B)
     Bnorm = norm(Bc)

@@ -32,8 +32,8 @@ include(joinpath(dirname(@__DIR__), "..", "test", "mie_reference.jl"))
 #  Settings (mirror viem_results/run_viem.jl)
 # ──────────────────────────────────────────────────────────────────────
 const RNG_SEED        = 12345
-const SOLVER_TOL      = 1e-6
-const MAXITER         = 400
+const SOLVER_TOL      = 1e-5
+const MAXITER         = 100
 const N_PW            = 10
 const DUFFY_ORDER     = 5
 const AIM_PITCH_RATIO = 0.5

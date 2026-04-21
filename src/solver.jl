@@ -71,8 +71,8 @@ end
                     E0::SVector{3,ComplexF64},
                     pitch::Float64,
                     padding::Integer = 3,
-                    tol::Float64 = 1e-6,
-                    maxiter::Integer = 200) -> SolveResult
+                    tol::Float64 = 1e-5,
+                    maxiter::Integer = 100) -> SolveResult
 
 Solve the VIEM system using the AIM-accelerated BiCGSTAB iteration
 (via Krylov.jl). The AIM operator is wrapped as a closure that computes
@@ -90,8 +90,8 @@ function solve_iterative(basis::AbstractDivBasis;
                          E0::SVector{3,ComplexF64},
                          pitch::Float64,
                          padding::Integer = 3,
-                         tol::Float64 = 1e-6,
-                         maxiter::Integer = 200)
+                         tol::Float64 = 1e-5,
+                         maxiter::Integer = 100)
     # `k0` is the wavenumber in the background medium
     # (k0 = 2π·m_m/λ₀, not the vacuum wavenumber).
     k_bg = ComplexF64(k0)
@@ -145,8 +145,8 @@ end
                           k0, eps_p, eps_bg = 1,
                           k_hat_list, E0_list,
                           pitch::Float64, padding::Integer = 3,
-                          tol::Float64 = 1e-6, maxiter::Integer = 200,
-                          method::Symbol = :bicgstab,
+                          tol::Float64 = 1e-5, maxiter::Integer = 100,
+                          method::Symbol = :gmres,
                           verbose::Bool = false)
         -> (D_block::Matrix{ComplexF64}, converged::Bool,
             residual::Float64, iterations::Int)
@@ -175,8 +175,8 @@ function solve_iterative_block(basis::AbstractDivBasis;
                                E0_list::AbstractVector,
                                pitch::Float64,
                                padding::Integer = 3,
-                               tol::Float64 = 1e-6,
-                               maxiter::Integer = 200,
+                               tol::Float64 = 1e-5,
+                               maxiter::Integer = 100,
                                method::Symbol = :gmres,
                                verbose::Bool = false)
     length(k_hat_list) == length(E0_list) ||

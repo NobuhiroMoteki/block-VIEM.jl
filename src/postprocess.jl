@@ -578,8 +578,8 @@ end
                               method::Symbol = :aim_gmres,
                               pitch::Union{Float64,Nothing} = nothing,
                               padding::Integer = 4,
-                              tol::Float64 = 1e-6,
-                              maxiter::Integer = 200,
+                              tol::Float64 = 1e-5,
+                              maxiter::Integer = 100,
                               verbose::Bool = false)
         -> Vector{CASv2Result}
 
@@ -651,8 +651,8 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    method::Symbol = :aim_gmres,
                                    pitch::Union{Float64,Nothing} = nothing,
                                    padding::Integer = 4,
-                                   tol::Float64 = 1e-6,
-                                   maxiter::Integer = 200,
+                                   tol::Float64 = 1e-5,
+                                   maxiter::Integer = 100,
                                    verbose::Bool = false,
                                    return_D::Bool = false,
                                    return_solve_info::Bool = false,
