@@ -158,8 +158,10 @@ solves `Z * X = B` where each column of `B` is the projection of one
 incident plane wave.
 
 `method` selects the block solver:
-- `:bicgstab` — Block BiCGSTAB (Tadano et al. 2009). Default.
-- `:gmres`    — Unrestarted Block GMRES (Simoncini & Szyld 1996).
+- `:gmres`    — Unrestarted Block GMRES (Simoncini & Szyld 1996).  Default.
+  Monotone convergence; robust against near-linearly-dependent RHS columns.
+- `:bicgstab` — Block BiCGSTAB (Tadano et al. 2009).  Typically fewer
+  iterations than GMRES but can break down on degenerate RHS blocks.
 
 **Convention.** Same as [`solve_direct`](@ref): `k0` is the
 background-medium wavenumber (`2π·m_m/λ₀`), and `eps_p`, `eps_bg` are
@@ -175,7 +177,7 @@ function solve_iterative_block(basis::AbstractDivBasis;
                                padding::Integer = 3,
                                tol::Float64 = 1e-6,
                                maxiter::Integer = 200,
-                               method::Symbol = :bicgstab,
+                               method::Symbol = :gmres,
                                verbose::Bool = false)
     length(k_hat_list) == length(E0_list) ||
         throw(ArgumentError("k_hat_list and E0_list must have equal length"))

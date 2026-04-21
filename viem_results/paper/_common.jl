@@ -19,8 +19,14 @@ const WL_PAPER     = 0.638                   # vacuum wavelength [μm]
 const M_M_PAPER    = 1.0                     # vacuum background
 
 # Volume-equivalent radii [μm]
-const A_EQ_FULL    = [0.05, 0.1, 0.2, 0.5]   # low / high-index
-const A_EQ_AU      = [0.05, 0.1, 0.2]        # Au only (≤ 0.2 μm)
+const A_EQ_FULL    = [0.05, 0.1, 0.2, 0.4]   # low / high-index (a_eq=0.5 dropped
+                                              # to keep wall-time per slot manageable
+                                              # for GRE × n317 and similar heavy cases)
+const A_EQ_AU      = [0.05, 0.1, 0.2]        # Au only (≤ 0.2 μm); a_eq=0.5 μm
+                                              # dropped — at |m_p|≈3.49 the
+                                              # wavelength-driven lc ≈ 0.018 μm
+                                              # yields prohibitive N_DOF
+                                              # (>24 h per slot).  See CLAUDE.md §2.
 
 # Multi-orientation grid (CLAUDE.md §6: max ≈ 100 simultaneous RHS)
 # Spheroid mode (sphere, oblate): block solver gets L = N_β = 5.

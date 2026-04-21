@@ -29,9 +29,9 @@
 
 | 物質 | n_p @ λ=0.638 μm | a_eq (μm) |
 | --- | --- | --- |
-| 低屈折率 | 1.5 + 0.01i | 0.05, 0.1, 0.2, 0.5 |
-| 高屈折率 | 3.17 + 0.16i | 0.05, 0.1, 0.2, 0.5 |
-| Au (J&C 1972) | **0.17525 + 3.4830i** (λ=0.638 μm でハードコード) | 0.05, 0.1, 0.2 (0.5 μm は対象外) |
+| 低屈折率 | 1.5 + 0.01i | 0.05, 0.1, 0.2, 0.4 |
+| 高屈折率 | 3.17 + 0.16i | 0.05, 0.1, 0.2, 0.4 |
+| Au (J&C 1972) | **0.17525 + 3.4830i** (λ=0.638 μm でハードコード) | 0.05, 0.1, 0.2 (**0.5 μm は廃止** — Au の `\|m_p\|≈3.49` で波長制約 lc≈0.018 μm が支配し N_DOF 爆発、1 スロットで 24 h 超え確実のため) |
 
 観測量:
 
@@ -40,7 +40,7 @@
 
 ### 形状パラメータの換算
 
-- **2 球 doublet の半径換算**: 体積等価半径 `a_eq` から monomer 半径 `R = a_eq / 2^(1/3) ≈ 0.7937 · a_eq`、軸方向 gap `g = 0.1 · R` (README Benchmark 節と同比)。a_eq = 0.05, 0.1, 0.2, 0.5 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3969 μm。
+- **2 球 doublet の半径換算**: 体積等価半径 `a_eq` から monomer 半径 `R = a_eq / 2^(1/3) ≈ 0.7937 · a_eq`、軸方向 gap `g = 0.1 · R` (README Benchmark 節と同比)。a_eq = 0.05, 0.1, 0.2, 0.4 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm。
 - **扁平回転楕円体**: 3 半軸 `(a, b, c)`, `a = b`, `b/c = 3` → `c = (a_eq³ / (b/c)²)^(1/3) = a_eq / 9^(1/3)`, `a = b = 3c`。
 - **GRE**: `GREParams(a_eq=a_eq, ab_ratio=1.0, bc_ratio=1.0, beta=0.2)` でそのまま構築。
 
@@ -93,11 +93,12 @@ HDF5 スイープを起動する前に必ず:
   - lc 収束: `convergence_{shape}_{material}.hdf5`
 - 既存 HDF5 の C_ext ≠ 0 エントリは `run_viem.jl` の再計算スキップ機能に従い中断再開可能
 - 多配向 block-Krylov の **反復数 と 1 配向あたり end-to-end 所要時間** は別スクリプト [viem_results/paper/run_rhs_scaling.jl](viem_results/paper/run_rhs_scaling.jl) で診断:
-  - RHS 数スイープ `L = 1, 2, 4, 8, 16, 32`（2 のべき乗、計 6 点で iter 数のスケーリングを解像）
+  - RHS 数スイープ `L = 1, 2, 4, 8, 16, 32, 64, 128`（2 のべき乗、計 8 点で iter 数のスケーリングを解像）
   - **2 ソルバを同時計測**: `block-BiCGSTAB` (`:aim_bicgstab`) と `block-GMRES` (`:aim_gmres`) を同じ shape slot, 同じメッシュ + projection + mass で評価
   - 結果は `/target/rhs_scaling/{bicgstab,gmres}/` のサブグループに `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s` を書き込み（`L_values`, `n_dof`, `n_tet` は両メソッド共通として親グループに）
-  - 各 shape slot ごとに測定（worst-case mesh 共有、固定 RNG seed の uniform-sphere 配向を nested に L=1 ⊂ L=2 ⊂ L=4 ⊂ L=8 ⊂ L=16 ⊂ L=32）
-  - L=64 はパイロット計測で block-BiCGSTAB の stagnation を頻発したため除外（near-linearly-dependent RHS による breakdown、[src/block_krylov.jl:62-65](src/block_krylov.jl#L62-L65) 既知制約）。L=32 を実用上限として採用。論文の Figure では BiCGSTAB / GMRES の収束反復数を併記し、BiCGSTAB が早く解ける一方 GMRES は monotone な収束を保証する点を比較
+  - 各 shape slot ごとに測定（worst-case mesh 共有、固定 RNG seed の uniform-sphere 配向を nested に L=1 ⊂ L=2 ⊂ … ⊂ L=128）
+  - 大 L 領域（L=64, 128）では BiCGSTAB が near-linearly-dependent RHS により stagnate しうる（[src/block_krylov.jl:62-65](src/block_krylov.jl#L62-L65) 既知制約）。論文 Figure では両ソルバの iter 数・壁時計時間を併記し、BiCGSTAB が小 L で速い一方 GMRES が大 L で安定（monotone 収束）である点を比較
+- **本番ソルバのデフォルトは v0.7.1 から `:aim_gmres`**（`solve_cas_v2_orientations` の method キーワードおよび [viem_results/run_viem.jl:37](viem_results/run_viem.jl#L37) の `SOLVER_METHOD`）。理由: GRE 本番で block solve L=100、N_DOF 数十万の条件下では BiCGSTAB の stagnation リスクが高く、論文全 44 スロットの完走を優先して monotone 収束保証のある GMRES を選択。パフォーマンス重視のケースでは明示的に `:aim_bicgstab` を指定する
 - **doublet 厳密解（MSTM 参照）は別 HDF5 で管理**: [viem_results/paper/run_mstm_reference.jl](viem_results/paper/run_mstm_reference.jl) を MSTMforCAS.jl env (`~/Julia/MSTMforCAS.jl`) で実行し、対応する `mstm_<basename>.hdf5` を生成
   - `truncation_order = 15`（[README.md:475-482](README.md#L475-L482) 準拠、Au 含む両材料で完全収束）
   - スキーマは `/target/{a_eq_um, R_monomer_um, gap_um, beta_rad, observables/{Q_*, S_fw_*, S_bk}, diagnostics/{n_iterations, converged}}`、軸対称性により (a_eq, β) の 2D グリッドのみ（α/γ は VIEM の解析展開と物理的に一致するため不要）

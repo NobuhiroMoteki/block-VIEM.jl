@@ -5,7 +5,7 @@
 # the iteration count + wall time.  Results are written under
 # /target/rhs_scaling/ as
 #
-#   L_values:        (nL,)                                Int   # [1, 2, 4, 8, 16, 32]
+#   L_values:        (nL,)                                Int   # [1, 2, 4, 8, 16, 32, 64, 128]
 #   n_dof:           (N_rv, N_bc, N_ab, N_bt)             Int   # shared across methods
 #   n_tet:           (N_rv, N_bc, N_ab, N_bt)             Int   # shared across methods
 #   bicgstab/
@@ -44,7 +44,7 @@ const N_PW            = 10
 const DUFFY_ORDER     = 5
 const AIM_PITCH_RATIO = 0.5
 const AIM_PADDING     = 4
-const L_LIST          = [1, 2, 4, 8, 16, 32]   # CLAUDE.md §6
+const L_LIST          = [1, 2, 4, 8, 16, 32, 64, 128]   # CLAUDE.md §6
 # Per-method (subgroup name, solver-method symbol)
 const METHODS         = ((:bicgstab, :aim_bicgstab), (:gmres, :aim_gmres))
 
@@ -136,7 +136,7 @@ function write_rhs_scaling(t, per_method, n_dof_arr, n_tet_arr)
     attrs(g)["description"] =
         "Block-Krylov scaling diagnostic over L ∈ L_values, per method " *
         "(bicgstab, gmres). Per-orientation sets are nested " *
-        "(L=1 ⊂ L=2 ⊂ L=4 ⊂ L=8 ⊂ L=16 ⊂ L=32), drawn from a " *
+        "(L=1 ⊂ L=2 ⊂ … ⊂ L=128), drawn from a " *
         "fixed-seed uniform-sphere Euler sequence."
     attrs(g)["units"]           = "t:[s]"
     attrs(g)["solver_tol"]      = SOLVER_TOL

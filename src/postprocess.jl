@@ -575,7 +575,7 @@ end
                               outer_rule::TetQuadRule = TET_QUAD_5PT,
                               ff_rule::TetQuadRule = TET_QUAD_5PT,
                               symmetrize::Bool = true,
-                              method::Symbol = :aim_bicgstab,
+                              method::Symbol = :aim_gmres,
                               pitch::Union{Float64,Nothing} = nothing,
                               padding::Integer = 4,
                               tol::Float64 = 1e-6,
@@ -609,9 +609,15 @@ Mixing the two forms, or supplying neither complete set, raises an
 # Solver selection
 
 `method` selects how the multi-RHS system is solved:
-- `:aim_bicgstab` — AIM FFT-MVP + Block BiCGSTAB (**default**). If `pitch`
-                    is not supplied it is set to `0.5 × mean_edge_length`.
-- `:aim_gmres`    — AIM FFT-MVP + Block GMRES (same pitch auto-detection).
+- `:aim_gmres`    — AIM FFT-MVP + Block GMRES (**default**). Same pitch
+                    auto-detection (`0.5 × mean_edge_length` if `pitch`
+                    is not supplied).  Monotone convergence and no
+                    breakdown on near-linearly-dependent RHS columns.
+- `:aim_bicgstab` — AIM FFT-MVP + Block BiCGSTAB. Typically fewer
+                    iterations than GMRES but can break down when the
+                    RHS block has near-linearly-dependent columns
+                    (observed at L ≥ 64 in paper-production pilots);
+                    use `:aim_gmres` in that regime.
 - `:dense`        — assemble `Z` and LU-factorize once, then reuse
                     across orientations. Only for small problems (`N ≲ 10³`).
 
@@ -642,7 +648,7 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    outer_rule::TetQuadRule = TET_QUAD_5PT,
                                    ff_rule::TetQuadRule = TET_QUAD_5PT,
                                    symmetrize::Bool = true,
-                                   method::Symbol = :aim_bicgstab,
+                                   method::Symbol = :aim_gmres,
                                    pitch::Union{Float64,Nothing} = nothing,
                                    padding::Integer = 4,
                                    tol::Float64 = 1e-6,

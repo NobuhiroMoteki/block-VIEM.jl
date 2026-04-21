@@ -80,7 +80,7 @@ function solve_one(p::GREParams, lc_value, m_p_xyz; wl_0=WL_PAPER, m_m=M_M_PAPER
         cas_results, D_block = solve_cas_v2_orientations(
             basis, euler_list;
             wl_0=wl_0, m_m=m_m, m_p=m_p_xyz,
-            method=:aim_bicgstab, tol=SOLVER_TOL, maxiter=MAXITER,
+            method=:aim_gmres, tol=SOLVER_TOL, maxiter=MAXITER,
             verbose=false, return_D=true,
             duffy_rule=duffy_reference_rule(DUFFY_ORDER),
             symmetrize=true,

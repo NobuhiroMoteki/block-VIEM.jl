@@ -24,8 +24,9 @@ so downstream analysis pipelines work with either without modification.
    equivalent problems.
 2. **AIM/FFT-accelerated block-Krylov solver.** The Adaptive Integral
    Method (AIM) computes matrix-vector products in O(N log N) via FFT.
-   Block BiCGSTAB / Block GMRES solve all particle orientations
-   simultaneously. AIM grid pitch is auto-detected from the mesh.
+   Block GMRES (default since v0.7.1) / Block BiCGSTAB solve all
+   particle orientations simultaneously. AIM grid pitch is auto-detected
+   from the mesh.
 3. **Multi-orientation batch solve.** Supports deterministic uniform Euler
    angle grids on SO(3) (`N_alpha` x `N_beta` x `N_gamma`), identical to
    block-DDA_Py. **Spheroid mode** (`ab_ratio=1`, `beta=0`) solves only
@@ -226,14 +227,18 @@ See [`solve_cas_v2_orientations`](src/postprocess.jl) docstring.
 
 ### Solver selection
 
-The default solver is **AIM + Block BiCGSTAB** (`method = :aim_bicgstab`),
-which uses FFT-accelerated matrix-vector products (O(N log N) per
-iteration) and solves all orientations simultaneously via a block-Krylov
-iteration.  The AIM grid pitch is auto-detected from the mesh
+The default solver (since v0.7.1) is **AIM + Block GMRES**
+(`method = :aim_gmres`), which uses FFT-accelerated matrix-vector
+products (O(N log N) per iteration) and solves all orientations
+simultaneously via a block-Krylov iteration.  GMRES is chosen over
+BiCGSTAB as the default because it is monotone-convergent and robust
+against near-linearly-dependent RHS columns (which can break BiCGSTAB
+at large block sizes, observed at L ≥ 64 in paper-production pilots).
+The AIM grid pitch is auto-detected from the mesh
 (`0.5 * mean_edge_length`) when not supplied explicitly.
 
 ```julia
-# Default: AIM + Block BiCGSTAB (pitch auto-detected)
+# Default: AIM + Block GMRES (pitch auto-detected)
 results = solve_cas_v2_orientations(
     basis, euler_list;
     wl_0 = 0.638, m_m = 1.0, m_p = 1.5 + 0.01im,
@@ -243,7 +248,7 @@ results = solve_cas_v2_orientations(
 results = solve_cas_v2_orientations(
     basis, euler_list;
     wl_0 = 0.638, m_m = 1.0, m_p = 1.5 + 0.01im,
-    method  = :aim_gmres,     # or :aim_bicgstab (default), :dense
+    method  = :aim_bicgstab,  # :aim_gmres (default), :aim_bicgstab, :dense
     pitch   = 0.01,           # AIM grid pitch [μm] (auto if omitted)
     padding = 4,
     tol     = 1e-8,
@@ -253,8 +258,10 @@ results = solve_cas_v2_orientations(
 
 Available methods:
 
-- **`:aim_bicgstab`** (default) — Block BiCGSTAB (Tadano-Sakurai-Kuramashi 2009).
-- **`:aim_gmres`** — unrestarted Block GMRES (Simoncini-Szyld 1996).
+- **`:aim_gmres`** (default, v0.7.1+) — unrestarted Block GMRES (Simoncini-Szyld 1996).
+  Monotone; robust against near-linearly-dependent RHS columns.
+- **`:aim_bicgstab`** — Block BiCGSTAB (Tadano-Sakurai-Kuramashi 2009).
+  Typically fewer iterations than GMRES but can break down on degenerate RHS blocks.
 - **`:dense`** — assemble Z and LU-factorize. Only for small problems (N < 10^3).
 
 Both block solvers are also exposed directly as
@@ -415,7 +422,7 @@ julia --project=. viem_results/check_h5.jl
 
 `run_viem.jl` is the Julia equivalent of block-DDA_Py's `run_dda.py`:
 
-- Uses **AIM + Block BiCGSTAB** by default (O(N log N) per iteration)
+- Uses **AIM + Block GMRES** by default (since v0.7.1; O(N log N) per iteration)
 - Automatically detects **spheroid mode** (`ab_ratio == 1` and
   `gre_beta == 0`): solves only `N_beta` orientations at α = 0, then
   fills the full `(N_alpha × N_beta × N_gamma)` grid analytically via

@@ -34,7 +34,7 @@ include(joinpath(dirname(@__DIR__), "test", "mie_reference.jl"))
 # ══════════════════════════════════════════════════════════════════════════════
 const RNG_SEED      = 12345       # GRE shape random seed (matches run_dda.py)
 const SOLVER_TOL    = 1e-6        # solver tolerance
-const SOLVER_METHOD = :aim_bicgstab  # :aim_bicgstab | :aim_gmres | :dense
+const SOLVER_METHOD = :aim_gmres     # :aim_gmres (default, v0.7.1+) | :aim_bicgstab | :dense
 const MAXITER       = 400         # max Krylov iterations per try
 const N_PW          = 10          # mesh: points per wavelength
 const DUFFY_ORDER   = 5           # Duffy quadrature order
