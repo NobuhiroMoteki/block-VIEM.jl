@@ -440,6 +440,105 @@ The HDF5 layout (`/target/simulated_data/...`) with datasets
 block-DDA_Py, so downstream consumers (e.g. `build_spheroid_lut.py`)
 can read either DDA or VIEM output without modification.
 
+## Paper-production workflow (v0.7.0)
+
+[viem_results/paper/](viem_results/paper/) contains a self-contained
+scaffold for running publication-quality sweeps against a fixed
+calculation matrix (4 shapes × 3 materials × up to 4 sizes, fixed
+wavelength λ₀ = 0.638 μm, vacuum background). See
+[CLAUDE.md](CLAUDE.md) for the full specification.
+
+### Shape × material templates
+
+Twelve short generators write block-DDA_Py-compatible sweep HDF5s via
+a shared schema helper [viem_results/paper/_common.jl](viem_results/paper/_common.jl):
+
+```bash
+# sphere / oblate / gre / doublet × n15 / n317 / Au
+julia --project=. viem_results/paper/sphere_n317.jl
+julia --project=. viem_results/paper/doublet_Au.jl
+# ... etc.
+```
+
+Materials (`n_p @ λ=0.638 μm`) are hard-coded as `N_LOW = 1.5+0.01i`,
+`N_HIGH = 3.17+0.16i`, `N_AU = 0.17525+3.4830i` (Johnson & Christy 1972).
+The `doublet` shape is a two-sphere cluster with monomer radius
+`R = a_eq / 2^(1/3)`, axis-direction surface gap `g = 0.1 R`, axis aligned
+with particle z so that `run_viem.jl`'s spheroid α-expansion applies
+directly (cylindrical symmetry).
+
+### Pre-run cost estimator
+
+[viem_results/estimate_cost.jl](viem_results/estimate_cost.jl) reads the
+same HDF5 and prints estimated `N_DOF`, peak RSS, setup + solve times
+per shape slot. It flags slots exceeding 24 h of wall time or 90 % of
+`MemAvailable`, to help decide whether to downsize a sweep before
+launching `run_viem.jl`:
+
+```bash
+julia --project=. -t auto viem_results/estimate_cost.jl \
+    viem_results/paper/sphere_n317.hdf5
+```
+
+Calibrated against empirical phase-A + pilot-run data; tune per-DOF
+constants via `T_SETUP_MS_DOF`, `T_ITER_MS_DOF`, `RSS_KB_PER_DOF`,
+`N_ITER_EST` environment variables.
+
+### Block-Krylov RHS-scaling diagnostic
+
+[viem_results/paper/run_rhs_scaling.jl](viem_results/paper/run_rhs_scaling.jl)
+measures, per shape slot, **both** `block_bicgstab` and `block_gmres`
+at `L ∈ {1, 2, 4, 8, 16, 32}` RHS using the shared worst-case mesh +
+projection + mass:
+
+```bash
+julia --project=. -t auto viem_results/paper/run_rhs_scaling.jl \
+    viem_results/paper/gre_n317.hdf5
+```
+
+Results are written to `/target/rhs_scaling/{bicgstab,gmres}/` with
+datasets `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s`
+(shape `(nL, N_rv, N_bc, N_ab, N_bt)`). The diagnostic relies on the
+`solve_cas_v2_orientations(return_solve_info=true)` API extension
+introduced in this release.
+
+### MSTM exact reference for doublet
+
+[viem_results/paper/run_mstm_reference.jl](viem_results/paper/run_mstm_reference.jl)
+runs in the `MSTMforCAS.jl` environment and consumes a doublet sweep
+HDF5 to produce a separate `mstm_<basename>.hdf5` indexed by
+`(a_eq, β)` with the numerically exact CAS-v2 observables at
+`truncation_order = 15` (converged for both dielectric and plasmonic
+monomers, see `benchmarks/cas_v2/doublet_mstm/`):
+
+```bash
+julia --project=/path/to/MSTMforCAS.jl \
+    viem_results/paper/run_mstm_reference.jl \
+    viem_results/paper/doublet_n317.hdf5
+# → viem_results/paper/mstm_doublet_n317.hdf5
+```
+
+### lc-convergence study
+
+[viem_results/paper/run_lc_convergence.jl](viem_results/paper/run_lc_convergence.jl)
+sweeps five mesh-size factors (1.5, 1.0, 0.7, 0.5, 0.35 × `adaptive_lc`)
+for one `(shape, material)` at `a_eq = 0.1 μm`, single orientation, and
+writes `convergence_<shape>_<material>.hdf5`:
+
+```bash
+julia --project=. -t auto viem_results/paper/run_lc_convergence.jl \
+    sphere n317
+```
+
+### End-to-end pipeline
+
+```text
+create_h5 (template)  →  estimate_cost  →  run_viem  →  check_h5
+                                       ↘  run_rhs_scaling
+                                       ↘  run_mstm_reference (doublet only)
+                                       ↘  run_lc_convergence (per (shape, material))
+```
+
 ## Benchmark: 2-sphere doublet CAS-v2 vs MSTM
 
 Cross-validation against [MSTMforCAS.jl](https://github.com/MOTEKI-LAB/MSTMforCAS.jl)
