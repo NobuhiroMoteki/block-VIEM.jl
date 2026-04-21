@@ -7,7 +7,7 @@ S_fw_phi for an axisymmetric particle.
 
 Usage (from inside the block-DDA_Py repo so that bl_dda can be imported):
 
-    cd ~/Python_in_WSL/block-DDA_Py
+    cd ~/Python/block-DDA_Py
     .venv/bin/python /path/to/run_dda_spheroid_single.py
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import sys
 import numpy as np
 
 # Make sure we can import block-DDA_Py regardless of cwd.
-_BLOCK_DDA_ROOT = os.path.expanduser("~/Python_in_WSL/block-DDA_Py")
+_BLOCK_DDA_ROOT = os.path.expanduser("~/Python/block-DDA_Py")
 if _BLOCK_DDA_ROOT not in sys.path:
     sys.path.insert(0, _BLOCK_DDA_ROOT)
 

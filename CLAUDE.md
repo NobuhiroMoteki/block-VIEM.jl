@@ -129,4 +129,4 @@ HDF5 スイープを起動する前に必ず:
 - `s00466-009-0424-1.pdf` (Mousavi & Sukumar 2010、一般化 Duffy 変換)— `.claude/reference/`
 - [docs/theory_note.tex](docs/theory_note.tex) / `docs/theory_note.pdf`（本ソルバの理論ノート、セクション番号で参照）
 - [README.md](README.md)（実装方針、ベンチマーク結果、block-DDA_Py との定義対応）
-- `block-DDA_Py` — `~/Python_in_WSL/block-DDA_Py`（出力フォーマット互換の参照元）
+- `block-DDA_Py` — `~/Python/block-DDA_Py`（出力フォーマット互換の参照元、姉妹プロジェクト [CLAUDE.md](file:///home/moteki/Python/block-DDA_Py/CLAUDE.md)）

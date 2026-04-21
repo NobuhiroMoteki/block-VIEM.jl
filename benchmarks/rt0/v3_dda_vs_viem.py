@@ -20,11 +20,11 @@ Output is human-readable and JSON for downstream comparison with
 the VIEM Julia results.
 
 Run with the block-DDA_Py virtualenv:
-   ~/Python_in_WSL/block-DDA_Py/.venv/bin/python \\
+   ~/Python/block-DDA_Py/.venv/bin/python \\
        benchmarks/rt0/v3_dda_vs_viem.py
 """
 import sys, os, json, time
-sys.path.insert(0, '/home/moteki/Python_in_WSL/block-DDA_Py')
+sys.path.insert(0, '/home/moteki/Python/block-DDA_Py')
 
 import numpy as np
 

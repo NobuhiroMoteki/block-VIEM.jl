@@ -3,7 +3,7 @@ the coarse-grid deformation field s_coarse so that block-VIEM.jl can
 reconstruct the identical shape for cross-validation.
 
 Usage:
-    cd ~/Python_in_WSL/block-DDA_Py
+    cd ~/Python/block-DDA_Py
     .venv/bin/python <path>/run_dda_gre.py
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import os
 import sys
 import numpy as np
 
-_BLOCK_DDA_ROOT = os.path.expanduser("~/Python_in_WSL/block-DDA_Py")
+_BLOCK_DDA_ROOT = os.path.expanduser("~/Python/block-DDA_Py")
 if _BLOCK_DDA_ROOT not in sys.path:
     sys.path.insert(0, _BLOCK_DDA_ROOT)
 

@@ -7,8 +7,8 @@ Mie validation, at several dpl values to match the VIEM mesh N.
 Usage: cd ~/Julia/block-VIEM.jl && python3 test/compare_dda_viem.py
 """
 import sys
-sys.path.insert(0, '/home/moteki/Python_in_WSL/block-DDA_Py')
-sys.path.insert(0, '/home/moteki/Python_in_WSL/MieScat_Py')
+sys.path.insert(0, '/home/moteki/Python/block-DDA_Py')
+sys.path.insert(0, '/home/moteki/Python/MieScat_Py')
 
 import numpy as np
 from miescat import miescat

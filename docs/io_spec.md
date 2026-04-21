@@ -4,7 +4,7 @@ This document mirrors the input/output conventions of
 [`block-DDA_Py`](https://github.com/NobuhiroMoteki/block-DDA_Py) so that
 BlockVIEM.jl can be used as a drop-in alternative for CAS-v2 simulation
 campaigns. References below cite the upstream README and `docs/theory_note.pdf`
-of `block-DDA_Py` (commit pinned in `~/Python_in_WSL/block-DDA_Py`).
+of `block-DDA_Py` (commit pinned in `~/Python/block-DDA_Py`).
 
 The unit system is SI throughout, with the convention that all length-like
 inputs share a common length unit chosen by the user (e.g., μm). The harmonic
@@ -85,7 +85,7 @@ HDF5 layout (`S_fw_s_re`, `S_fw_s_im`, ...).
 - p-polarization: incident `Ê` in scattering plane
 
 These match the CAS-v2 definitions in
-`~/Python_in_WSL/block-DDA_Py/docs/theory_note.pdf` (Sec. 7).
+`~/Python/block-DDA_Py/docs/theory_note.pdf` (Sec. 7).
 
 ---
 
