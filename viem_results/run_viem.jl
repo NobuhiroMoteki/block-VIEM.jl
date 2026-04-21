@@ -18,7 +18,7 @@
 # The -t auto flag is recommended to enable multi-threaded assembly.
 
 using BlockVIEM
-using BlockVIEM: Vec3
+using BlockVIEM: Vec3, SphereAggregate, mesh_sphere_aggregate
 using StaticArrays
 using LinearAlgebra
 using HDF5
@@ -82,18 +82,57 @@ function generate_euler_grid(N_alpha::Int, N_beta::Int, N_gamma::Int)
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Spheroid detection
+#  Spheroid (axial-symmetry) detection
 # ══════════════════════════════════════════════════════════════════════════════
-_is_spheroid(ab_ratio, gre_beta) = ab_ratio == 1.0 && gre_beta == 0.0
+# The α-expansion in `run_viem_spheroid` works for any particle that is
+# cylindrically symmetric about its z-axis: GRE family with ab=1, β=0 OR
+# a doublet placed along particle z (CLAUDE.md §2).
+_is_spheroid(shape_kind, ab_ratio, gre_beta) =
+    shape_kind == "doublet" || (ab_ratio == 1.0 && gre_beta == 0.0)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Build mesh + SWG basis for a GRE particle
+#  Doublet aggregate aligned along particle z-axis
+#  Equal-radius monomers, gap = 0.1 R between surfaces (CLAUDE.md §2),
+#  doublet axis = particle z so the spheroid α-expansion applies.
 # ══════════════════════════════════════════════════════════════════════════════
-function build_particle(r_v_base, bc_ratio, ab_ratio, gre_beta, wl_0, m_p_xyz)
+function _doublet_along_z(R::Real)
+    gap = 0.1 * R                   # surface-to-surface gap (CLAUDE.md)
+    step = 2.0 * R + gap
+    centers = zeros(Float64, 3, 2)
+    centers[3, 1] = -step / 2
+    centers[3, 2] = +step / 2
+    radii = Float64[R, R]
+    metadata = Dict{String,Any}(
+        "source"  => "run_viem.jl::_doublet_along_z",
+        "axis"    => "z",
+        "R"       => Float64(R),
+        "gap"     => Float64(gap),
+    )
+    return SphereAggregate(centers, radii; metadata=metadata)
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Build mesh + SWG basis (dispatches on shape_kind)
+# ══════════════════════════════════════════════════════════════════════════════
+function build_particle(shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
+                        wl_0, m_p_xyz)
     rng = Random.MersenneTwister(RNG_SEED)
-    p = GREParams(r_v_base, bc_ratio, ab_ratio, gre_beta)
     m_p_max = maximum(abs.(m_p_xyz))
-    mesh, r_ve = gre_mesh(p, rng; wl_0=wl_0, m_p_max=m_p_max, N_pw=N_PW)
+    if shape_kind == "doublet"
+        # a_eq = r_v_base; monomer radius R = a_eq / 2^(1/3) (CLAUDE.md §2)
+        R = Float64(r_v_base) / 2.0^(1/3)
+        agg = _doublet_along_z(R)
+        mesh, _msh = mesh_sphere_aggregate(agg;
+                                           wl_0=wl_0, m_p_max=m_p_max, N_pw=N_PW)
+        # r_ve from actual discretised volume (small deviation from a_eq
+        # due to mesh truncation of the sphere surfaces)
+        V = total_volume(mesh)
+        r_ve = (3 * V / (4π))^(1/3)
+    else
+        # GRE family
+        p = GREParams(r_v_base, bc_ratio, ab_ratio, gre_beta)
+        mesh, r_ve = gre_mesh(p, rng; wl_0=wl_0, m_p_max=m_p_max, N_pw=N_PW)
+    end
     basis = build_swg_basis(mesh; include_boundary_faces=true)
     return mesh, basis, r_ve
 end
@@ -260,6 +299,9 @@ function main()
         N_beta  = Int(read_attribute(t, "N_beta_ori"))
         N_gamma = Int(read_attribute(t, "N_gamma_ori"))
         num_orientations = N_alpha * N_beta * N_gamma
+        # shape_kind: "gre" (default for legacy files) or "doublet"
+        shape_kind = haskey(attributes(t), "shape_kind") ?
+            String(read_attribute(t, "shape_kind")) : "gre"
 
         wl_m_m_pairs  = read(t["wl_m_m_pairs"])     # (N_pairs, 2) in Julia
         m_p_xyz_list  = read(t["m_p_xyz_list"])      # (N_m_p, 3)
@@ -278,8 +320,8 @@ function main()
         # Full Euler angle grid
         euler_angles = generate_euler_grid(N_alpha, N_beta, N_gamma)
 
-        _log("Sweep: $(N_pairs) wl-pairs × $(N_m_p) m_p × " *
-             "$(N_rv) r_v × $(N_bc) bc × $(N_ab) ab × $(N_bt) β")
+        _log("Sweep: shape_kind=$shape_kind  $(N_pairs) wl-pairs × " *
+             "$(N_m_p) m_p × $(N_rv) r_v × $(N_bc) bc × $(N_ab) ab × $(N_bt) β")
         _log("Orientation grid: N_α=$N_alpha, N_β=$N_beta, N_γ=$N_gamma " *
              "(L=$num_orientations)")
 
@@ -307,7 +349,7 @@ function main()
             gre_beta  = gre_beta_list[i_bt]
 
             shape_idx = (i_rv, i_bc, i_ab, i_bt)
-            spheroid_mode = _is_spheroid(ab_ratio, gre_beta)
+            spheroid_mode = _is_spheroid(shape_kind, ab_ratio, gre_beta)
 
             # Write r_ve (geometric, same for all wl/m_p for this shape)
             sd["r_ve"][shape_idx...] = r_v_base
@@ -322,7 +364,7 @@ function main()
                 m_p_worst_xyz = fill(ComplexF64(m_p_max_global), 3)
                 t_mesh = @elapsed begin
                     shape_mesh, shape_basis, shape_r_ve = build_particle(
-                        r_v_base, bc_ratio, ab_ratio, gre_beta,
+                        shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
                         wl_0_min_sweep, m_p_worst_xyz)
                 end
                 h_bar_shape = mean_edge_length(shape_mesh)
@@ -377,7 +419,8 @@ function main()
                 else
                     t_mesh = @elapsed begin
                         mesh, basis, r_ve = build_particle(
-                            r_v_base, bc_ratio, ab_ratio, gre_beta, wl_0, m_p_xyz)
+                            shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
+                            wl_0, m_p_xyz)
                     end
                     h_bar = mean_edge_length(mesh)
                     _log("  mesh: $(n_tets(mesh)) tets, $(n_basis(basis)) DOFs, " *

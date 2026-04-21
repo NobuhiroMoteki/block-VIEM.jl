@@ -649,6 +649,7 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    maxiter::Integer = 200,
                                    verbose::Bool = false,
                                    return_D::Bool = false,
+                                   return_solve_info::Bool = false,
                                    projection::Union{AIMProjection,Nothing} = nothing,
                                    mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing)
     k0_c, eps_p_c, eps_bg_c = _resolve_physical_inputs(wl_0, m_m, m_p,
@@ -660,6 +661,9 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
     L = length(orientations)
 
     local D_block::Matrix{ComplexF64}
+    # Solver diagnostics — populated by both branches; the dense branch
+    # returns sentinel values since LU has no iteration count.
+    solve_info = (iterations = 0, residual_norm = 0.0, converged = true)
 
     if method === :dense
         Z = assemble_impedance_matrix(basis; k0 = k0_c, eps_p = eps_p_c,
@@ -707,6 +711,9 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
         res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
                            verbose = verbose)
         D_block = res.X
+        solve_info = (iterations    = res.iterations,
+                      residual_norm = res.residual_norm,
+                      converged     = res.converged)
         verbose && @info "solve_cas_v2_orientations (AIM block Krylov)" method =
             method iterations = res.iterations residual = res.residual_norm
     else
@@ -721,5 +728,13 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                              k0 = k0_c, eps_p = eps_p_c,
                                              eps_bg = eps_bg_c, rule = ff_rule)
     end
-    return return_D ? (results, D_block) : results
+    if return_D && return_solve_info
+        return results, D_block, solve_info
+    elseif return_solve_info
+        return results, solve_info
+    elseif return_D
+        return results, D_block
+    else
+        return results
+    end
 end

@@ -210,9 +210,12 @@ h5open(filename, "r") do f
                 alpha_d, beta_d, gamma_d)
         @printf("  C_abs      = %.4e  um^2\n", C_abs[I_ORI])
         @printf("  C_ext      = %.4e  um^2\n", C_ext[I_ORI])
-        @printf("  S_fw_theta = %.4g  um\n", S_fw_th[I_ORI])
-        @printf("  S_fw_phi   = %.4g  um\n", S_fw_ph[I_ORI])
-        @printf("  S_bk_OCBS  = %.4g  um\n", S_bk[I_ORI])
+        @printf("  S_fw_theta = %.4g %+.4gim  um\n",
+                real(S_fw_th[I_ORI]), imag(S_fw_th[I_ORI]))
+        @printf("  S_fw_phi   = %.4g %+.4gim  um\n",
+                real(S_fw_ph[I_ORI]), imag(S_fw_ph[I_ORI]))
+        @printf("  S_bk_OCBS  = %.4g %+.4gim  um\n",
+                real(S_bk[I_ORI]), imag(S_bk[I_ORI]))
     end
 
     # ── Mie reference ────────────────────────────────────────────────────
@@ -224,8 +227,10 @@ h5open(filename, "r") do f
     println("\n=== Mie reference (volume-equivalent sphere) ===")
     @printf("  C_abs_mie       = %.4e um^2\n", C_abs_mie)
     @printf("  C_ext_mie       = %.4e um^2\n", C_ext_mie)
-    @printf("  S_fw_mean_mie   = %.4g\n", S_fw_mean_mie)
-    @printf("  S_bk_mie        = %.4g\n", S_bk_mie)
+    @printf("  S_fw_mean_mie   = %.4g %+.4gim\n",
+            real(S_fw_mean_mie), imag(S_fw_mean_mie))
+    @printf("  S_bk_mie        = %.4g %+.4gim\n",
+            real(S_bk_mie), imag(S_bk_mie))
 
     # ── VIEM vs Mie comparison ───────────────────────────────────────────
     println("\n=== VIEM (orientation mean) vs Mie ===")
