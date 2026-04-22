@@ -92,6 +92,8 @@ HDF5 スイープを起動する前に必ず:
   - `gre_n15.hdf5`, `gre_n317.hdf5`, `gre_Au.hdf5`
   - lc 収束: `convergence_{shape}_{material}.hdf5`
 - 既存 HDF5 の C_ext ≠ 0 エントリは `run_viem.jl` の再計算スキップ機能に従い中断再開可能
+- **`/target/cost/` グループで end-to-end cost を per-slot 記録（block-DDA_Py 側と対称、v0.7.3+）**。[viem_results/paper/_common.jl](viem_results/paper/_common.jl) の `create_paper_h5` が 11 dataset（`t_build_s`, `t_setup_s`, `t_solve_s`, `t_total_s`, `peak_rss_bytes`, `n_tet`, `n_dof`, `mean_edge_length`, `iters`, `converged`, `solver_err`）を shape_cond 次元で作成し、[run_viem.jl](viem_results/run_viem.jl) が per-slot で埋める。peak RSS は [viem_results/rss_monitor.jl](viem_results/rss_monitor.jl) の daemon-task サンプラ（`/proc/self/status:VmRSS` を 0.2s 間隔でポーリング、`reset!` で per-slot ベースラインを切り替え）経由で取得。DDA 側 ([~/Python/block-DDA_Py/utils/rss_monitor.py](file:///home/moteki/Python/block-DDA_Py/utils/rss_monitor.py)) と `/target/cost/` の 8 フィールド（時間・peak RSS・iters・converged・solver_err）は bit-for-bit 一致、残り 3 つは VIEM 側名称 (`n_tet`/`n_dof`/`mean_edge_length`) で DDA の (`n_cuboid`/`n_occ`/`lattice_lf`) と 1:1 対応。lc 収束 HDF5 の `lc_convergence/` サブグループ、RHS-scaling の `/target/rhs_scaling/{bicgstab,gmres}/` サブグループにも同じ 8 フィールド（時間・peak RSS・iters・converged 等）を書き込む
+- 後方互換: `/target/cost/` を持たない古い HDF5 は `run_viem.jl` 起動時にエラーで拒否。`create_paper_h5` で再生成すれば cost group が自動付与される
 - 多配向 block-Krylov の **反復数 と 1 配向あたり end-to-end 所要時間** は別スクリプト [viem_results/paper/run_rhs_scaling.jl](viem_results/paper/run_rhs_scaling.jl) で診断:
   - RHS 数スイープ `L = 1, 2, 4, 8, 16, 32, 64, 128`（2 のべき乗、計 8 点で iter 数のスケーリングを解像）
   - **2 ソルバを同時計測**: `block-BiCGSTAB` (`:aim_bicgstab`) と `block-GMRES` (`:aim_gmres`) を同じ shape slot, 同じメッシュ + projection + mass で評価

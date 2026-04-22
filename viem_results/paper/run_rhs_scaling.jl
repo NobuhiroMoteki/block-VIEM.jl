@@ -34,6 +34,9 @@ using Printf
 using Random
 using Dates
 
+include(joinpath(dirname(@__DIR__), "rss_monitor.jl"))
+using .RSSMonitor
+
 # ──────────────────────────────────────────────────────────────────────
 #  Settings (mirror viem_results/run_viem.jl)
 # ──────────────────────────────────────────────────────────────────────
@@ -99,10 +102,11 @@ end
 #  Per-(shape, method, L) measurement
 # ──────────────────────────────────────────────────────────────────────
 function measure_one(basis, mesh, projection, mass, method_sym, L,
-                     wl_0, m_m, m_p_xyz)
+                     wl_0, m_m, m_p_xyz, mon::RSSMonitor.Monitor)
     eulers = pick_orientations(L)
     pitch  = AIM_PITCH_RATIO * mean_edge_length(mesh)
 
+    RSSMonitor.reset!(mon)
     t0 = time_ns()
     _results, solve_info = solve_cas_v2_orientations(
         basis, eulers;
@@ -115,13 +119,15 @@ function measure_one(basis, mesh, projection, mass, method_sym, L,
         pitch=pitch, padding=AIM_PADDING,
         duffy_rule=duffy_reference_rule(DUFFY_ORDER),
         symmetrize=true)
-    t_total = (time_ns() - t0) / 1e9
+    t_total  = (time_ns() - t0) / 1e9
+    peak_rss = RSSMonitor.peak_bytes(mon)
 
     return (
         iters         = solve_info.iterations,
         converged     = solve_info.converged,
         t_total       = t_total,
         t_per_orient  = t_total / L,
+        peak_rss      = peak_rss,
     )
 end
 
@@ -155,6 +161,7 @@ function write_rhs_scaling(t, per_method, n_dof_arr, n_tet_arr)
         write_dataset(sg, "converged",               m.conv_arr)
         write_dataset(sg, "t_total_s",               m.t_total_arr)
         write_dataset(sg, "t_end2end_per_orient_s",  m.t_per_arr)
+        write_dataset(sg, "peak_rss_bytes",          m.peak_rss_arr)
     end
 end
 
@@ -213,12 +220,17 @@ function main()
 
         # Per-method storage (one tuple of arrays per (subgroup_name, method_sym))
         per_method = [(name, (
-            method_sym  = sym,
-            iters_arr   = zeros(Int,     nL, n_rv, n_bc, n_ab, n_bt),
-            conv_arr    = zeros(Int,     nL, n_rv, n_bc, n_ab, n_bt),
-            t_total_arr = zeros(Float64, nL, n_rv, n_bc, n_ab, n_bt),
-            t_per_arr   = zeros(Float64, nL, n_rv, n_bc, n_ab, n_bt),
+            method_sym    = sym,
+            iters_arr     = zeros(Int,     nL, n_rv, n_bc, n_ab, n_bt),
+            conv_arr      = zeros(Int,     nL, n_rv, n_bc, n_ab, n_bt),
+            t_total_arr   = zeros(Float64, nL, n_rv, n_bc, n_ab, n_bt),
+            t_per_arr     = zeros(Float64, nL, n_rv, n_bc, n_ab, n_bt),
+            peak_rss_arr  = zeros(Int64,   nL, n_rv, n_bc, n_ab, n_bt),
         )) for (name, sym) in METHODS]
+
+        # Peak-RSS sampler shared across all (shape, method, L) measurements.
+        mon = RSSMonitor.Monitor(0.2)
+        RSSMonitor.start!(mon)
 
         for i_rv in 1:n_rv, i_bc in 1:n_bc, i_ab in 1:n_ab, i_bt in 1:n_bt
             r_v = r_v_list[i_rv]
@@ -248,18 +260,21 @@ function main()
                 for (iL, L) in enumerate(L_LIST)
                     m = measure_one(basis, mesh, projection, mass,
                                     m_arrays.method_sym,
-                                    L, wl_0_op, m_m_op, m_p_op)
-                    m_arrays.iters_arr[iL,i_rv,i_bc,i_ab,i_bt]   = m.iters
-                    m_arrays.conv_arr[iL,i_rv,i_bc,i_ab,i_bt]    = m.converged ? 1 : 0
-                    m_arrays.t_total_arr[iL,i_rv,i_bc,i_ab,i_bt] = m.t_total
-                    m_arrays.t_per_arr[iL,i_rv,i_bc,i_ab,i_bt]   = m.t_per_orient
+                                    L, wl_0_op, m_m_op, m_p_op, mon)
+                    m_arrays.iters_arr[iL,i_rv,i_bc,i_ab,i_bt]    = m.iters
+                    m_arrays.conv_arr[iL,i_rv,i_bc,i_ab,i_bt]     = m.converged ? 1 : 0
+                    m_arrays.t_total_arr[iL,i_rv,i_bc,i_ab,i_bt]  = m.t_total
+                    m_arrays.t_per_arr[iL,i_rv,i_bc,i_ab,i_bt]    = m.t_per_orient
+                    m_arrays.peak_rss_arr[iL,i_rv,i_bc,i_ab,i_bt] = Int64(m.peak_rss)
                     conv_str = m.converged ? "✓" : "✗"
-                    _log(@sprintf("    L=%-3d  iters=%-4d  %s  t_total=%7.2fs  t/ori=%7.3fs",
-                                  L, m.iters, conv_str, m.t_total, m.t_per_orient))
+                    _log(@sprintf("    L=%-3d  iters=%-4d  %s  t_total=%7.2fs  t/ori=%7.3fs  peak=%6.2f GB",
+                                  L, m.iters, conv_str, m.t_total, m.t_per_orient,
+                                  m.peak_rss / 2^30))
                     flush(stdout)
                 end
             end
         end
+        RSSMonitor.stop!(mon)
 
         write_rhs_scaling(t, per_method, n_dof_arr, n_tet_arr)
         _log("─"^70)

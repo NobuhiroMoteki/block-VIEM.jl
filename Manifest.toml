@@ -34,7 +34,7 @@ version = "1.11.0"
 deps = ["FFTW", "Gmsh", "HDF5", "IterativeSolvers", "JSON3", "Krylov", "LinearAlgebra", "Printf", "Random", "SparseArrays", "SpecialFunctions", "StaticArrays"]
 path = "."
 uuid = "c6c5da73-2b17-47f9-a04b-9516bf8d71c0"
-version = "0.7.2"
+version = "0.7.3"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]

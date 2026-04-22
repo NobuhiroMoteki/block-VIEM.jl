@@ -183,6 +183,46 @@ function create_paper_h5(filename::AbstractString;
            "Mie S(0) of volume-equivalent sphere [um]")
         ds(sd, "S_bk_OCBS_mie",   shape_cond, ComplexF64,
            "Mie S(180) of volume-equivalent sphere [um]")
+
+        # ── /target/cost/ ───────────────────────────────────────────────
+        # Per-slot cost + solver diagnostics. Schema is bit-for-bit
+        # symmetric with block-DDA_Py's `/target/cost/`, modulo three
+        # VIEM-specific renames for physically corresponding fields:
+        #   DDA  n_cuboid    ↔  VIEM  n_tet
+        #   DDA  n_occ       ↔  VIEM  n_dof
+        #   DDA  lattice_lf  ↔  VIEM  mean_edge_length
+        # The other eight fields (t_*_s, peak_rss_bytes, iters,
+        # converged, solver_err) match the DDA names exactly so
+        # end-to-end cost comparisons reduce to a direct HDF5 lookup.
+        cost = create_group(grp, "cost")
+        attrs(cost)["description"] = "per-slot cost and solver diagnostics"
+        attrs(cost)["units"]       =
+            "t_*:[s], peak_rss_bytes:[B], mean_edge_length:[um], solver_err:[1]"
+        ds(cost, "t_build_s",        shape_cond, Float64,
+           "wall time: tet mesh + SWG basis build [s]")
+        ds(cost, "t_setup_s",        shape_cond, Float64,
+           "wall time: AIM grid + projection + mass-matrix assembly [s]")
+        ds(cost, "t_solve_s",        shape_cond, Float64,
+           "wall time: block-Krylov iterative solve (no mesh/setup) [s]")
+        ds(cost, "t_total_s",        shape_cond, Float64,
+           "end-to-end wall time (build + setup + solve + observables) [s]")
+        ds(cost, "peak_rss_bytes",   shape_cond, Int64,
+           "peak resident set size observed during this slot [bytes]")
+        ds(cost, "n_tet",            shape_cond, Int64,
+           "number of tetrahedra in the VIEM mesh " *
+           "(corresponds to block-DDA_Py's n_cuboid)")
+        ds(cost, "n_dof",            shape_cond, Int64,
+           "number of SWG basis functions (unknowns) " *
+           "(corresponds to block-DDA_Py's n_occ)")
+        ds(cost, "mean_edge_length", shape_cond, Float64,
+           "tet-mesh mean edge length h̄ [um] " *
+           "(corresponds to block-DDA_Py's lattice_lf)")
+        ds(cost, "iters",            shape_cond, Int64,
+           "block-Krylov outer iteration count")
+        ds(cost, "converged",        shape_cond, Int8,
+           "1 if block-Krylov reached tol, else 0")
+        ds(cost, "solver_err",       shape_cond, Float64,
+           "final relative residual ‖B − A·X‖_F / ‖B‖_F")
     end
 
     println("Created $filename")

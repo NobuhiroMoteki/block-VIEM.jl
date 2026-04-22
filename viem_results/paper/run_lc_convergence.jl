@@ -27,6 +27,8 @@ using Dates
 
 include(joinpath(@__DIR__, "_common.jl"))
 include(joinpath(dirname(@__DIR__), "..", "test", "mie_reference.jl"))
+include(joinpath(dirname(@__DIR__), "rss_monitor.jl"))
+using .RSSMonitor
 
 # ──────────────────────────────────────────────────────────────────────
 #  Settings (mirror viem_results/run_viem.jl)
@@ -62,26 +64,33 @@ end
 # ──────────────────────────────────────────────────────────────────────
 #  Per-lc-point solve
 # ──────────────────────────────────────────────────────────────────────
-function solve_one(p::GREParams, lc_value, m_p_xyz; wl_0=WL_PAPER, m_m=M_M_PAPER)
+function solve_one(p::GREParams, lc_value, m_p_xyz, mon::RSSMonitor.Monitor;
+                   wl_0=WL_PAPER, m_m=M_M_PAPER)
     rng = Random.MersenneTwister(RNG_SEED)
+    RSSMonitor.reset!(mon)
+    t0_total = time_ns()
 
-    t_setup = @elapsed begin
+    t_build = @elapsed begin
         mesh, r_ve = gre_mesh(p, rng; lc=lc_value)
         basis = build_swg_basis(mesh; include_boundary_faces=true)
-        h_bar = mean_edge_length(mesh)
-        pitch = AIM_PITCH_RATIO * h_bar
+    end
+    h_bar = mean_edge_length(mesh)
+    pitch = AIM_PITCH_RATIO * h_bar
+    t_setup = @elapsed begin
         grid       = aim_grid(basis.mesh; pitch=pitch, padding=AIM_PADDING)
         projection = build_aim_projection(basis, grid; poly_order=2, stencil=3)
         mass       = assemble_mass_matrix(basis)
     end
 
     euler_list = [SINGLE_ORIENT]
+    solve_info = (iterations = 0, converged = false, residual_norm = NaN)
+    local sr
     t_solve = @elapsed begin
-        cas_results, D_block = solve_cas_v2_orientations(
+        cas_results, D_block, solve_info = solve_cas_v2_orientations(
             basis, euler_list;
             wl_0=wl_0, m_m=m_m, m_p=m_p_xyz,
             method=:aim_gmres, tol=SOLVER_TOL, maxiter=MAXITER,
-            verbose=false, return_D=true,
+            verbose=false, return_D=true, return_solve_info=true,
             duffy_rule=duffy_reference_rule(DUFFY_ORDER),
             symmetrize=true,
             pitch=pitch, padding=AIM_PADDING,
@@ -96,14 +105,22 @@ function solve_one(p::GREParams, lc_value, m_p_xyz; wl_0=WL_PAPER, m_m=M_M_PAPER
                                 k0=k0, eps_p=eps_p, eps_bg=eps_bg,
                                 csca_method=:farfield)
     end
+    t_total = (time_ns() - t0_total) / 1e9
+    peak_rss = RSSMonitor.peak_bytes(mon)
 
     return (
         n_tet      = n_tets(mesh),
         n_dof      = n_basis(basis),
         r_ve       = r_ve,
         h_bar      = h_bar,
+        t_build    = t_build,
         t_setup    = t_setup,
         t_solve    = t_solve,
+        t_total    = t_total,
+        peak_rss   = peak_rss,
+        iters      = solve_info.iterations,
+        converged  = solve_info.converged,
+        solver_err = Float64(solve_info.residual_norm),
         C_abs      = sr.C_abs,
         C_ext      = sr.C_ext,
         C_sca      = sr.C_ext - sr.C_abs,
@@ -160,8 +177,16 @@ function write_convergence_h5(path, shape, material, m_p_xyz, p, results, mie)
         write_dataset(c, "n_tet",     Int.([r.n_tet for r in results]))
         write_dataset(c, "n_dof",     Int.([r.n_dof for r in results]))
         write_dataset(c, "r_ve",      Float64[r.r_ve   for r in results])
-        write_dataset(c, "t_setup",   Float64[r.t_setup for r in results])
-        write_dataset(c, "t_solve",   Float64[r.t_solve for r in results])
+        # Cost fields (names & units symmetric with /target/cost/ used
+        # by run_viem.jl / run_rhs_scaling.jl and block-DDA_Py).
+        write_dataset(c, "t_build_s",       Float64[r.t_build  for r in results])
+        write_dataset(c, "t_setup_s",       Float64[r.t_setup  for r in results])
+        write_dataset(c, "t_solve_s",       Float64[r.t_solve  for r in results])
+        write_dataset(c, "t_total_s",       Float64[r.t_total  for r in results])
+        write_dataset(c, "peak_rss_bytes",  Int64[Int64(r.peak_rss) for r in results])
+        write_dataset(c, "iters",           Int64[Int64(r.iters)    for r in results])
+        write_dataset(c, "converged",       Int8[Int8(r.converged ? 1 : 0) for r in results])
+        write_dataset(c, "solver_err",      Float64[r.solver_err for r in results])
         write_dataset(c, "C_abs",     Float64[r.C_abs   for r in results])
         write_dataset(c, "C_ext",     Float64[r.C_ext   for r in results])
         write_dataset(c, "C_sca",     Float64[r.C_sca   for r in results])
@@ -216,23 +241,31 @@ function main()
     println("  bc=$(sp.bc_ratio) ab=$(sp.ab_ratio) β_gre=$(sp.gre_beta)")
     @printf("  lc_base = %.5f μm  (adaptive)\n", lc_base)
     println("  factors = $LC_FACTORS")
-    println("─"^96)
-    @printf("%6s %10s %8s %8s %10s %10s %12s %12s\n",
+    println("─"^108)
+    @printf("%6s %10s %8s %8s %9s %9s %9s %8s %6s %12s %12s\n",
             "factor", "lc[μm]", "N_tet", "N_DOF",
-            "t_setup[s]", "t_solve[s]", "C_ext[μm²]", "C_abs[μm²]")
-    println("─"^96)
+            "t_build", "t_solve", "t_total", "RSS[GB]",
+            "iters", "C_ext[μm²]", "C_abs[μm²]")
+    println("─"^108)
 
+    mon = RSSMonitor.Monitor(0.2)
+    RSSMonitor.start!(mon)
     results = NamedTuple[]
-    for factor in LC_FACTORS
-        lc_val = factor * lc_base
-        r = solve_one(p, lc_val, m_p_xyz)
-        push!(results, r)
-        @printf("%6.2f %10.5f %8d %8d %10.1f %10.1f %12.4e %12.4e\n",
-                factor, lc_val, r.n_tet, r.n_dof,
-                r.t_setup, r.t_solve, r.C_ext, r.C_abs)
-        flush(stdout)
+    try
+        for factor in LC_FACTORS
+            lc_val = factor * lc_base
+            r = solve_one(p, lc_val, m_p_xyz, mon)
+            push!(results, r)
+            @printf("%6.2f %10.5f %8d %8d %9.1f %9.1f %9.1f %8.2f %6d %12.4e %12.4e\n",
+                    factor, lc_val, r.n_tet, r.n_dof,
+                    r.t_build, r.t_solve, r.t_total,
+                    r.peak_rss / 2^30, r.iters, r.C_ext, r.C_abs)
+            flush(stdout)
+        end
+    finally
+        RSSMonitor.stop!(mon)
     end
-    println("─"^96)
+    println("─"^108)
 
     mie = mie_ref(m_p_xyz)
     out = joinpath(@__DIR__, "convergence_$(shape)_$(material).hdf5")

@@ -29,6 +29,10 @@ using Dates
 # Include Mie reference (test utility, not part of the package)
 include(joinpath(dirname(@__DIR__), "test", "mie_reference.jl"))
 
+# Per-slot peak-RSS sampler (daemon task reads /proc/self/status)
+include(joinpath(@__DIR__, "rss_monitor.jl"))
+using .RSSMonitor
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Settings
 # ══════════════════════════════════════════════════════════════════════════════
@@ -154,13 +158,14 @@ function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh;
     pitch = AIM_PITCH_RATIO * h_bar
 
     method_kw = Dict{Symbol,Any}(
-        :method    => SOLVER_METHOD,
-        :tol       => SOLVER_TOL,
-        :maxiter   => MAXITER,
-        :verbose   => false,
-        :return_D  => true,
-        :duffy_rule => duffy_reference_rule(DUFFY_ORDER),
-        :symmetrize => true,
+        :method            => SOLVER_METHOD,
+        :tol               => SOLVER_TOL,
+        :maxiter           => MAXITER,
+        :verbose           => false,
+        :return_D          => true,
+        :return_solve_info => true,
+        :duffy_rule        => duffy_reference_rule(DUFFY_ORDER),
+        :symmetrize        => true,
     )
     if SOLVER_METHOD !== :dense
         method_kw[:pitch]      = pitch
@@ -169,7 +174,7 @@ function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh;
         method_kw[:mass]       = mass
     end
 
-    cas_results, D_block = solve_cas_v2_orientations(
+    cas_results, D_block, solve_info = solve_cas_v2_orientations(
         basis, euler_list;
         wl_0=wl_0, m_m=m_m, m_p=m_p_xyz,
         method_kw...)
@@ -193,7 +198,7 @@ function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh;
         C_ext[i] = sr.C_ext
     end
 
-    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v, solve_info
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -201,10 +206,10 @@ end
 # ══════════════════════════════════════════════════════════════════════════════
 function run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz, euler_angles;
                           projection = nothing, mass = nothing)
-    C_abs, C_ext, S_fw_th, S_fw_ph, S_bk =
+    C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, solve_info =
         _solve_and_postprocess(basis, euler_angles, wl_0, m_m, m_p_xyz, mesh;
                                projection = projection, mass = mass)
-    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, true
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, solve_info
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -220,11 +225,13 @@ function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
     beta_vals = acos.(cos_beta)
     euler_beta_only = [(0.0, β, 0.0) for β in beta_vals]
 
-    C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0 =
+    C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0, solve_info =
         _solve_and_postprocess(basis, euler_beta_only, wl_0, m_m, m_p_xyz, mesh;
                                projection = projection, mass = mass)
 
-    _log("    [spheroid, L=$N_beta]: converged ✓")
+    _log("    [spheroid, L=$N_beta]: " *
+         (solve_info.converged ? "converged ✓" : "NOT converged ✗") *
+         "  iters=$(solve_info.iterations)")
 
     # Analytical α-expansion to full grid
     alpha_vals = collect(range(0, 2π, length=N_alpha+1)[1:end-1])
@@ -256,7 +263,7 @@ function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
         end
     end
 
-    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, true
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, solve_info
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -294,6 +301,18 @@ function main()
     h5open(OUTPUT_FILE, "r+") do f
         t  = f["target"]
         sd = t["simulated_data"]
+        # The /target/cost/ group is mandatory since v0.7.3 (symmetric
+        # with block-DDA_Py).  Refuse to run on HDF5 files produced by
+        # an older create_paper_h5.jl — they must be regenerated.
+        haskey(t, "cost") || error(
+            "HDF5 is missing the /target/cost/ group — regenerate via " *
+            "viem_results/paper/<shape>_<material>.jl (v0.7.3+).")
+        cost = t["cost"]
+
+        # Peak-RSS sampler (daemon task); reset before each slot so the
+        # recorded peak reflects just that slot's allocations.
+        mon = RSSMonitor.Monitor(0.2)
+        RSSMonitor.start!(mon)
 
         N_alpha = Int(read_attribute(t, "N_alpha_ori"))
         N_beta  = Int(read_attribute(t, "N_beta_ori"))
@@ -360,9 +379,15 @@ function main()
             shape_r_ve       = nothing
             shape_projection = nothing
             shape_mass       = nothing
+            # Per-shape build / setup wall times — attributed in the
+            # cost group to the first slot (i_pair=1, i_mp=1) that uses
+            # the cached mesh/projection/mass.  Remain 0 for non-REUSE
+            # mode (where per-slot build happens inside the inner loop).
+            t_build_shape = 0.0
+            t_setup_shape = 0.0
             if REUSE_PROJECTION_PER_SHAPE
                 m_p_worst_xyz = fill(ComplexF64(m_p_max_global), 3)
-                t_mesh = @elapsed begin
+                t_build_shape = @elapsed begin
                     shape_mesh, shape_basis, shape_r_ve = build_particle(
                         shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
                         wl_0_min_sweep, m_p_worst_xyz)
@@ -373,9 +398,9 @@ function main()
                      "$(n_basis(shape_basis)) DOFs, " *
                      "r_ve=$(Printf.@sprintf("%.5f", shape_r_ve)), " *
                      "pitch=$(Printf.@sprintf("%.4f", pitch_shape)) " *
-                     "($(Printf.@sprintf("%.1fs", t_mesh)))")
+                     "($(Printf.@sprintf("%.1fs", t_build_shape)))")
                 if SOLVER_METHOD !== :dense
-                    t_setup = @elapsed begin
+                    t_setup_shape = @elapsed begin
                         grid = aim_grid(shape_basis.mesh;
                                          pitch = pitch_shape,
                                          padding = AIM_PADDING)
@@ -384,7 +409,7 @@ function main()
                         shape_mass = assemble_mass_matrix(shape_basis)
                     end
                     _log("  projection + mass cached " *
-                         "($(Printf.@sprintf("%.1fs", t_setup)))")
+                         "($(Printf.@sprintf("%.1fs", t_setup_shape)))")
                 end
                 # r_ve from actual mesh volume (same across inner loop)
                 sd["r_ve"][shape_idx...] = shape_r_ve
@@ -412,6 +437,19 @@ function main()
                 _log("  r_v=$r_v_base  bc=$bc_ratio  ab=$ab_ratio  " *
                      "β=$gre_beta  N_ori=$num_orientations$mode_tag")
 
+                # ── Per-slot cost accounting ─────────────────────────────
+                RSSMonitor.reset!(mon)
+                t_slot_start = time_ns()
+                # Attribute shape-level build + setup to the FIRST slot
+                # in this shape (REUSE mode); zero for the subsequent
+                # slots that simply reuse the cached mesh / projection.
+                t_build_slot = 0.0
+                t_setup_slot = 0.0
+                if REUSE_PROJECTION_PER_SHAPE && i_pair == 1 && i_mp == 1
+                    t_build_slot = t_build_shape
+                    t_setup_slot = t_setup_shape
+                end
+
                 # ── Build mesh + basis (unless reused from shape) ────────
                 local mesh, basis, r_ve
                 if REUSE_PROJECTION_PER_SHAPE
@@ -422,6 +460,7 @@ function main()
                             shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
                             wl_0, m_p_xyz)
                     end
+                    t_build_slot = t_mesh     # per-slot mesh build
                     h_bar = mean_edge_length(mesh)
                     _log("  mesh: $(n_tets(mesh)) tets, $(n_basis(basis)) DOFs, " *
                          "r_ve=$(Printf.@sprintf("%.5f", r_ve)), " *
@@ -439,16 +478,20 @@ function main()
                 S_fw_theta = fill(NaN + NaN*im, num_orientations)
                 S_fw_phi   = fill(NaN + NaN*im, num_orientations)
                 S_bk       = fill(NaN + NaN*im, num_orientations)
+                # Sentinel values used when the solver raises; overwritten
+                # on success by the 6th return value of run_viem_*.
+                solve_info = (iterations = 0, converged = false,
+                              residual_norm = NaN)
                 t0_solve = time_ns()
                 try
                     if spheroid_mode
-                        C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, _ =
+                        C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, solve_info =
                             run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
                                               N_alpha, N_beta, N_gamma;
                                               projection = shape_projection,
                                               mass = shape_mass)
                     else
-                        C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, _ =
+                        C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk, solve_info =
                             run_viem_general(basis, mesh, wl_0, m_m, m_p_xyz,
                                              euler_angles;
                                              projection = shape_projection,
@@ -457,13 +500,16 @@ function main()
                 catch e
                     if e isa InterruptException
                         _log("Interrupted — file closed cleanly.")
+                        RSSMonitor.stop!(mon)
                         return
                     end
                     _log("  FAILED: $(sprint(showerror, e))")
                     _log("  filling with NaN and continuing")
                 end
                 t_solve = (time_ns() - t0_solve) / 1e9
-                _log("  solve: $(Printf.@sprintf("%.1fs", t_solve))")
+                _log("  solve: $(Printf.@sprintf("%.1fs", t_solve))  " *
+                     "iters=$(solve_info.iterations)  " *
+                     "converged=$(solve_info.converged)")
 
                 # ── Mie reference ────────────────────────────────────────
                 C_abs_mie, C_ext_mie, S_fw_mean_mie, S_bk_mie =
@@ -489,16 +535,40 @@ function main()
                 sd["S_fw_PCAS_mie"][idx6...]          = S_fw_mean_mie
                 sd["S_bk_OCBS_mie"][idx6...]          = S_bk_mie
 
+                # ── Per-slot cost record (symmetric with DDA) ────────────
+                # For the first slot in a REUSE shape, t_build_slot and
+                # t_setup_slot were measured before t_slot_start (shared
+                # shape-level phase), so we add them back here to keep
+                # t_total_s = build + setup + solve + observables
+                # semantically consistent with the DDA cost group.
+                t_total_slot = (time_ns() - t_slot_start) / 1e9 +
+                               t_build_slot + t_setup_slot
+                peak_rss     = RSSMonitor.peak_bytes(mon)
+                cost["t_build_s"][idx6...]        = t_build_slot
+                cost["t_setup_s"][idx6...]        = t_setup_slot
+                cost["t_solve_s"][idx6...]        = t_solve
+                cost["t_total_s"][idx6...]        = t_total_slot
+                cost["peak_rss_bytes"][idx6...]   = Int64(peak_rss)
+                cost["n_tet"][idx6...]            = Int64(n_tets(mesh))
+                cost["n_dof"][idx6...]            = Int64(n_basis(basis))
+                cost["mean_edge_length"][idx6...] = mean_edge_length(mesh)
+                cost["iters"][idx6...]            = Int64(solve_info.iterations)
+                cost["converged"][idx6...]        = Int8(solve_info.converged ? 1 : 0)
+                cost["solver_err"][idx6...]       = Float64(solve_info.residual_norm)
+
                 n_done += 1
                 C_ext_mean = sum(filter(!isnan, C_ext)) /
                              max(1, count(!isnan, C_ext))
                 _log("  C_ext(mean)=$(Printf.@sprintf("%.4e", C_ext_mean))  " *
                      "Mie C_ext=$(Printf.@sprintf("%.4e", C_ext_mie))  " *
-                     "[$n_done done, $n_skip skipped / $n_total total]")
+                     "[$n_done done, $n_skip skipped / $n_total total]  " *
+                     "t_total=$(Printf.@sprintf("%.1fs", t_total_slot))  " *
+                     "peak_RSS=$(Printf.@sprintf("%.2f", peak_rss / 2^30)) GB")
                 flush(stdout)
             end
         end
 
+        RSSMonitor.stop!(mon)
         println("═" ^ 64)
         _log("Sweep complete: $n_done computed, $n_skip skipped, $n_total total")
     end
