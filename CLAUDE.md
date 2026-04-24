@@ -29,9 +29,12 @@
 
 | 物質 | n_p @ λ=0.638 μm | a_eq (μm) |
 | --- | --- | --- |
-| 低屈折率 | 1.5 + 0.01i | 0.05, 0.1, 0.2, 0.4 |
-| 高屈折率 | 3.17 + 0.16i | 0.05, 0.1, 0.2, 0.4 |
+| n15 (低屈折率) | 1.5 + 0.01i | 0.05, 0.1, 0.2, 0.4 |
+| n20 (paper "high", v0.7.5〜) | **2.0 + 0.0i** | 0.05, 0.1, 0.2, 0.4 |
+| n317 (legacy high, ≤ v0.7.4) | 3.17 + 0.16i | (reference 用、既存 HDF5 を残置、新規計算には使わない) |
 | Au (J&C 1972) | **0.17525 + 3.4830i** (λ=0.638 μm でハードコード) | 0.05, 0.1, 0.2 (**0.5 μm は廃止** — Au の `\|m_p\|≈3.49` で波長制約 lc≈0.018 μm が支配し N_DOF 爆発、1 スロットで 24 h 超え確実のため) |
+
+**v0.7.5 での材料差替え**: paper "high" を n317 (|m_p|≈3.17) → n20 (|m_p|=2.0) に引き下げ。実測 (DDA) で `gre × n317 × r_v=0.4 × L=100` が peak RSS 215 GB / wall 195 min を消費し、block-Krylov stagnation (iter=100, err~3e-3) も頻発したため。n20 は非吸収・中屈折率で両ソルバとも安定収束の見込み。既存 `*_n317.hdf5` は reference として保持 (block-DDA_Py 側 CLAUDE.md §6 と対称)。
 
 観測量:
 
@@ -86,10 +89,11 @@ HDF5 スイープを起動する前に必ず:
 
 - 1 HDF5 = 1 物質 × 1 形状（Au, 低屈折率, 高屈折率それぞれ別ファイル、doublet も別）
 - ファイル命名: `viem_results/paper/{shape}_{material}.hdf5`
-  - `sphere_n15.hdf5`, `sphere_n317.hdf5`, `sphere_Au.hdf5`
-  - `doublet_n15.hdf5`, `doublet_n317.hdf5`, `doublet_Au.hdf5`
-  - `oblate_n15.hdf5`, `oblate_n317.hdf5`, `oblate_Au.hdf5`
-  - `gre_n15.hdf5`, `gre_n317.hdf5`, `gre_Au.hdf5`
+  - `sphere_n15.hdf5`, `sphere_n20.hdf5`, `sphere_Au.hdf5`
+  - `doublet_n15.hdf5`, `doublet_n20.hdf5`, `doublet_Au.hdf5`
+  - `oblate_n15.hdf5`, `oblate_n20.hdf5`, `oblate_Au.hdf5`
+  - `gre_n15.hdf5`, `gre_n20.hdf5`, `gre_Au.hdf5`
+  - (legacy *_n317.hdf5 は reference データとして残置)
   - lc 収束: `convergence_{shape}_{material}.hdf5`
 - 既存 HDF5 の C_ext ≠ 0 エントリは `run_viem.jl` の再計算スキップ機能に従い中断再開可能
 - **`/target/cost/` グループで end-to-end cost を per-slot 記録（block-DDA_Py 側と対称、v0.7.3+）**。[viem_results/paper/_common.jl](viem_results/paper/_common.jl) の `create_paper_h5` が 11 dataset（`t_build_s`, `t_setup_s`, `t_solve_s`, `t_total_s`, `peak_rss_bytes`, `n_tet`, `n_dof`, `mean_edge_length`, `iters`, `converged`, `solver_err`）を shape_cond 次元で作成し、[run_viem.jl](viem_results/run_viem.jl) が per-slot で埋める。peak RSS は [viem_results/rss_monitor.jl](viem_results/rss_monitor.jl) の daemon-task サンプラ（`/proc/self/status:VmRSS` を 0.2s 間隔でポーリング、`reset!` で per-slot ベースラインを切り替え）経由で取得。DDA 側 ([~/Python/block-DDA_Py/utils/rss_monitor.py](file:///home/moteki/Python/block-DDA_Py/utils/rss_monitor.py)) と `/target/cost/` の 8 フィールド（時間・peak RSS・iters・converged・solver_err）は bit-for-bit 一致、残り 3 つは VIEM 側名称 (`n_tet`/`n_dof`/`mean_edge_length`) で DDA の (`n_cuboid`/`n_occ`/`lattice_lf`) と 1:1 対応。lc 収束 HDF5 の `lc_convergence/` サブグループ、RHS-scaling の `/target/rhs_scaling/{bicgstab,gmres}/` サブグループにも同じ 8 フィールド（時間・peak RSS・iters・converged 等）を書き込む

@@ -461,14 +461,15 @@ Twelve short generators write block-DDA_Py-compatible sweep HDF5s via
 a shared schema helper [viem_results/paper/_common.jl](viem_results/paper/_common.jl):
 
 ```bash
-# sphere / oblate / gre / doublet × n15 / n317 / Au
-julia --project=. viem_results/paper/sphere_n317.jl
+# sphere / oblate / gre / doublet × n15 / n20 / Au
+julia --project=. viem_results/paper/sphere_n20.jl
 julia --project=. viem_results/paper/doublet_Au.jl
 # ... etc.
 ```
 
 Materials (`n_p @ λ=0.638 μm`) are hard-coded as `N_LOW = 1.5+0.01i`,
-`N_HIGH = 3.17+0.16i`, `N_AU = 0.17525+3.4830i` (Johnson & Christy 1972).
+`N_20 = 2.0+0.0i` (paper "high" since v0.7.5; previously `N_HIGH = 3.17+0.16i`
+kept for reference), `N_AU = 0.17525+3.4830i` (Johnson & Christy 1972).
 The `doublet` shape is a two-sphere cluster with monomer radius
 `R = a_eq / 2^(1/3)`, axis-direction surface gap `g = 0.1 R`, axis aligned
 with particle z so that `run_viem.jl`'s spheroid α-expansion applies
@@ -484,7 +485,7 @@ launching `run_viem.jl`:
 
 ```bash
 julia --project=. -t auto viem_results/estimate_cost.jl \
-    viem_results/paper/sphere_n317.hdf5
+    viem_results/paper/sphere_n20.hdf5
 ```
 
 Calibrated against empirical phase-A + pilot-run data; tune per-DOF
@@ -500,7 +501,7 @@ projection + mass:
 
 ```bash
 julia --project=. -t auto viem_results/paper/run_rhs_scaling.jl \
-    viem_results/paper/gre_n317.hdf5
+    viem_results/paper/gre_n20.hdf5
 ```
 
 Results are written to `/target/rhs_scaling/{bicgstab,gmres}/` with
@@ -521,8 +522,8 @@ monomers, see `benchmarks/cas_v2/doublet_mstm/`):
 ```bash
 julia --project=/path/to/MSTMforCAS.jl \
     viem_results/paper/run_mstm_reference.jl \
-    viem_results/paper/doublet_n317.hdf5
-# → viem_results/paper/mstm_doublet_n317.hdf5
+    viem_results/paper/doublet_n20.hdf5
+# → viem_results/paper/mstm_doublet_n20.hdf5
 ```
 
 ### lc-convergence study
@@ -534,7 +535,7 @@ writes `convergence_<shape>_<material>.hdf5`:
 
 ```bash
 julia --project=. -t auto viem_results/paper/run_lc_convergence.jl \
-    sphere n317
+    sphere n20
 ```
 
 ### End-to-end pipeline

@@ -9,12 +9,12 @@
 # Output is written to a SEPARATE HDF5 (CLAUDE.md §6) so the VIEM
 # production HDF5 stays clean.  Default output path:
 #   viem_results/paper/mstm_<basename>.hdf5
-# (e.g., doublet_n317.hdf5 → mstm_doublet_n317.hdf5)
+# (e.g., doublet_n20.hdf5 → mstm_doublet_n20.hdf5)
 #
 # Usage:
 #   julia --project=/home/moteki/Julia/MSTMforCAS.jl \
 #         viem_results/paper/run_mstm_reference.jl \
-#         viem_results/paper/doublet_n317.hdf5 [output_path]
+#         viem_results/paper/doublet_n20.hdf5 [output_path]
 #
 # Conventions:
 #   * Doublet axis at rest = +z; rotated by β about y so it makes angle β

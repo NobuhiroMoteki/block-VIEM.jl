@@ -12,7 +12,7 @@
 #         <shape> <material>
 #
 #   shape    ∈ {sphere, oblate, gre}
-#   material ∈ {n15, n317, Au}
+#   material ∈ {n15, n20, Au}  (n317 also accepted for legacy v0.7.4 runs)
 
 using BlockVIEM
 using BlockVIEM: GREParams, gre_mesh, adaptive_lc,
@@ -56,9 +56,10 @@ end
 
 function material_m_p(name::AbstractString)
     name == "n15"  && return N_LOW
-    name == "n317" && return N_HIGH
+    name == "n20"  && return N_20       # paper "high" since v0.7.5
+    name == "n317" && return N_HIGH     # legacy high-index (≤ v0.7.4)
     name == "Au"   && return N_AU
-    error("unknown material '$name' (expected: n15 | n317 | Au)")
+    error("unknown material '$name' (expected: n15 | n20 | n317 | Au)")
 end
 
 # ──────────────────────────────────────────────────────────────────────
@@ -218,7 +219,7 @@ function main()
     length(ARGS) == 2 || error("Usage: julia --project=. " *
         "viem_results/paper/run_lc_convergence.jl <shape> <material>\n" *
         "  shape    ∈ {sphere, oblate, gre}\n" *
-        "  material ∈ {n15, n317, Au}")
+        "  material ∈ {n15, n20, Au}  (n317 legacy accepted)")
 
     shape    = ARGS[1]
     material = ARGS[2]

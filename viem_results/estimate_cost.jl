@@ -37,7 +37,8 @@ using Random
 # ──────────────────────────────────────────────────────────────────────
 const N_ITER_EST     = parse(Int,     get(ENV, "N_ITER_EST",     "200"))
 # Defaults calibrated from the 2026-04-21 pilot:
-# sphere_n317 a_eq=0.1 μm, N_DOF=5644, multi-threaded (julia -t auto):
+# sphere_n317 a_eq=0.1 μm, N_DOF=5644, multi-threaded (julia -t auto).
+# Same constants apply to n20 (paper "high" since v0.7.5):
 #   t_setup ≈ 0.9 s   → 0.16 ms/DOF  (set to 0.3 with ~2× safety margin)
 #   t_solve ≈ 16.9 s for L=5         → 0.01 ms/DOF/iter (assuming ~100 iters,
 #                                       4× safety margin)

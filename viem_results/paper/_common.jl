@@ -11,17 +11,18 @@ using HDF5
 # ──────────────────────────────────────────────────────────────────────
 #  Material constants  (all at λ₀ = 0.638 μm; CLAUDE.md §2)
 # ──────────────────────────────────────────────────────────────────────
-const N_LOW   = 1.5  + 0.01im                # low-index dielectric
-const N_HIGH  = 3.17 + 0.16im                # high-index dielectric
+const N_LOW   = 1.5  + 0.01im                # low-index dielectric (n15)
+const N_20    = 2.0  + 0.0im                 # mid-index non-absorbing (n20, paper "high" since v0.7.5)
+const N_HIGH  = 3.17 + 0.16im                # legacy high-index (n317, kept as reference; v0.7.4 and earlier paper material)
 const N_AU    = 0.17525 + 3.4830im           # Au, Johnson & Christy 1972 @ 0.638 μm
 
 const WL_PAPER     = 0.638                   # vacuum wavelength [μm]
 const M_M_PAPER    = 1.0                     # vacuum background
 
 # Volume-equivalent radii [μm]
-const A_EQ_FULL    = [0.05, 0.1, 0.2, 0.4]   # low / high-index (a_eq=0.5 dropped
-                                              # to keep wall-time per slot manageable
-                                              # for GRE × n317 and similar heavy cases)
+const A_EQ_FULL    = [0.05, 0.1, 0.2, 0.4]   # n15 / n20 (a_eq=0.5 dropped
+                                              # to keep wall-time per slot manageable;
+                                              # originally set for the heavier n317 cases)
 const A_EQ_AU      = [0.05, 0.1, 0.2]        # Au only (≤ 0.2 μm); a_eq=0.5 μm
                                               # dropped — at |m_p|≈3.49 the
                                               # wavelength-driven lc ≈ 0.018 μm
