@@ -36,6 +36,8 @@
 
 **v0.7.5 での材料差替え**: paper "high" を n317 (|m_p|≈3.17) → n20 (|m_p|=2.0) に引き下げ。実測 (DDA) で `gre × n317 × r_v=0.4 × L=100` が peak RSS 215 GB / wall 195 min を消費し、block-Krylov stagnation (iter=100, err~3e-3) も頻発したため。n20 は非吸収・中屈折率で両ソルバとも安定収束の見込み。既存 `*_n317.hdf5` は reference として保持 (block-DDA_Py 側 CLAUDE.md §6 と対称)。
 
+**v0.7.6 での MAXITER 拡張**: 全 runner (`run_viem.jl`, `run_lc_convergence.jl`, `run_rhs_scaling.jl`) と `MAXITER_HISTORY` を 100 → 200 に bump。理由: n20 化で典型 slot は ~30-50 iter で収束見込みなので 200 cap は安全マージン、Au plasmonic と RHS-scaling L=64-128 の stagnation 領域に追加余地を与えるため。v0.7.4 の `O(kL²)` block-Givens fix で per-iter コスト線形のため maxiter 倍化のオーバヘッドは限定的。
+
 観測量:
 
 - **Qext, Qsca, Qabs** (体積等価半径基準、規格化 `Q = C / (π a_eq²)`)
@@ -100,10 +102,9 @@ HDF5 スイープを起動する前に必ず:
 - 後方互換: `/target/cost/` を持たない古い HDF5 は `run_viem.jl` 起動時にエラーで拒否。`create_paper_h5` で再生成すれば cost group が自動付与される
 - 多配向 block-Krylov の **反復数 と 1 配向あたり end-to-end 所要時間** は別スクリプト [viem_results/paper/run_rhs_scaling.jl](viem_results/paper/run_rhs_scaling.jl) で診断:
   - RHS 数スイープ `L = 1, 2, 4, 8, 16, 32, 64, 128`（2 のべき乗、計 8 点で iter 数のスケーリングを解像）
-  - **2 ソルバを同時計測**: `block-BiCGSTAB` (`:aim_bicgstab`) と `block-GMRES` (`:aim_gmres`) を同じ shape slot, 同じメッシュ + projection + mass で評価
-  - 結果は `/target/rhs_scaling/{bicgstab,gmres}/` のサブグループに `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s` を書き込み（`L_values`, `n_dof`, `n_tet` は両メソッド共通として親グループに）
+  - **v0.7.6 から GMRES 単独計測**: `block-GMRES` (`:aim_gmres`) のみ。論文のスコープからソルバ依存性軸を外し、shape × material × N_DOF のスケーリングに焦点を絞るため。BiCGSTAB を再度比較したい場合は `run_rhs_scaling.jl::METHODS` に `(:bicgstab, :aim_bicgstab)` を追記すれば schema 変更なしで復活可
+  - 結果は `/target/rhs_scaling/gmres/` サブグループに `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s`, `peak_rss_bytes`, `residual_history` を書き込み（`L_values`, `n_dof`, `n_tet` は親グループに）
   - 各 shape slot ごとに測定（worst-case mesh 共有、固定 RNG seed の uniform-sphere 配向を nested に L=1 ⊂ L=2 ⊂ … ⊂ L=128）
-  - 大 L 領域（L=64, 128）では BiCGSTAB が near-linearly-dependent RHS により stagnate しうる（[src/block_krylov.jl:62-65](src/block_krylov.jl#L62-L65) 既知制約）。論文 Figure では両ソルバの iter 数・壁時計時間を併記し、BiCGSTAB が小 L で速い一方 GMRES が大 L で安定（monotone 収束）である点を比較
 - **本番ソルバのデフォルトは v0.7.1 から `:aim_gmres`**（`solve_cas_v2_orientations` の method キーワードおよび [viem_results/run_viem.jl:37](viem_results/run_viem.jl#L37) の `SOLVER_METHOD`）。理由: GRE 本番で block solve L=100、N_DOF 数十万の条件下では BiCGSTAB の stagnation リスクが高く、論文全 44 スロットの完走を優先して monotone 収束保証のある GMRES を選択。パフォーマンス重視のケースでは明示的に `:aim_bicgstab` を指定する
 - **doublet 厳密解（MSTM 参照）は別 HDF5 で管理**: [viem_results/paper/run_mstm_reference.jl](viem_results/paper/run_mstm_reference.jl) を MSTMforCAS.jl env (`~/Julia/MSTMforCAS.jl`) で実行し、対応する `mstm_<basename>.hdf5` を生成
   - `truncation_order = 15`（[README.md:475-482](README.md#L475-L482) 準拠、Au 含む両材料で完全収束）

@@ -1,20 +1,25 @@
 # RHS-scaling diagnostic for block-Krylov (CLAUDE.md §6).
 #
-# For every shape slot in a paper sweep HDF5, run BOTH block-BiCGSTAB
-# and block-GMRES against L ∈ L_LIST distinct orientations and record
-# the iteration count + wall time.  Results are written under
-# /target/rhs_scaling/ as
+# For every shape slot in a paper sweep HDF5, run block-GMRES against
+# L ∈ L_LIST distinct orientations and record the iteration count + wall
+# time.  Results are written under /target/rhs_scaling/ as
 #
-#   L_values:        (nL,)                                Int   # [1, 2, 4, 8, 16, 32, 64, 128]
-#   n_dof:           (N_rv, N_bc, N_ab, N_bt)             Int   # shared across methods
-#   n_tet:           (N_rv, N_bc, N_ab, N_bt)             Int   # shared across methods
-#   bicgstab/
-#     iters:                  (nL, N_rv, N_bc, N_ab, N_bt)   Int
-#     converged:              (nL, N_rv, N_bc, N_ab, N_bt)   Int  (0/1)
-#     t_total_s:              (nL, N_rv, N_bc, N_ab, N_bt)   Float64
-#     t_end2end_per_orient_s: (nL, N_rv, N_bc, N_ab, N_bt)   Float64
+#   L_values:        (nL,)                                Int   # [1,2,4,8,16,32,64,128]
+#   n_dof:           (N_rv, N_bc, N_ab, N_bt)             Int   # shape geom
+#   n_tet:           (N_rv, N_bc, N_ab, N_bt)             Int   # shape geom
 #   gmres/
-#     (same datasets as bicgstab/)
+#     iters:                  (nL, N_rv, N_bc, N_ab, N_bt)        Int
+#     converged:              (nL, N_rv, N_bc, N_ab, N_bt)        Int  (0/1)
+#     t_total_s:              (nL, N_rv, N_bc, N_ab, N_bt)        Float64
+#     t_end2end_per_orient_s: (nL, N_rv, N_bc, N_ab, N_bt)        Float64
+#     peak_rss_bytes:         (nL, N_rv, N_bc, N_ab, N_bt)        Int64
+#     residual_history:       (nL, N_rv, N_bc, N_ab, N_bt, MAXITER) Float64
+#
+# v0.7.6: scope reduced to GMRES only.  Paper drops the solver-comparison
+# axis (:aim_bicgstab vs :aim_gmres) to keep figure space focused on
+# shape × material × N_DOF scaling.  The per-method subgroup structure
+# is retained for forward compatibility (re-add BiCGSTAB to METHODS to
+# revisit the comparison without schema changes).
 #
 # This is a *diagnostic* — it does NOT change any of the production data
 # slots (C_ext, S_fw, etc.).  Run on the same HDF5 used for the main
@@ -42,14 +47,17 @@ using .RSSMonitor
 # ──────────────────────────────────────────────────────────────────────
 const RNG_SEED        = 12345
 const SOLVER_TOL      = 1e-5
-const MAXITER         = 100
+const MAXITER         = 200     # v0.7.6: 100→200 (large-L stagnation headroom)
 const N_PW            = 10
 const DUFFY_ORDER     = 5
 const AIM_PITCH_RATIO = 0.5
 const AIM_PADDING     = 4
 const L_LIST          = [1, 2, 4, 8, 16, 32, 64, 128]   # CLAUDE.md §6
 # Per-method (subgroup name, solver-method symbol)
-const METHODS         = ((:bicgstab, :aim_bicgstab), (:gmres, :aim_gmres))
+# v0.7.6: scoped to GMRES only — paper drops solver-comparison axis to
+# keep the figure space focused on shape × material × N_DOF scaling.
+# Re-add (:bicgstab, :aim_bicgstab) here to revisit the comparison.
+const METHODS         = ((:gmres, :aim_gmres),)
 
 # ──────────────────────────────────────────────────────────────────────
 #  Helpers (kept in sync with viem_results/run_viem.jl::build_particle)

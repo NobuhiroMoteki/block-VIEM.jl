@@ -495,20 +495,22 @@ constants via `T_SETUP_MS_DOF`, `T_ITER_MS_DOF`, `RSS_KB_PER_DOF`,
 ### Block-Krylov RHS-scaling diagnostic
 
 [viem_results/paper/run_rhs_scaling.jl](viem_results/paper/run_rhs_scaling.jl)
-measures, per shape slot, **both** `block_bicgstab` and `block_gmres`
-at `L ∈ {1, 2, 4, 8, 16, 32}` RHS using the shared worst-case mesh +
-projection + mass:
+measures, per shape slot, `block_gmres` at `L ∈ {1, 2, 4, 8, 16, 32, 64, 128}`
+RHS using the shared worst-case mesh + projection + mass (BiCGSTAB
+dropped from the paper scope at v0.7.6 to focus on shape × material ×
+N_DOF scaling):
 
 ```bash
 julia --project=. -t auto viem_results/paper/run_rhs_scaling.jl \
     viem_results/paper/gre_n20.hdf5
 ```
 
-Results are written to `/target/rhs_scaling/{bicgstab,gmres}/` with
-datasets `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s`
-(shape `(nL, N_rv, N_bc, N_ab, N_bt)`). The diagnostic relies on the
-`solve_cas_v2_orientations(return_solve_info=true)` API extension
-introduced in this release.
+Results are written to `/target/rhs_scaling/gmres/` with datasets
+`iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s`,
+`peak_rss_bytes`, `residual_history` (last shape `(nL, N_rv, N_bc, N_ab,
+N_bt, MAXITER)`).  The diagnostic relies on
+`solve_cas_v2_orientations(return_solve_info=true)` and the
+`BlockSolveResult.residual_history` field.
 
 ### MSTM exact reference for doublet
 

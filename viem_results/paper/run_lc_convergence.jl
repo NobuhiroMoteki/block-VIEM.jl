@@ -35,7 +35,7 @@ using .RSSMonitor
 # ──────────────────────────────────────────────────────────────────────
 const RNG_SEED        = 12345
 const SOLVER_TOL      = 1e-5
-const MAXITER         = 100
+const MAXITER         = 200      # v0.7.6: 100→200 (plasmonic Au headroom)
 const N_PW            = 10
 const DUFFY_ORDER     = 5
 const AIM_PITCH_RATIO = 0.5

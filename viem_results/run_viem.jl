@@ -39,7 +39,7 @@ using .RSSMonitor
 const RNG_SEED      = 12345       # GRE shape random seed (matches run_dda.py)
 const SOLVER_TOL    = 1e-5        # solver tolerance (paper-production default)
 const SOLVER_METHOD = :aim_gmres     # :aim_gmres (default, v0.7.1+) | :aim_bicgstab | :dense
-const MAXITER       = 100         # max Krylov iterations per try
+const MAXITER       = 200         # max Krylov iterations per try (v0.7.6: 100→200)
 const N_PW          = 10          # mesh: points per wavelength
 const DUFFY_ORDER   = 5           # Duffy quadrature order
 const AIM_PITCH_RATIO = 0.5      # AIM grid pitch = ratio × mean edge length

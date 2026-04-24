@@ -39,7 +39,9 @@ const N_GAMMA_DEFAULT = 5
 # Residual-history length for /target/cost/residual_history (CLAUDE.md §7.5 /
 # block-DDA_Py parity).  Must match the MAXITER used by run_viem.jl and
 # friends; slots that converge earlier are NaN-padded.
-const MAXITER_HISTORY = 100
+# v0.7.6: bumped 100 → 200 to give plasmonic Au and large-L RHS-scaling
+# room beyond the v0.7.5 stagnation cap.
+const MAXITER_HISTORY = 200
 
 # ──────────────────────────────────────────────────────────────────────
 #  Schema writer
