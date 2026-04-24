@@ -60,4 +60,27 @@ using BlockVIEM: Vec3, TetVerts
         @inferred tet_volume(nodes[1], nodes[2], nodes[3], nodes[4])
         @inferred triangle_area(nodes[1], nodes[2], nodes[3])
     end
+
+    @testset "apply_scale!" begin
+        # Unit tet at origin, V₀ = 1/6
+        nodes = Vec3[Vec3(0, 0, 0), Vec3(1, 0, 0),
+                     Vec3(0, 1, 0), Vec3(0, 0, 1)]
+        tets = TetVerts[TetVerts(1, 2, 3, 4)]
+        mesh = TetMesh(nodes, tets)
+        V0   = total_volume(mesh)
+        c0   = mesh.tet_centroids[1]   # = (¼, ¼, ¼)
+
+        s = 2.5
+        ret = apply_scale!(mesh, s)
+        @test ret === mesh                              # in-place returns same mesh
+        @test mesh.nodes[2] ≈ Vec3(s, 0, 0)             # node coords scaled
+        @test mesh.nodes[3] ≈ Vec3(0, s, 0)
+        @test mesh.tet_centroids[1] ≈ s .* c0          # centroid scaled
+        @test isapprox(total_volume(mesh), s^3 * V0; rtol=1e-14)
+
+        # Inverse rescale recovers the original mesh exactly (modulo fp)
+        apply_scale!(mesh, 1 / s)
+        @test mesh.nodes[2] ≈ Vec3(1, 0, 0)
+        @test isapprox(total_volume(mesh), V0; rtol=1e-14)
+    end
 end

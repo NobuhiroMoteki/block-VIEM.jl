@@ -38,6 +38,8 @@
 
 **v0.7.6 での MAXITER 拡張**: 全 runner (`run_viem.jl`, `run_lc_convergence.jl`, `run_rhs_scaling.jl`) と `MAXITER_HISTORY` を 100 → 200 に bump。理由: n20 化で典型 slot は ~30-50 iter で収束見込みなので 200 cap は安全マージン、Au plasmonic と RHS-scaling L=64-128 の stagnation 領域に追加余地を与えるため。v0.7.4 の `O(kL²)` block-Givens fix で per-iter コスト線形のため maxiter 倍化のオーバヘッドは限定的。
 
+**v0.7.7 での volume-preserving rescale**: `gre_mesh`, `gre_mesh_with_field`, `mesh_sphere_aggregate` がメッシュ生成後に `apply_scale!(mesh, r_v_base / r_ve)` で節点座標を等方スケールし `V_mesh = (4π/3)·r_v_base³` を**厳密**に満足させるよう変更。block-DDA_Py 側 `Target.__init__` の `d_adj` 再スケールと対称化し、Rayleigh 領域の C_ext/C_abs/|S_fw| に出る discretisation volume bias (~0.5-3%) を除去。`r_ve` が HDF5 上で `r_v_base` と機械精度で一致するため paper の 1:1 相関プロットが clean に。`mesh_sphere_aggregate` のみ `rescale_to_target_volume::Bool=true` キーワードで無効化可能 (overlap geometry test 用)。詳細は [docs/paper_simulation_conditions_viem.md §5.2](docs/paper_simulation_conditions_viem.md#L88) 参照。
+
 観測量:
 
 - **Qext, Qsca, Qabs** (体積等価半径基準、規格化 `Q = C / (π a_eq²)`)

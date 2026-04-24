@@ -70,7 +70,7 @@ include("aim_operator.jl")
 
 # Public API (Phase 1)
 export Vec3, TetVerts
-export TetMesh, n_nodes, n_tets, total_volume, mean_edge_length
+export TetMesh, n_nodes, n_tets, total_volume, mean_edge_length, apply_scale!
 export tet_volume, tet_signed_volume, tet_centroid, triangle_area
 export AbstractDivBasis, SWGBasis, build_swg_basis, n_basis, evaluate, divergence, support_tets
 export RT1Basis, build_rt1_basis, build_tet_to_dofs

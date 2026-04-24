@@ -94,9 +94,11 @@ using Random: MersenneTwister
         rng = MersenneTwister(1)
         mesh, r_ve = gre_mesh(p, rng; lc=0.08)
 
+        # v0.7.7+: gre_mesh applies a uniform volume-preserving rescale
+        # so V_mesh equals (4π/3)·r_v_base³ to machine precision.
         V_target = (4π / 3) * 0.2^3
-        @test isapprox(total_volume(mesh), V_target; rtol=0.10)
-        @test isapprox(r_ve, 0.2; rtol=0.05)
+        @test isapprox(total_volume(mesh), V_target; rtol=1e-12)
+        @test isapprox(r_ve, 0.2; rtol=1e-12)
         @test n_tets(mesh) > 10
         @test all(>(0), mesh.tet_volumes)
     end

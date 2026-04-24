@@ -109,6 +109,31 @@ end
 total_volume(mesh::TetMesh) = sum(mesh.tet_volumes)
 
 """
+    apply_scale!(mesh::TetMesh, s::Real) -> TetMesh
+
+Uniformly scale all node coordinates by `s`.  Tetrahedron volumes scale
+by `s^3`, centroids by `s`.  Physical tags and topology are unchanged.
+Modifies `mesh` in place and returns it.
+
+Used for volume-preserving post-processing in `gre_mesh` and
+`mesh_sphere_aggregate` so the mesh's volume-equivalent radius matches
+the target `r_v_base` exactly (block-DDA_Py parity, paper-production
+v0.7.7+; see `docs/paper_simulation_conditions_viem.md` §5).
+"""
+function apply_scale!(mesh::TetMesh, s::Real)
+    s_f = Float64(s)
+    s3  = s_f^3
+    @inbounds for i in eachindex(mesh.nodes)
+        mesh.nodes[i] = mesh.nodes[i] * s_f
+    end
+    @inbounds for i in eachindex(mesh.tet_centroids)
+        mesh.tet_centroids[i] = mesh.tet_centroids[i] * s_f
+        mesh.tet_volumes[i]   = mesh.tet_volumes[i] * s3
+    end
+    return mesh
+end
+
+"""
     mean_edge_length(mesh::TetMesh) -> Float64
 
 Mean edge length across all tetrahedra (6 edges per tet, counted with

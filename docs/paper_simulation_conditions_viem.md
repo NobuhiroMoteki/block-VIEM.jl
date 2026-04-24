@@ -92,7 +92,31 @@ lc = min( λ₀ / (|m_p|_max · N_pw),    # 波長制約 (N_pw = 10)
 - 本番計算は既定 `N_pw = 10`, `N_per_radius = 3`
 - `aggregate_mesh.jl::adaptive_lc_aggregate` は doublet 用、c_min = 各 monomer 半径
 
-### 5.2 lc 収束性スタディ用 factor
+### 5.2 Volume-preserving rescale (v0.7.7+)
+
+メッシュ生成後、**節点座標を等方的にスケール**して `V_mesh = (4π/3)·r_v_base³` を厳密化:
+
+```text
+s = r_v_base / r_ve_initial    # r_ve_initial = cbrt(3 V_mesh_initial / (4π))
+apply_scale!(mesh, s)
+# 結果: total_volume(mesh) == (4π/3)·r_v_base³ to machine precision
+#       r_ve == r_v_base
+```
+
+理由:
+
+- block-DDA_Py の `Target.__init__` も `d_adj = cbrt(V_target / N_occ)` で格子間隔を再スケールし
+  `N_occ · d_adj³ = V_target` を厳密満足する（DDA 側 paper_simulation_conditions_dda.md 参照）
+- VIEM だけ gmsh 実メッシュ体積をそのまま使うと r_ve が r_v_base より僅かに小さくなり (~0.5–3%、lc 依存)、
+  Rayleigh 領域の C_ext / C_abs / |S_fw| に系統偏差が残って 1:1 相関プロットが歪む
+- 等方リスケールで mesh 形状・トポロジは保ちつつ体積を厳密に target に一致させる
+
+実装: [src/mesh.jl::apply_scale!](../src/mesh.jl)、`gre_mesh`, `gre_mesh_with_field`, `mesh_sphere_aggregate` 末尾で自動適用。
+`mesh_sphere_aggregate` のみ `rescale_to_target_volume::Bool=true` キーワードで無効化可能（overlap geometry 検証テスト用、paper では default true）。
+
+副作用: `mean_edge_length` も s 倍されるため AIM grid pitch が僅かに変わる。adaptive_lc は再計算しない (既存 lc を生成したメッシュをスケールするだけ)。
+
+### 5.3 lc 収束性スタディ用 factor
 
 [viem_results/paper/run_lc_convergence.jl::LC_FACTORS](../viem_results/paper/run_lc_convergence.jl):
 
@@ -390,7 +414,8 @@ DDA 側との対称項目（要同期）:
 | v0.7.4 | `1843456` | `block_gmres` per-iter cost `O(k²L³) → O(kL²)` (incremental Givens) |
 | v0.7.5a | `d2902fe` | "high" material n317 → n20 (2.0+0.0i) 差替 |
 | v0.7.5b | `6f6987a` | `BlockSolveResult.residual_history`, HDF5 全所に per-iter trace 追加 |
-| **v0.7.6** | `d2bceaf` | **MAXITER 100 → 200**、**RHS-scaling GMRES のみ** (BiCGSTAB scope 外) |
+| v0.7.6 | `d2bceaf` | MAXITER 100 → 200、RHS-scaling GMRES のみ (BiCGSTAB scope 外) |
+| **v0.7.7** | (本コミット) | **volume-preserving rescale** (apply_scale!) を gre_mesh / mesh_sphere_aggregate に追加。`V_mesh = (4π/3)·r_v_base³` 厳密化で DDA `Target.__init__` と対称、Rayleigh 領域の C_ext/C_abs/\|S_fw\| systematic bias 除去 |
 
 ---
 

@@ -218,8 +218,13 @@ end
                  (d^2 + 2d*(R_i + R_j) - 3*(R_i - R_j)^2) / (12 * d)
         V_analytic = V_sph - V_lens
 
+        # `rescale_to_target_volume=false` keeps the gmsh-faceted
+        # overlap geometry intact for this analytical-volume check
+        # (paper-production passes the default `true` to enforce
+        # V_mesh = monomer_volume_sum exactly; v0.7.7+).
         mesh, path = mesh_sphere_aggregate(agg;
-                         overlap_factor=eps_eff, lc=0.012, verbosity=0)
+                         overlap_factor=eps_eff, lc=0.012, verbosity=0,
+                         rescale_to_target_volume=false)
         V_mesh = total_volume(mesh)
         @test isapprox(V_mesh, V_analytic; rtol=8e-2)
         rm(path; force=true)
@@ -238,12 +243,44 @@ end
         d_eff = 2r
         V_analytic = _two_sphere_volume(R_eff, d_eff)
 
+        # See note above: disable rescale to inspect the raw faceted
+        # overlap volume.
         mesh, path = mesh_sphere_aggregate(agg;
-                         overlap_factor=eps_eff, lc=0.015, verbosity=0)
+                         overlap_factor=eps_eff, lc=0.015, verbosity=0,
+                         rescale_to_target_volume=false)
         V_mesh = total_volume(mesh)
         # Tet discretisation error ~ few %; rtol=0.08 is generous but robust.
         @test isapprox(V_mesh, V_analytic; rtol=8e-2)
         rm(path; force=true)
+    end
+
+    # ── Volume-preserving rescale enforces V_mesh == monomer_volume_sum ──
+    @testset "mesh_sphere_aggregate rescale to target volume (v0.7.7+)" begin
+        # Equal-radius doublet, paper-production geometry: R = a_eq/2^(1/3),
+        # gap = 0.1·R, default overlap_factor=0.02.
+        a_eq = 0.05
+        R    = a_eq / 2^(1/3)
+        gap  = 0.1 * R
+        d    = 2R + gap
+        centers = reshape([0.0, 0.0, -d/2, 0.0, 0.0, d/2], 3, 2)
+        agg = SphereAggregate(centers, [R, R])
+
+        # Default rescale=true → V_mesh == monomer_volume_sum to machine precision
+        mesh, path = mesh_sphere_aggregate(agg;
+                         overlap_factor=0.02, lc=0.012, verbosity=0)
+        V_target = monomer_volume_sum(agg)
+        @test isapprox(total_volume(mesh), V_target; rtol=1e-12)
+        # Volume-equivalent radius == a_eq exactly
+        r_ve = cbrt(3 * total_volume(mesh) / (4π))
+        @test isapprox(r_ve, a_eq; rtol=1e-12)
+        rm(path; force=true)
+
+        # rescale=false → V_mesh ≈ inflated faceted volume (~few % off target)
+        mesh2, path2 = mesh_sphere_aggregate(agg;
+                          overlap_factor=0.02, lc=0.012, verbosity=0,
+                          rescale_to_target_volume=false)
+        @test !isapprox(total_volume(mesh2), V_target; rtol=1e-6)
+        rm(path2; force=true)
     end
 
 end # @testset "Aggregate mesh"

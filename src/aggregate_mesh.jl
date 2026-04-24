@@ -644,7 +644,8 @@ function mesh_sphere_aggregate(agg::SphereAggregate;
                                wl_0::Real=NaN, m_p_max::Real=NaN,
                                N_pw::Int=10, N_per_radius::Int=3,
                                mesh_path::Union{AbstractString,Nothing}=nothing,
-                               verbosity::Int=0)
+                               verbosity::Int=0,
+                               rescale_to_target_volume::Bool=true)
     eps_eff = neck_ratio === nothing ?
         Float64(overlap_factor) :
         neck_ratio_to_overlap(neck_ratio)
@@ -701,5 +702,26 @@ function mesh_sphere_aggregate(agg::SphereAggregate;
     end
 
     mesh = read_msh(path)
+
+    # ── Volume-preserving rescale (block-DDA_Py parity, v0.7.7+) ──────
+    # Target volume = sum of ideal monomer volumes (= (4π/3)·r_v_total³
+    # for an equal-radius cluster).  Scale node coordinates so the
+    # discretised mesh hits this exactly, matching DDA's Target spacing
+    # adjustment and removing the discretisation-volume bias from paper
+    # 1:1 cross-solver plots.  Inter-monomer geometry (gap, axis) is
+    # preserved by the uniform scaling.
+    #
+    # Disabled (`rescale_to_target_volume=false`) when callers want the
+    # gmsh-faceted overlap geometry preserved — e.g. analytical
+    # overlap-volume validation tests where V_mesh should match
+    # `V_inflated_spheres − V_lens` rather than the no-overlap
+    # `monomer_volume_sum`.
+    if rescale_to_target_volume
+        V_target = monomer_volume_sum(agg)
+        V_mesh   = total_volume(mesh)
+        s = (V_target / V_mesh) ^ (1/3)
+        apply_scale!(mesh, s)
+    end
+
     return mesh, path
 end

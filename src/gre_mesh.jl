@@ -538,6 +538,16 @@ function gre_mesh(p::GREParams, rng::AbstractRNG;
     V = total_volume(mesh)
     r_ve = cbrt(3V / (4π))
 
+    # ── Volume-preserving rescale (block-DDA_Py parity, v0.7.7+) ──────
+    # Scale node coordinates so the discretised mesh volume equals the
+    # target (4π/3)·r_v_base³ exactly.  DDA's Target.__init__ enforces
+    # the same invariant via lattice spacing adjustment, so paper 1:1
+    # cross-solver correlation plots are not biased by mesh-volume loss.
+    s = p.r_v_base / r_ve
+    apply_scale!(mesh, s)
+    V = total_volume(mesh)             # now exact: (4π/3)·r_v_base³
+    r_ve = cbrt(3V / (4π))             # now == p.r_v_base to machine precision
+
     return mesh, r_ve
 end
 
@@ -578,5 +588,12 @@ function gre_mesh_with_field(p::GREParams,
     mesh = read_msh(mesh_path)
     V = total_volume(mesh)
     r_ve = cbrt(3V / (4π))
+
+    # Volume-preserving rescale (see gre_mesh; v0.7.7+).
+    s = p.r_v_base / r_ve
+    apply_scale!(mesh, s)
+    V = total_volume(mesh)
+    r_ve = cbrt(3V / (4π))             # now == p.r_v_base to machine precision
+
     return mesh, r_ve
 end
