@@ -556,6 +556,15 @@ function main()
                 cost["converged"][idx6...]        = Int8(solve_info.converged ? 1 : 0)
                 cost["solver_err"][idx6...]       = Float64(solve_info.residual_norm)
 
+                # Per-iteration residual trace, NaN-padded to MAXITER_HISTORY.
+                # Length mismatch (hist_n > MAXITER) means MAXITER was raised
+                # above the schema's preallocated length — truncate to fit.
+                hist = fill(NaN, MAXITER)
+                eh = solve_info.residual_history
+                hist_n = min(length(eh), MAXITER)
+                hist[1:hist_n] .= eh[1:hist_n]
+                cost["residual_history"][idx6..., :] = hist
+
                 n_done += 1
                 C_ext_mean = sum(filter(!isnan, C_ext)) /
                              max(1, count(!isnan, C_ext))

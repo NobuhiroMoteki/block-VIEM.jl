@@ -123,11 +123,12 @@ function measure_one(basis, mesh, projection, mass, method_sym, L,
     peak_rss = RSSMonitor.peak_bytes(mon)
 
     return (
-        iters         = solve_info.iterations,
-        converged     = solve_info.converged,
-        t_total       = t_total,
-        t_per_orient  = t_total / L,
-        peak_rss      = peak_rss,
+        iters            = solve_info.iterations,
+        converged        = solve_info.converged,
+        t_total          = t_total,
+        t_per_orient     = t_total / L,
+        peak_rss         = peak_rss,
+        residual_history = Vector{Float64}(solve_info.residual_history),
     )
 end
 
@@ -162,6 +163,13 @@ function write_rhs_scaling(t, per_method, n_dof_arr, n_tet_arr)
         write_dataset(sg, "t_total_s",               m.t_total_arr)
         write_dataset(sg, "t_end2end_per_orient_s",  m.t_per_arr)
         write_dataset(sg, "peak_rss_bytes",          m.peak_rss_arr)
+        d_hist = create_dataset(sg, "residual_history", Float64, size(m.hist_arr))
+        attrs(d_hist)["definition"] =
+            "per-iteration relative residual, shape " *
+            "(nL, N_rv, N_bc, N_ab, N_bt, MAXITER). " *
+            "NaN-padded beyond iter_fin.  Enables convergence-profile " *
+            "figures symmetric with block-DDA_Py rhs_scaling output."
+        write(d_hist, m.hist_arr)
     end
 end
 
@@ -226,6 +234,7 @@ function main()
             t_total_arr   = zeros(Float64, nL, n_rv, n_bc, n_ab, n_bt),
             t_per_arr     = zeros(Float64, nL, n_rv, n_bc, n_ab, n_bt),
             peak_rss_arr  = zeros(Int64,   nL, n_rv, n_bc, n_ab, n_bt),
+            hist_arr      = fill(NaN,      nL, n_rv, n_bc, n_ab, n_bt, MAXITER),
         )) for (name, sym) in METHODS]
 
         # Peak-RSS sampler shared across all (shape, method, L) measurements.
@@ -266,6 +275,10 @@ function main()
                     m_arrays.t_total_arr[iL,i_rv,i_bc,i_ab,i_bt]  = m.t_total
                     m_arrays.t_per_arr[iL,i_rv,i_bc,i_ab,i_bt]    = m.t_per_orient
                     m_arrays.peak_rss_arr[iL,i_rv,i_bc,i_ab,i_bt] = Int64(m.peak_rss)
+                    # residual_history, NaN-padded to MAXITER length
+                    eh = m.residual_history
+                    m_eh = min(length(eh), MAXITER)
+                    @views m_arrays.hist_arr[iL,i_rv,i_bc,i_ab,i_bt, 1:m_eh] .= eh[1:m_eh]
                     conv_str = m.converged ? "✓" : "✗"
                     _log(@sprintf("    L=%-3d  iters=%-4d  %s  t_total=%7.2fs  t/ori=%7.3fs  peak=%6.2f GB",
                                   L, m.iters, conv_str, m.t_total, m.t_per_orient,

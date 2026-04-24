@@ -33,16 +33,22 @@ using LinearAlgebra: norm, mul!, tr
 Return type for [`block_bicgstab`](@ref) and [`block_gmres`](@ref).
 
 # Fields
-- `X::Matrix{ComplexF64}`     — solution block, shape `(N, L)`
-- `converged::Bool`           — whether the solver reached `tol`
-- `residual_norm::Float64`    — final relative residual `‖B − A X‖_F / ‖B‖_F`
-- `iterations::Int`           — number of outer iterations taken
+- `X::Matrix{ComplexF64}`               — solution block, shape `(N, L)`
+- `converged::Bool`                     — whether the solver reached `tol`
+- `residual_norm::Float64`              — final relative residual `‖B − A X‖_F / ‖B‖_F`
+- `iterations::Int`                     — number of outer iterations taken
+- `residual_history::Vector{Float64}`   — relative residual after each
+  outer iteration (length `iterations`).  Enables convergence-profile
+  figures; symmetric with `block-DDA_Py`'s `err_history` returned by
+  `bl_bicgstab_mvp_fft` / `bl_gmres_mvp_fft` (paper-production parity,
+  v0.7.5+).
 """
 struct BlockSolveResult
     X::Matrix{ComplexF64}
     converged::Bool
     residual_norm::Float64
     iterations::Int
+    residual_history::Vector{Float64}
 end
 
 """
@@ -69,7 +75,8 @@ function block_bicgstab(A, B::AbstractMatrix; tol::Real = 1e-5,
     N, L = size(B)
     Bc = Matrix{ComplexF64}(B)
     Bnorm = norm(Bc)
-    Bnorm == 0 && return BlockSolveResult(zeros(ComplexF64, N, L), true, 0.0, 0)
+    Bnorm == 0 && return BlockSolveResult(
+        zeros(ComplexF64, N, L), true, 0.0, 0, Float64[])
 
     X = zeros(ComplexF64, N, L)
     R = copy(Bc)
@@ -78,6 +85,7 @@ function block_bicgstab(A, B::AbstractMatrix; tol::Real = 1e-5,
 
     err = Inf
     iter = 0
+    residual_history = Float64[]
     for k in 1:maxiter
         iter = k
         V = A * P                     # N × L
@@ -94,15 +102,16 @@ function block_bicgstab(A, B::AbstractMatrix; tol::Real = 1e-5,
         R .= T .- qsi .* Zblk
 
         err = norm(R) / Bnorm
+        push!(residual_history, err)
         verbose && @info "block_bicgstab" iter = k err = err
         if err < tol
-            return BlockSolveResult(X, true, err, k)
+            return BlockSolveResult(X, true, err, k, residual_history)
         end
 
         beta = RV \ (-(R0' * Zblk))   # L × L
         P .= R .+ (P .- qsi .* V) * beta
     end
-    return BlockSolveResult(X, err < tol, err, iter)
+    return BlockSolveResult(X, err < tol, err, iter, residual_history)
 end
 
 """
@@ -127,7 +136,8 @@ function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
     N, L = size(B)
     Bc = Matrix{ComplexF64}(B)
     Bnorm = norm(Bc)
-    Bnorm == 0 && return BlockSolveResult(zeros(ComplexF64, N, L), true, 0.0, 0)
+    Bnorm == 0 && return BlockSolveResult(
+        zeros(ComplexF64, N, L), true, 0.0, 0, Float64[])
 
     # Initial residual (X0 = 0) and its thin QR: R0 = V1 * Λ.
     Qfac = qr(Bc)
@@ -165,6 +175,7 @@ function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
 
     err = Inf
     iter = 0
+    residual_history = Float64[]
     for k in 1:maxiter
         iter = k
         W = A * Vblocks[k]               # N × L
@@ -213,6 +224,7 @@ function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
 
         # Residual Frobenius norm: rows kL+1:(k+1)L of b_hat.
         err = norm(@view b_hat[k * L + 1 : (k + 1) * L, :]) / Bnorm
+        push!(residual_history, err)
         verbose && @info "block_gmres" iter = k err = err
 
         if err < tol || k == maxiter
@@ -224,9 +236,9 @@ function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
             for j in 1:k
                 @views X .+= Vblocks[j] * Y_sol[(j - 1) * L + 1 : j * L, :]
             end
-            return BlockSolveResult(X, err < tol, err, k)
+            return BlockSolveResult(X, err < tol, err, k, residual_history)
         end
     end
     # Unreachable — the loop returns on the final iteration.
-    return BlockSolveResult(zeros(ComplexF64, N, L), false, err, iter)
+    return BlockSolveResult(zeros(ComplexF64, N, L), false, err, iter, residual_history)
 end

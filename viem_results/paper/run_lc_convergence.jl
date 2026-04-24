@@ -110,24 +110,25 @@ function solve_one(p::GREParams, lc_value, m_p_xyz, mon::RSSMonitor.Monitor;
     peak_rss = RSSMonitor.peak_bytes(mon)
 
     return (
-        n_tet      = n_tets(mesh),
-        n_dof      = n_basis(basis),
-        r_ve       = r_ve,
-        h_bar      = h_bar,
-        t_build    = t_build,
-        t_setup    = t_setup,
-        t_solve    = t_solve,
-        t_total    = t_total,
-        peak_rss   = peak_rss,
-        iters      = solve_info.iterations,
-        converged  = solve_info.converged,
-        solver_err = Float64(solve_info.residual_norm),
-        C_abs      = sr.C_abs,
-        C_ext      = sr.C_ext,
-        C_sca      = sr.C_ext - sr.C_abs,
-        S_fw_theta = cas_results[1].S_fw_theta,
-        S_fw_phi   = cas_results[1].S_fw_phi,
-        S_bk       = cas_results[1].S_bk,
+        n_tet            = n_tets(mesh),
+        n_dof            = n_basis(basis),
+        r_ve             = r_ve,
+        h_bar            = h_bar,
+        t_build          = t_build,
+        t_setup          = t_setup,
+        t_solve          = t_solve,
+        t_total          = t_total,
+        peak_rss         = peak_rss,
+        iters            = solve_info.iterations,
+        converged        = solve_info.converged,
+        solver_err       = Float64(solve_info.residual_norm),
+        residual_history = Vector{Float64}(solve_info.residual_history),
+        C_abs            = sr.C_abs,
+        C_ext            = sr.C_ext,
+        C_sca            = sr.C_ext - sr.C_abs,
+        S_fw_theta       = cas_results[1].S_fw_theta,
+        S_fw_phi         = cas_results[1].S_fw_phi,
+        S_bk             = cas_results[1].S_bk,
     )
 end
 
@@ -188,6 +189,18 @@ function write_convergence_h5(path, shape, material, m_p_xyz, p, results, mie)
         write_dataset(c, "iters",           Int64[Int64(r.iters)    for r in results])
         write_dataset(c, "converged",       Int8[Int8(r.converged ? 1 : 0) for r in results])
         write_dataset(c, "solver_err",      Float64[r.solver_err for r in results])
+        # residual_history: (n_lc_points, MAXITER_HISTORY), NaN-padded
+        hist_mat = fill(NaN, n, MAXITER_HISTORY)
+        for (i, r) in enumerate(results)
+            eh = r.residual_history
+            m_eh = min(length(eh), MAXITER_HISTORY)
+            @views hist_mat[i, 1:m_eh] .= eh[1:m_eh]
+        end
+        d_hist = create_dataset(c, "residual_history", Float64, size(hist_mat))
+        attrs(d_hist)["definition"] =
+            "per-iteration relative residual per lc point, shape " *
+            "(n_lc_points, $MAXITER_HISTORY).  NaN-padded beyond iter_fin."
+        write(d_hist, hist_mat)
         write_dataset(c, "C_abs",     Float64[r.C_abs   for r in results])
         write_dataset(c, "C_ext",     Float64[r.C_ext   for r in results])
         write_dataset(c, "C_sca",     Float64[r.C_sca   for r in results])

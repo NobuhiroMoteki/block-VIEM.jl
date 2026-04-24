@@ -668,8 +668,9 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
 
     local D_block::Matrix{ComplexF64}
     # Solver diagnostics — populated by both branches; the dense branch
-    # returns sentinel values since LU has no iteration count.
-    solve_info = (iterations = 0, residual_norm = 0.0, converged = true)
+    # returns sentinel values since LU has no iteration count / history.
+    solve_info = (iterations = 0, residual_norm = 0.0, converged = true,
+                  residual_history = Float64[])
 
     if method === :dense
         Z = assemble_impedance_matrix(basis; k0 = k0_c, eps_p = eps_p_c,
@@ -717,9 +718,10 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
         res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
                            verbose = verbose)
         D_block = res.X
-        solve_info = (iterations    = res.iterations,
-                      residual_norm = res.residual_norm,
-                      converged     = res.converged)
+        solve_info = (iterations       = res.iterations,
+                      residual_norm    = res.residual_norm,
+                      converged        = res.converged,
+                      residual_history = res.residual_history)
         verbose && @info "solve_cas_v2_orientations (AIM block Krylov)" method =
             method iterations = res.iterations residual = res.residual_norm
     else

@@ -36,6 +36,11 @@ const N_ALPHA_DEFAULT = 4
 const N_BETA_DEFAULT  = 5
 const N_GAMMA_DEFAULT = 5
 
+# Residual-history length for /target/cost/residual_history (CLAUDE.md §7.5 /
+# block-DDA_Py parity).  Must match the MAXITER used by run_viem.jl and
+# friends; slots that converge earlier are NaN-padded.
+const MAXITER_HISTORY = 100
+
 # ──────────────────────────────────────────────────────────────────────
 #  Schema writer
 # ──────────────────────────────────────────────────────────────────────
@@ -224,6 +229,19 @@ function create_paper_h5(filename::AbstractString;
            "1 if block-Krylov reached tol, else 0")
         ds(cost, "solver_err",       shape_cond, Float64,
            "final relative residual ‖B − A·X‖_F / ‖B‖_F")
+
+        # Per-iteration residual history (v0.7.5, symmetric with DDA).
+        # Shape: shape_cond × MAXITER_HISTORY.  NaN-padded beyond iter_fin.
+        # residual_history[..., k] = relative residual after iteration k.
+        shape_hist = (shape_cond..., MAXITER_HISTORY)
+        d_hist = create_dataset(cost, "residual_history", Float64, shape_hist)
+        attrs(d_hist)["definition"] =
+            "per-iteration relative residual ‖B − A·X‖_F / ‖B‖_F, " *
+            "NaN-padded to length $MAXITER_HISTORY.  entry [..., k] is " *
+            "the residual after iteration k (1-indexed); NaN if k > iter_fin.  " *
+            "Enables convergence-profile figures symmetric with block-DDA_Py."
+        # Initialise with NaN so unfilled slots are distinguishable from 0.
+        write(d_hist, fill(NaN, shape_hist))
     end
 
     println("Created $filename")
