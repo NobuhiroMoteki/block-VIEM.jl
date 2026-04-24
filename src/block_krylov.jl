@@ -136,45 +136,93 @@ function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
 
     Vblocks = Vector{Matrix{ComplexF64}}()
     push!(Vblocks, V1)
-    # H is stored as a dense (maxiter+1)·L × maxiter·L upper block-Hessenberg
-    # matrix, grown column-block by column-block.
-    Hfull = zeros(ComplexF64, (maxiter + 1) * L, maxiter * L)
+
+    # Incremental block-Givens QR of the block-Hessenberg H.
+    #
+    # Previous implementation rebuilt and re-solved an (k+1)L × kL
+    # least-squares problem every iteration (O((kL)^3) each), which
+    # dominated the per-iter cost for large L and large k in
+    # paper-production runs.  We instead maintain:
+    #
+    #   R       — kL × kL upper-triangular factor of the block-Hessenberg
+    #             H after rolling block-Givens triangularisation
+    #   b_hat   — (maxiter+1)L × L transformed RHS; starts as [Λ; 0; …]
+    #             and rotations are applied as each new block column of H
+    #             is generated.  The residual Frobenius norm at iteration
+    #             k equals ‖b_hat[kL+1:(k+1)L, :]‖.
+    #   Qstore  — one 2L × 2L orthogonal Q per iteration k, obtained from
+    #             QR of the 2L × L "super-block" [H_{kk}; H_{k+1,k}].
+    #             Applied from the left to future H-columns to propagate
+    #             the triangularisation, and to the corresponding row
+    #             range of b_hat.
+    #
+    # Per-iter cost drops from O((kL)^3) for the LS solve to O(kL^2) for
+    # rotation propagation + one 2L × L block QR (O(L^3)).
+    R_tri   = zeros(ComplexF64, maxiter * L, maxiter * L)
+    b_hat   = zeros(ComplexF64, (maxiter + 1) * L, L)
+    @views b_hat[1:L, :] .= Λ
+    Qstore  = Vector{Matrix{ComplexF64}}(undef, maxiter)
 
     err = Inf
     iter = 0
     for k in 1:maxiter
         iter = k
         W = A * Vblocks[k]               # N × L
-        # Block Gram–Schmidt against prior blocks
+
+        # ── Block Gram–Schmidt ──────────────────────────────────────
+        H_col = zeros(ComplexF64, (k + 1) * L, L)
         for i in 1:k
             Hik = Vblocks[i]' * W        # L × L
-            Hfull[(i - 1) * L + 1:i * L, (k - 1) * L + 1:k * L] .= Hik
+            @views H_col[(i - 1) * L + 1 : i * L, :] .= Hik
             W .-= Vblocks[i] * Hik
         end
-        # Thin QR of the remaining block
-        Qfk = qr(W)
-        Vk1 = Matrix{ComplexF64}(Qfk.Q)[:, 1:L]
+        # Thin QR of the remaining block → V_{k+1}, H_{k+1,k}
+        Qfk  = qr(W)
+        Vk1  = Matrix{ComplexF64}(Qfk.Q)[:, 1:L]
         Hk1k = Matrix{ComplexF64}(Qfk.R)
-        Hfull[k * L + 1:(k + 1) * L, (k - 1) * L + 1:k * L] .= Hk1k
+        @views H_col[k * L + 1 : (k + 1) * L, :] .= Hk1k
         push!(Vblocks, Vk1)
 
-        # Solve least-squares  min ‖ H_k · Y − E1·Λ ‖_F  where
-        # H_k is the current (k+1)L × kL sub-matrix and the RHS top block
-        # is Λ (others are zero). We solve it each iteration — cheap for
-        # small k.
-        m = (k + 1) * L
-        n = k * L
-        Hk_view = @view Hfull[1:m, 1:n]
-        rhs = zeros(ComplexF64, m, L)
-        rhs[1:L, :] .= Λ
-        Y = Hk_view \ rhs
-        resblk = Hk_view * Y - rhs
-        err = norm(resblk) / Bnorm
+        # ── Apply previously stored block-Givens rotations ──────────
+        # Rotation j acts on rows (j-1)L+1 : (j+1)L of any H-column.
+        for j in 1:k-1
+            rng = (j - 1) * L + 1 : (j + 1) * L
+            @views H_col[rng, :] = Qstore[j]' * H_col[rng, :]
+        end
+
+        # ── New block-Givens to zero the sub-diagonal L×L block ────
+        # QR the 2L × L super-block [H_{kk}; H_{k+1,k}].  Q is 2L × 2L
+        # orthogonal; R's top L×L is the new diagonal block of R_tri.
+        # Multiplying `Qs.Q` by a `(2L × 2L)` identity forces materialisation
+        # of the full Q — `Matrix(Qs.Q)` on modern Julia returns the thin
+        # form by default, which would break the subsequent rotations of
+        # b_hat (off-diagonal block-rows must be rotated, not discarded).
+        super_rng = (k - 1) * L + 1 : (k + 1) * L
+        Qs        = qr(@view H_col[super_rng, :])
+        Qmat      = Matrix{ComplexF64}(Qs.Q * I(2 * L))  # 2L × 2L full Q
+        Rmat      = Matrix{ComplexF64}(Qs.R)             # L × L (thin R)
+        Qstore[k] = Qmat
+        @views H_col[(k - 1) * L + 1 : k * L, :] .= Rmat
+        @views H_col[k * L + 1 : (k + 1) * L, :] .= 0
+
+        # Store k-th block column of R_tri (only first k block-rows non-zero).
+        @views R_tri[1 : k * L, (k - 1) * L + 1 : k * L] .= H_col[1 : k * L, :]
+
+        # Apply new rotation to b_hat on the same row range.
+        @views b_hat[super_rng, :] = Qmat' * b_hat[super_rng, :]
+
+        # Residual Frobenius norm: rows kL+1:(k+1)L of b_hat.
+        err = norm(@view b_hat[k * L + 1 : (k + 1) * L, :]) / Bnorm
         verbose && @info "block_gmres" iter = k err = err
+
         if err < tol || k == maxiter
+            # Upper-triangular solve R_k · Y = b_hat[1:kL, :]
+            R_top = UpperTriangular(@view R_tri[1 : k * L, 1 : k * L])
+            Y_sol = R_top \ @view b_hat[1 : k * L, :]
+            # Reconstruct X = Σ_j V_j * Y_j
             X = zeros(ComplexF64, N, L)
             for j in 1:k
-                X .+= Vblocks[j] * Y[(j - 1) * L + 1:j * L, :]
+                @views X .+= Vblocks[j] * Y_sol[(j - 1) * L + 1 : j * L, :]
             end
             return BlockSolveResult(X, err < tol, err, k)
         end
