@@ -35,33 +35,26 @@ so downstream analysis pipelines work with either without modification.
 4. **Birefringent (anisotropic) materials.** Diagonal permittivity tensor
    `eps_p = diag(eps_x, eps_y, eps_z)` is supported throughout the solver,
    post-processing, and sweep scripts.
-5. **Gaussian Random Ellipsoid (GRE) shape model.** Parametric irregular
-   particle shapes `(r_v_base, bc_ratio, ab_ratio, beta)` matching
-   block-DDA_Py (Muinonen & Pieniluoma 2011, JQSRT). Tetrahedral meshes
-   are generated automatically via Gmsh with adaptive mesh size based on
-   wavelength, geometry, and surface-deformation correlation length.
-6. **Sphere-aggregate targets.** Fused clusters of spheres are handled
-   as first-class geometries (`SphereAggregate`, `mesh_sphere_aggregate`).
-   Built-in constructors cover linear chains, planar arrays, and
-   FCC / BCC / HCP clusters (`make_linear_chain`, `make_planar_array`,
-   `make_fcc_cluster`, `make_bcc_cluster`, `make_hcp_cluster`);
-   arbitrary monomer-center/radius lists (e.g. random fractal-like
-   aggregates from the `aggregate_generator_PTSA` HDF5 files) are
-   loaded via `load_ptsa_h5`. Overlap between adjacent monomers is
-   specified through an interpretable `neck_ratio` (contact-circle
-   radius ÷ monomer radius). A single conforming tetrahedral mesh
-   spans the entire aggregate so the internal D-field is resolved
-   across every neck.
-7. **CAS-v2 observables.** Computes the polarized complex forward-scattering
+5. **Gaussian Random Ellipsoid (GRE) and sphere-aggregate shape models.**
+   Parametric irregular shapes (`GREParams`) and discrete-monomer
+   clusters (`SphereAggregate`, with built-in chain / planar / FCC /
+   BCC / HCP generators and PTSA HDF5 loader) are both meshed via
+   Gmsh OpenCASCADE with adaptive mesh size and a volume-preserving
+   final rescale (block-DDA_Py-compatible). See
+   [docs/descriptions_particle_shape_model.md](docs/descriptions_particle_shape_model.md)
+   for the full specification of parameter ranges, the `neck_ratio`
+   convention, the volume-preserving rescale, and discretisation
+   examples.
+6. **CAS-v2 observables.** Computes the polarized complex forward-scattering
    amplitudes `S(0)_theta`, `S(0)_phi` (PCAS) and the complex
    backward-scattering amplitude `S(180)` (OCBS), plus `C_ext`, `C_abs`,
    `C_sca`.
-8. **Production sweep with resume.** `run_viem.jl` performs multi-dimensional
+7. **Production sweep with resume.** `run_viem.jl` performs multi-dimensional
    parameter sweeps (wavelength x refractive index x shape x orientation),
    writes results to HDF5 in the block-DDA_Py-compatible schema, and
    resumes from partially completed files. On solver failure, fills NaN and
    continues (matching block-DDA_Py).
-9. **Mie reference.** Each sweep condition is compared to the Mie solution
+8. **Mie reference.** Each sweep condition is compared to the Mie solution
    for the volume-equivalent sphere with axis-averaged refractive index.
 
 ### Validation
@@ -316,90 +309,25 @@ for λ in wavelengths
 end
 ```
 
-### Gaussian Random Ellipsoid (GRE) shapes
+### Particle shape models
 
-block-VIEM.jl can generate tetrahedral meshes for the same Gaussian
-Random Ellipsoid particle shapes used by block-DDA_Py, directly from the
-`(r_v_base, bc_ratio, ab_ratio, beta)` parameter set:
+The two shape families supported by block-VIEM.jl — Gaussian Random
+Ellipsoid (GRE) and sphere aggregates — share the same Gmsh-based
+discretisation pipeline and a common volume-preserving rescale.
+Parameter ranges, the `neck_ratio` neck-width convention, the
+volume-preserving rescale (v0.7.7+), discretisation examples, and
+recommended usage patterns are documented in
+**[docs/descriptions_particle_shape_model.md](docs/descriptions_particle_shape_model.md)**.
 
-```julia
-using BlockVIEM, Random
-
-p = GREParams(
-    0.2,    # r_v_base [μm] — volume-equivalent radius of base ellipsoid
-    3.0,    # bc_ratio      — b/c semi-axis ratio  (range [1, 7])
-    1.5,    # ab_ratio      — a/b semi-axis ratio  (range [1, 2])
-    0.15,   # beta          — Gaussian deformation σ (range [0, 0.3])
-)
-
-rng = MersenneTwister(42)
-
-# Mesh size is chosen automatically from wavelength + geometry:
-mesh, r_ve = gre_mesh(p, rng;
-    wl_0    = 0.638,   # vacuum wavelength [μm]
-    m_p_max = 1.5,     # max |m_p| (for resolution estimate)
-    N_pw    = 10,       # elements per wavelength inside particle
-)
-
-# Or set lc explicitly:
-mesh, r_ve = gre_mesh(p, rng; lc = 0.04)
-
-basis = build_swg_basis(mesh; include_boundary_faces = true)
-# ... proceed with solve_cas_v2_orientations as above
-```
-
-For `beta = 0` (smooth ellipsoid) the mesh is generated via the Gmsh
-OpenCASCADE kernel.  For `beta > 0`, a Gaussian random deformation
-field is sampled on the ellipsoid surface (Muinonen & Pieniluoma 2011,
-JQSRT) and all mesh nodes are deformed radially, preserving mesh
-quality.  The adaptive mesh size `adaptive_lc(p; ...)` takes the minimum
-of a wavelength constraint, a geometry constraint (`c/3`), and the
-surface-deformation correlation length (`0.1c`).
-
-#### Visualising discretised targets
-
-[viz/visualize_gre.jl](viz/visualize_gre.jl) renders the tetrahedral
-target of a GRE particle at a given laboratory-frame orientation
-(mirroring `run_gaussian_ellipsoid.ipynb` in block-DDA_Py). The
-semi-transparent wireframe shows the discretised surface triangles;
-black/red/blue arrows mark the lab-frame z/x/y axes (z = incident beam
-direction):
-
-```julia
-# from the viz/ environment
-include("viz/visualize_gre.jl")
-
-p = GREParams(
-    0.30,   # r_v_base [μm]
-    2.0,    # bc_ratio
-    1.0,    # ab_ratio
-    0.10,   # beta
-)
-visualize_gre(p, (0, 45, 0);                 # ZYZ Euler angles in degrees
-              output_path = "gre.png",
-              lc          = 0.04)             # coarser mesh for clarity
-```
-
-Batch generation of the README gallery:
+Wireframe galleries of representative discretised targets are
+generated by
 
 ```bash
-julia --project=viz viz/visualize_gre.jl
-# writes PNGs to viz/figs/
+julia --project=viz viz/visualize_gre.jl         # GRE gallery
+julia --project=viz viz/visualize_aggregate.jl   # sphere-aggregate gallery
 ```
 
-Five representative shapes at `r_v_base = 0.30 μm`, rendered with a
-coarser-than-physics mesh (`lc = c / 2.5`) purely for wireframe
-readability:
-
-| sphere (`bc=1, ab=1, β=0`)         | oblate (`bc=3, ab=1, β=0`)             | triaxial (`bc=2, ab=1.5, β=0`)                  |
-| :--------------------------------: | :------------------------------------: | :---------------------------------------------: |
-| ![sphere](viz/figs/gre_sphere.png) | ![oblate](viz/figs/gre_oblate_bc3.png) | ![triaxial](viz/figs/gre_triaxial_bc2_ab15.png) |
-| Euler = (0°, 0°, 0°)               | Euler = (0°, 60°, 0°)                  | Euler = (30°, 45°, 0°)                          |
-
-| GRE (`bc=2, ab=1, β=0.10`)                | GRE (`bc=1.5, ab=1.5, β=0.20`)                  |
-| :---------------------------------------: | :---------------------------------------------: |
-| ![gre_b010](viz/figs/gre_beta010_bc2.png) | ![gre_b020](viz/figs/gre_beta020_bc15_ab15.png) |
-| Euler = (0°, 45°, 0°)                     | Euler = (20°, 60°, 10°)                         |
+writing PNGs to `viz/figs/`.
 
 ### Parameter-sweep HDF5 I/O
 
@@ -825,8 +753,10 @@ materials, and orientation grid stay in lock-step between the two codes.
 
 - `docs/theory_note.tex` — full formulation reference: EFVIE-D, SWG /
   half-SWG, Duffy transform, AIM, block-Krylov, CAS-v2 observables,
-  Mie validation (dielectric + plasmonic Au), spheroid benchmarks,
-  GRE shape model
+  Mie validation (dielectric + plasmonic Au), spheroid benchmarks
+- `docs/descriptions_particle_shape_model.md` — GRE and sphere-aggregate
+  shape models, discretisation, `neck_ratio` convention, and
+  volume-preserving rescale
 - `docs/io_spec.md` — block-DDA_Py compatible I/O specification
 - `.claude/reference/` — primary literature (SWG 1984, Volakis-Sertel,
   Sheng-Song, Mousavi-Sukumar 2010)
