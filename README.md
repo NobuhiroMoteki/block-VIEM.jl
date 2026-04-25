@@ -761,7 +761,16 @@ materials, and orientation grid stay in lock-step between the two codes.
 - `.claude/reference/` — primary literature (SWG 1984, Volakis-Sertel,
   Sheng-Song, Mousavi-Sukumar 2010)
 
-## Installation (development)
+## Installation
+
+For a from-scratch setup on **Windows + WSL2 (Ubuntu)** or **native
+Ubuntu** — including Julia 1.12.5 via `juliaup`, system-package
+prerequisites for `Gmsh.jl`, the `viz/` figure-generation
+sub-environment, and the test-suite smoke test — see the dedicated
+**[Installation Guide](Installation_guide.md)**.
+
+Quick development setup once the prerequisites are in place
+(Julia ≥ 1.10, Gmsh's runtime libraries, a clone of this repository):
 
 ```julia
 julia> using Pkg
@@ -769,9 +778,6 @@ julia> Pkg.activate(".")
 julia> Pkg.instantiate()
 julia> Pkg.test()
 ```
-
-Julia ≥ 1.10 is required. The package depends on `Gmsh.jl` for mesh
-generation and I/O.
 
 ## License
 
