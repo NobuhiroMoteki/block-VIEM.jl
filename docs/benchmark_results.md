@@ -7,7 +7,7 @@ place:
 - Numerical conditions (geometry, material, mesh, solver settings).
 - Reference data (Mie series, MSTM T-matrix, block-DDA_Py).
 - Tabulated relative errors for every observable reported in the
-  paper-production HDF5 schema (`C_ext`, `C_abs`, `C_sca`,
+  paper-production HDF5\,\text{s}chema (`C_ext`, `C_abs`, `C_sca`,
   `S_fw_θ`, `S_fw_φ`, `S_bk`).
 - Mesh-refinement (`ℓ_c` convergence) studies and the corresponding
   fitted convergence rates.
@@ -39,8 +39,8 @@ Driver: `test/mie_reference.jl` (used inside the Phase-5 validation
 tests, not a separate benchmark script).
 
 **Conditions.** Volume-equivalent sphere,
-$\lambda_0 = \SI{4}{\micro\metre}$, $m_m = 1$,
-$m_p = 1.5 + 0.01\,i$, $r = \SI{0.5}{\micro\metre}$.
+$\lambda_0 = 4\,\text{μm}$, $m_m = 1$,
+$m_p = 1.5 + 0.01\,i$, $r = 0.5\,\text{μm}$.
 Mesh sweep $\ell_c \in \{0.30, 0.18, 0.12\}$ μm.
 
 **Result.** After the 2026-04-13 physics-convention switch, both
@@ -61,10 +61,10 @@ Driver: [benchmarks/cas_v2/au_sphere_mie.jl](../benchmarks/cas_v2/au_sphere_mie.
 - Material: Johnson & Christy 1972 gold,
   $m_\text{Au} = 0.17525 + 3.4830\,i$,
   $\varepsilon_\text{Au} = -12.10 + 1.22\,i$ at
-  $\lambda_0 = \SI{0.638}{\micro\metre}$ (via
+  $\lambda_0 = 0.638\,\text{μm}$ (via
   [refractiveindex.info](https://refractiveindex.info/?shelf=main&book=Au&page=Johnson)).
 - Geometry: sphere, size parameter $x = k_0 r = 0.63$,
-  $r \approx \SI{0.0640}{\micro\metre}$.
+  $r \approx 0.0640\,\text{μm}$.
 - Background: vacuum, $m_m = 1$.
 - Basis: half-SWG (boundary faces included).
 - Quadrature: `duffy_reference_rule(5)`.
@@ -90,10 +90,10 @@ contaminate the discretisation error).
 
 | ℓ_c [μm] | N    | Method       | C_ext  | C_abs  | C_sca  | S_fw,mean | S_bk   | wall  |
 | -------- | ---- | ------------ | ------ | ------ | ------ | --------- | ------ | ----- |
-| 0.020    | 2134 | dense (LU)   | 0.65 % | 0.005 % | 0.75 % | 0.58 %    | 0.28 % | 17 s  |
-| 0.020    | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 %    | 0.11 % | 43 s  |
-| 0.014    | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 %    | 0.15 % | 68 s  |
-| 0.014    | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 %    | 0.07 % | 105 s |
+| 0.020    | 2134 | dense (LU)   | 0.65 % | 0.005 % | 0.75 % | 0.58 %    | 0.28 % | 17\,\text{s}  |
+| 0.020    | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 %    | 0.11 % | 43\,\text{s}  |
+| 0.014    | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 %    | 0.15 % | 68\,\text{s}  |
+| 0.014    | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 %    | 0.07 % | 105\,\text{s} |
 
 **Findings.**
 
@@ -112,7 +112,7 @@ contaminate the discretisation error).
    adds to the SWG discretisation error. The amplitudes inherit
    only the SWG error.
 4. Monotone sub-1 % accuracy in the plasmonic regime — where the
-   divergence-free part of $\bm D$ is comparable to the divergent
+   divergence-free part of $\boldsymbol{D}$ is comparable to the divergent
    (charge) part — confirms that the half-SWG surface correction
    $K^{B} + K^{C} + K^{D}$ correctly enforces the surface
    polarisation-charge boundary condition. The interior-only SWG
@@ -153,14 +153,14 @@ Drivers:
 the exchange format.
 
 **Conditions.**
-- Particle: oblate spheroid, $D_{ve} = \SI{0.40}{\micro\metre}$,
+- Particle: oblate spheroid, $D_{ve} = 0.40\,\text{μm}$,
   `bc_ratio = 3`, $m_p = 1.5$ (non-absorbing).
-- Background: $m_m = 1$, $\lambda_0 = \SI{0.638}{\micro\metre}$
+- Background: $m_m = 1$, $\lambda_0 = 0.638\,\text{μm}$
   ($k_0 r_{ve} \approx 1.97$).
 - Orientations: $(\alpha, \beta, \gamma) = (0, \pi/4, 0)$ and
   $(0, \pi/2, 0)$.
 - Discretisations: DDA $N_\text{dip} = 2236$ with dpl = 17;
-  VIEM half-SWG, $\ell_c = \SI{0.035}{\micro\metre}$,
+  VIEM half-SWG, $\ell_c = 0.035\,\text{μm}$,
   $N_\text{dof} = 8746$.
 
 **Result.**
@@ -170,18 +170,18 @@ the exchange format.
 | **β = π/4** | | | |
 | $S_{\text{fw},\theta}$ | $+0.23514 + 0.09368\,i$ | $+0.23143 + 0.09164\,i$ | 1.67 % |
 | $S_{\text{fw},\phi}$ | $+0.23884 + 0.18561\,i$ | $+0.23480 + 0.17937\,i$ | 2.46 % |
-| $C_\text{ext}$ | $\SI{0.17819}{\square\micro\metre}$ | $\SI{0.17291}{\square\micro\metre}$ | 2.96 % |
+| $C_\text{ext}$ | $0.17819\,\text{μm²}$ | $0.17291\,\text{μm²}$ | 2.96 % |
 | **β = π/2** | | | |
 | $S_{\text{fw},\theta}$ | $+0.23703 + 0.08742\,i$ | $+0.23221 + 0.08536\,i$ | 2.08 % |
 | $S_{\text{fw},\phi}$ | $+0.29578 + 0.21695\,i$ | $+0.28980 + 0.20883\,i$ | 2.75 % |
-| $C_\text{ext}$ | $\SI{0.19419}{\square\micro\metre}$ | $\SI{0.18769}{\square\micro\metre}$ | 3.34 % |
+| $C_\text{ext}$ | $0.19419\,\text{μm²}$ | $0.18769\,\text{μm²}$ | 3.34 % |
 
 **Findings.**
 
 - VIEM and DDA agree to ~ 2–3 % on all complex polarimetric
   amplitudes at both tilts, on both real and imaginary parts
   independently — not just on magnitudes.
-- The VIEM mesh recovered $r_{ve}^\text{mesh} = \SI{0.19918}{\micro\metre}$
+- The VIEM mesh recovered $r_{ve}^\text{mesh} = 0.19918\,\text{μm}$
   (0.41 % volumetric error, before the v0.7.7 rescale; current
   builds hit $r_{ve} = 0.20000$ to machine precision); DDA
   introduces a comparable stair-casing error. The ~ 2 % code-to-code
@@ -199,11 +199,11 @@ script and consumed by the Julia side via
 [gre_mesh_with_field](../src/gre_mesh.jl#L571) so both codes solve
 the identical shape.
 
-**Common parameters.** $\lambda_0 = \SI{0.638}{\micro\metre}$,
+**Common parameters.** $\lambda_0 = 0.638\,\text{μm}$,
 $n_m = 1.0$, $m_p = 1.5 + 0.01\,i$,
-$r_\text{v,base} = \SI{0.20}{\micro\metre}$. DDA uses dpl = 17
+$r_\text{v,base} = 0.20\,\text{μm}$. DDA uses dpl = 17
 ($N_\text{DDA} \approx 2300$); VIEM uses
-$\ell_c = \SI{0.035}{\micro\metre}$
+$\ell_c = 0.035\,\text{μm}$
 ($N_\text{VIEM} \approx 8600$ half-SWG DOFs). Two tilt angles
 $\beta_\text{ori} = \pi/4, \pi/2$.
 
@@ -224,12 +224,12 @@ cubic-lattice DDA and tetrahedral VIEM.
 
 Drivers under [benchmarks/cas_v2/aniso_comparison/](../benchmarks/cas_v2/aniso_comparison/).
 
-**Setup.** Sphere, $r_{ve} = \SI{0.20}{\micro\metre}$,
-$\lambda_0 = \SI{0.638}{\micro\metre}$, with diagonal-tensor
-refractive index $\bm m_p = (m_x, m_y, m_z)$ passed identically to
+**Setup.** Sphere, $r_{ve} = 0.20\,\text{μm}$,
+$\lambda_0 = 0.638\,\text{μm}$, with diagonal-tensor
+refractive index $\boldsymbol{m}_p = (m_x, m_y, m_z)$ passed identically to
 both DDA and VIEM. Two tilt angles
 $\beta_\text{ori} = \pi/4, \pi/2$. VIEM mesh:
-$\ell_c = \SI{0.035}{\micro\metre}$, $N_\text{VIEM} \approx 8000$
+$\ell_c = 0.035\,\text{μm}$, $N_\text{VIEM} \approx 8000$
 half-SWG DOFs.
 
 | Case   | $m_p$               | $\|\Delta S_\theta\|/\|S_\theta\|$ | $\|\Delta S_\phi\|/\|S_\phi\|$ |
@@ -267,20 +267,20 @@ exact same physical problem.
 
 ### 7.1 Geometry, materials, and observable
 
-- Two equal-radius spheres of radius $R = \SI{0.030}{\micro\metre}$
-  with axial gap $\SI{0.003}{\micro\metre}$ (centre-to-centre
-  separation $d = \SI{0.063}{\micro\metre}$).
+- Two equal-radius spheres of radius $R = 0.030\,\text{μm}$
+  with axial gap $0.003\,\text{μm}$ (centre-to-centre
+  separation $d = 0.063\,\text{μm}$).
 - Doublet axis along the particle-frame $z$. The spheres are
   topologically disjoint so MSTM treats each monomer as an
   isolated VSWF expansion.
-- Vacuum background, $\lambda_0 = \SI{0.638}{\micro\metre}$.
+- Vacuum background, $\lambda_0 = 0.638\,\text{μm}$.
 - Three orientations $\beta \in \{0, \pi/4, \pi/2\}$, where
-  $\beta$ is the angle between $\hat{\bm{u}}_\text{inc}$ and the
+  $\beta$ is the angle between $\hat{\boldsymbol{u}}_\text{inc}$ and the
   doublet axis. VIEM realises $\beta$ via Euler $(0, \beta, 0)$;
-  MSTM rotates the doublet about $\hat{\bm{e}}_y$ by $\beta$.
+  MSTM rotates the doublet about $\hat{\boldsymbol{e}}_y$ by $\beta$.
 - Two materials: high-contrast dielectric (polystyrene-like)
   $m_p = 1.60 + 0.01\,i$ and plasmonic
-  $m_p = 0.17525 + 3.4830\,i$ (Au @ 638 nm, Johnson & Christy 1972).
+  $m_p = 0.17525 + 3.4830\,i$ (Au @ 638\,\text{nm}, Johnson & Christy 1972).
 
 The CAS-v2 forward amplitudes are defined in the
 block-DDA_Py / block-VIEM convention (RCP incidence) as
@@ -310,9 +310,9 @@ for generic aggregates.
 
 ### 7.2 Numerical setup
 
-- VIEM: $\ell_c = R/5 = \SI{0.006}{\micro\metre}$, 5348 tets,
+- VIEM: $\ell_c = R/5 = 0.006\,\text{μm}$, 5348 tets,
   $N = 11501$ half-SWG DOFs. AIM block-BiCGSTAB at tolerance
-  $10^{-7}$, pitch $0.5\bar{h} = \SI{0.0038}{\micro\metre}$.
+  $10^{-7}$, pitch $0.5\bar{h} = 0.0038\,\text{μm}$.
 - MSTM: VSWF truncation order **forced to $N_\text{trunc} = 15$**
   for both materials. The auto-truncation at $x \approx 0.30$
   returns $N = 3$, which is converged for the dielectric case but
@@ -422,9 +422,9 @@ error.
   driven in phase along their centre line, the interaction field
   concentrates in the sub-wavelength gap, and the surface plasmon
   lives in a skin layer of depth
-  $\delta = \lambda_0/(2\pi \Im m_p) \approx \SI{29}{\nano\metre}$,
+  $\delta = \lambda_0/(2\pi \Im m_p) \approx 29\,\text{nm}$,
   essentially the monomer radius itself. With
-  $\ell_c = R/5 = \SI{6}{\nano\metre}$ the skin layer is resolved
+  $\ell_c = R/5 = 6\,\text{nm}$ the skin layer is resolved
   by ~ 5 linear tets — adequate for few-percent accuracy but the
   Im $\theta$ channel is the stiffest observable at 10.5 %.
 
@@ -448,7 +448,7 @@ Driver:
 geometry, four refinement levels $\ell_c = R/k$ for
 $k = 5, 6, 7, 8$, all compared against the converged MSTM
 $N = 15$ reference. Single-threaded (Intel i7-1265U,
-\SI{16}{\giga\byte} RAM, Julia 1.11) — the v0.6.0 threaded setup
+16\,\text{GB} RAM, Julia 1.11) — the v0.6.0 threaded setup
 + block MVP gives a 2 – 3 × speed-up at 4 + Julia threads.
 
 ### 8.1 Per-component error vs ℓ_c at β = π/2
@@ -498,28 +498,28 @@ $\ell_c = R/10$ is the next planned refinement step.
 `total tracked` = `Base.summarysize(AIMOperator)` — every sparse
 matrix, FFT kernel, and mass matrix in the operator. For
 comparison the original Phase-1a `half_swg_extra` matrix alone
-reached \SI{486}{\mebi\byte} at $R/5$ and \SI{1074}{\mebi\byte}
+reached 486\,\text{MiB} at $R/5$ and 1074\,\text{MiB}
 at $R/6$ on the same geometry; Phase A reduces those totals to
-\SI{97}{\mebi\byte} and \SI{164}{\mebi\byte} — a 5.0 × / 6.5 × /
+97\,\text{MiB} and 164\,\text{MiB} — a 5.0 × / 6.5 × /
 11 × reduction at $R/5$ / $R/6$ / $R/7$ respectively. Asymptotic:
 total tracked grows as $\mathcal O(N_\text{dof}^{1.02})$ —
 essentially linear in $N$.
 
 | ℓ_c / R | N DOF  | N_bnd | $W^S$    | precorrection | total tracked | t_setup | t_solve (3 orient.) |
 | ------- | ------ | ----- | -------- | ------------- | ------------- | ------- | ------------------- |
-| 1/5     | 11 501 | 1 610 | 4.9 MiB  | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s               |
-| 1/6     | 18 919 | 2 254 | 8.1 MiB  | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s               |
-| 1/7     | 29 636 | 3 176 | 12.6 MiB | 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s               |
-| 1/8     | 45 585 | 4 210 | 19.4 MiB | 300.7 MiB     | **413.3 MiB** | 410 s   | 925 s               |
+| 1/5     | 11 501 | 1 610 | 4.9\,\text{MiB}  | 67.2\,\text{MiB}      | **96.8\,\text{MiB}**  | 105\,\text{s}   | 201\,\text{s}               |
+| 1/6     | 18 919 | 2 254 | 8.1\,\text{MiB}  | 116.5\,\text{MiB}     | **164.2\,\text{MiB}** | 179\,\text{s}   | 363\,\text{s}               |
+| 1/7     | 29 636 | 3 176 | 12.6\,\text{MiB} | 189.0\,\text{MiB}     | **262.7\,\text{MiB}** | 299\,\text{s}   | 718\,\text{s}               |
+| 1/8     | 45 585 | 4 210 | 19.4\,\text{MiB} | 300.7\,\text{MiB}     | **413.3\,\text{MiB}** | 410\,\text{s}   | 925\,\text{s}               |
 
 Setup and solve times both scale as $\mathcal{O}(N_\text{dof})$
 within measurement noise, consistent with the AIM MVP cost
 $\mathcal{O}(N_g \log N_g + N_\text{dof}\, n_\text{near})$ at fixed
-wavelength. With sub-\SI{300}{\mebi\byte} budgets through $R/7$,
-refinement to $R/8$ used 413 MiB operator memory (RSS peak ~ 3.8
+wavelength. With sub-300\,\text{MiB} budgets through $R/7$,
+refinement to $R/8$ used 413\,\text{MiB} operator memory (RSS peak ~ 3.8
 GiB during the 3-orientation block-BiCGSTAB). The projected
-\SI{760}{\mebi\byte} operator memory at $R/10$ is feasible on the
-same 16 GB workstation.
+760\,\text{MiB} operator memory at $R/10$ is feasible on the
+same 16\,\text{GB} workstation.
 
 ---
 
@@ -529,7 +529,7 @@ Driver: [benchmarks/cas_v2/au_sphere_mie.jl](../benchmarks/cas_v2/au_sphere_mie.
 (VIEM side) and the equivalent block-DDA_Py sweep on the same
 sphere. The Mie analytical solution is the common reference.
 
-### 9.1 Low-contrast: $m_p = 1.5 + 0.01\,i$, $r = \SI{1}{\micro\metre}$, $\lambda_0 = \SI{10}{\micro\metre}$, $x \approx 0.63$
+### 9.1 Low-contrast: $m_p = 1.5 + 0.01\,i$, $r = 1\,\text{μm}$, $\lambda_0 = 10\,\text{μm}$, $x \approx 0.63$
 
 Single orientation, Intel i7-1265U, single-threaded
 (`t_setup` drops by ~ 2.5 × on a 4-thread machine after the
@@ -537,14 +537,14 @@ parallel setup added in v0.6.0).
 
 | Code          | N DOF | $C_\text{abs}$ rel. err. | t_setup | t_solve | memory |
 | ------------- | ----- | ------------------------ | ------- | ------- | ------ |
-| block-DDA_Py  | 302   | 1.7 %  | < 0.1 s | < 0.1 s | 6 MB   |
-| block-DDA_Py  | 4 419 | 0.8 %  | < 0.1 s | 0.1 s   | 64 MB  |
-| block-VIEM.jl | 589   | 8.4 %  | 7.9 s   | 2.2 s   | 6 MB   |
-| block-VIEM.jl | 1 986 | 3.6 %  | 23.9 s  | 0.7 s   | 63 MB  |
-| block-VIEM.jl | 7 868 | 1.4 %  | 145.8 s | 2.7 s   | 991 MB |
+| block-DDA_Py  | 302   | 1.7 %  | < 0.1\,\text{s} | < 0.1\,\text{s} | 6 MB   |
+| block-DDA_Py  | 4 419 | 0.8 %  | < 0.1\,\text{s} | 0.1\,\text{s}   | 64 MB  |
+| block-VIEM.jl | 589   | 8.4 %  | 7.9\,\text{s}   | 2.2\,\text{s}   | 6 MB   |
+| block-VIEM.jl | 1 986 | 3.6 %  | 23.9\,\text{s}  | 0.7\,\text{s}   | 63 MB  |
+| block-VIEM.jl | 7 868 | 1.4 %  | 145.8\,\text{s} | 2.7\,\text{s}   | 991 MB |
 
-DDA achieves 1.7 % accuracy with 302 dipoles in under 0.1 s. VIEM
-needs ~ 2 000 DOFs and ~ 10 s of setup (4 threads) for comparable
+DDA achieves 1.7 % accuracy with 302 dipoles in under 0.1\,\text{s}. VIEM
+needs ~ 2 000 DOFs and ~ 10\,\text{s} of setup (4 threads) for comparable
 accuracy. The DDA cubic lattice has an exact FFT-MVP with no
 near-field precorrection, so its setup cost is effectively zero.
 **Recommendation:** for $|m_p / m_m| < 2$ and moderate aspect
@@ -588,9 +588,9 @@ Same sphere, single orientation, Mie reference for $C_\text{abs}$:
 
 | Method                             | $N_\text{dof}$ | $C_\text{abs}$ rel. err. |
 | ---------------------------------- | -------------- | ------------------------ |
-| DDA, $d = \SI{0.14}{\micro\metre}$ | 4488           | 1.25 %                   |
-| half-SWG VIEM, $\ell_c = \SI{0.50}{\micro\metre}$ | 589  | 0.21 % |
-| half-SWG VIEM, $\ell_c = \SI{0.18}{\micro\metre}$ | 7868 | 0.15 % |
+| DDA, $d = 0.14\,\text{μm}$ | 4488           | 1.25 %                   |
+| half-SWG VIEM, $\ell_c = 0.50\,\text{μm}$ | 589  | 0.21 % |
+| half-SWG VIEM, $\ell_c = 0.18\,\text{μm}$ | 7868 | 0.15 % |
 
 VIEM is **10–12× more accurate per DOF** than DDA on this test:
 matching the 1.25 % DDA error needs only ~ 400 half-SWG DOFs vs
@@ -642,7 +642,7 @@ the script sweeps **five mesh-size factors**
 factor ∈ {1.5, 1.0, 0.7, 0.5, 0.35} × adaptive_lc(...)
 ```
 
-at the representative size $a_{eq} = \SI{0.1}{\micro\metre}$,
+at the representative size $a_{eq} = 0.1\,\text{μm}$,
 single orientation, and writes `convergence_<shape>_<material>.hdf5`
 with the standard observable schema plus a `lc_factor` attribute
 on every slot.
