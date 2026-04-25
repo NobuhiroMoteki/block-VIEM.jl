@@ -59,114 +59,42 @@ so downstream analysis pipelines work with either without modification.
 
 ### Validation
 
-- **Plasmonic Au Mie sphere** (`benchmarks/cas_v2/au_sphere_mie.jl`):
-  Johnson & Christy 1972 gold at wl_0 = 0.638 um
-  (m_p = 0.17525 + 3.4830i, eps_p = -12.10 + 1.22i, x = 0.63).
-  Both dense (LU) and AIM-BiCGSTAB solvers achieve sub-1 % on all
-  five observables at N = 2134 half-SWG DOFs (single-threaded wall
-  times; see § *Parallel execution* for the 2–3 × speed-up at 4+
-  Julia threads):
-
-  | lc [um] | N    | method       | C_ext  | C_abs  | C_sca  | S_fw_mean | S_bk   | time  |
-  |---------|------|--------------|--------|--------|--------|-----------|--------|-------|
-  | 0.020   | 2134 | dense (LU)   | 0.65 % | 0.01 % | 0.75 % | 0.58 %    | 0.28 % | 17 s  |
-  | 0.020   | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 %    | 0.11 % | 43 s  |
-  | 0.014   | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 %    | 0.15 % | 68 s  |
-  | 0.014   | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 %    | 0.07 % | 105 s |
-
-- **Spheroid symmetry** (`benchmarks/cas_v2/spheroid_ar3.jl`): the
-  analytical α-expansion `S_θ(α) = A + B·exp(+2jα)` holds at machine
-  precision (~5×10⁻¹⁵) on an oblate AR = 3 mesh.
-- **Cross-validation vs block-DDA_Py (spheroid)**
-  (`benchmarks/cas_v2/dda_comparison/`): oblate AR = 3 spheroid
-  (D_ve = 0.40 μm, m_p = 1.5, λ₀ = 0.638 μm), VIEM and DDA agree to
-  ~2 % on the complex polarimetric forward amplitudes at two tilt
-  angles (β = π/4, π/2).
-- **GRE cross-validation vs block-DDA_Py (β > 0)**
-  (`benchmarks/cas_v2/gre_comparison/`): three GRE shapes with surface
-  deformation (β = 0.10–0.20, bc_ratio = 1.5–3.0, ab_ratio = 1.0–1.5),
-  m_p = 1.5 + 0.01i, λ₀ = 0.638 μm, at two tilt angles. The same
-  Gaussian random field is shared between DDA and VIEM. Agreement:
-
-  | Case | b/c | a/b | β    | ΔS_θ rel.  | ΔS_φ rel.  |
-  |------|-----|-----|------|------------|------------|
-  | A    | 2.0 | 1.0 | 0.10 | 0.5–0.7 %  | 0.1–0.3 %  |
-  | B    | 3.0 | 1.0 | 0.15 | 2.0–2.6 %  | 1.7–1.8 %  |
-  | C    | 1.5 | 1.5 | 0.20 | 1.2–1.6 %  | 1.6–1.8 %  |
-
-- **Anisotropic ε_p cross-validation vs block-DDA_Py**
-  (`benchmarks/cas_v2/aniso_comparison/`): sphere (r_ve = 0.20 μm,
-  λ₀ = 0.638 μm) with diagonal-tensor refractive index. The same
-  `m_p_xyz = [m_x, m_y, m_z]` is passed to both DDA and VIEM:
-
-  | Case   | m_p               | ΔS_θ rel.  | ΔS_φ rel.  |
-  |--------|-------------------|------------|------------|
-  | iso    | [1.5, 1.5, 1.5]  | 1.3–2.4 %  | 2.4 %      |
-  | mild   | [1.55, 1.5, 1.45] | 1.2–3.5 %  | 2.3–2.6 %  |
-  | strong | [1.6, 1.5, 1.4]  | 0.7–5.0 %  | 2.3–2.9 %  |
+block-VIEM.jl is validated against four independent references:
+the **Mie series** (sphere, dielectric and plasmonic Au), an
+analytical **α-symmetry identity** (oblate spheroid), the
+multi-sphere T-matrix package **MSTMforCAS.jl** (touching doublet,
+dielectric and plasmonic Au), and **block-DDA_Py** (spheroid, GRE
+β > 0, anisotropic ε_p). Sub-1 % accuracy on all five CAS-v2
+observables is reached at modest mesh sizes for the Mie reference;
+agreement against the independent codes is at the few-percent
+level expected from the discretisation budget of either side. All
+numerical conditions, per-observable tables, mesh-refinement rates,
+and AIM-operator memory measurements are collected in
+**[docs/benchmark_results.md](docs/benchmark_results.md)**.
 
 ## When to use block-VIEM.jl vs block-DDA_Py
 
-block-DDA_Py and block-VIEM.jl solve the same physics and produce the
-same observables in the same HDF5 format. The choice depends on the
-refractive-index contrast and particle geometry.
+block-DDA_Py and block-VIEM.jl solve the same physics and produce
+the same observables in the same HDF5 format. The choice depends on
+refractive-index contrast and geometry.
 
-### Low contrast (|m_p| < 2): use block-DDA_Py
+- **Low contrast (|m_p| < 2)**: prefer **block-DDA_Py**. DDA's exact
+  cubic-lattice FFT-MVP gives effectively-zero setup; sub-2 %
+  accuracy at ~ 300 dipoles in < 0.1 s. VIEM matches that accuracy
+  but needs ~ 2 000 half-SWG DOFs and ~ 10 s of setup.
+- **High contrast (|m_p| > 2 – 3, plasmonic metals, extreme aspect
+  ratios)**: prefer **block-VIEM.jl**. DDA converges as
+  $\mathcal{O}(N^{-1/2})$ here and may stall at 4 – 7 % error;
+  VIEM's $H(\mathrm{div})$-conforming half-SWG basis on a
+  tetrahedral mesh converges as $\mathcal{O}(h^2)$ and reaches
+  sub-1 % at $N \sim 2 \times 10^3$ DOFs even on plasmonic Au.
 
-For weakly scattering particles (e.g. mineral dust, m_p ~ 1.5), DDA
-is far more efficient. Benchmark on a Mie sphere (r = 1 um,
-m_p = 1.5 + 0.01i, wl_0 = 10 um, x = 0.63, single orientation,
-Intel i7-1265U, single-threaded — `t_setup` drops by ~2.5 × on a
-4-thread machine after the parallel setup added in v0.6.0; see
-§ *Parallel execution*):
-
-| Code          | N DOF  | C_abs error | t_setup  | t_solve  | memory  |
-|---------------|--------|-------------|----------|----------|---------|
-| block-DDA_Py  | 302    | 1.7 %       | < 0.1 s  | < 0.1 s  | 6 MB    |
-| block-DDA_Py  | 4 419  | 0.8 %       | < 0.1 s  | 0.1 s    | 64 MB   |
-| block-VIEM.jl | 589    | 8.4 %       | 7.9 s    | 2.2 s    | 6 MB    |
-| block-VIEM.jl | 1 986  | 3.6 %       | 23.9 s   | 0.7 s    | 63 MB   |
-| block-VIEM.jl | 7 868  | 1.4 %       | 145.8 s  | 2.7 s    | 991 MB  |
-
-DDA achieves 1.7 % accuracy with 302 dipoles in under 0.1 s.
-VIEM requires ~2 000 DOFs and ~10 s of setup (4 threads) for
-comparable accuracy. The DDA cubic lattice has an exact FFT-MVP with
-no near-field precorrection, so setup cost is effectively zero.
-
-**Recommendation:** For |m_p/m_m| < 2 and moderate aspect ratios,
-block-DDA_Py is the right tool.
-
-### High contrast (|m_p| > 3, plasmonic): use block-VIEM.jl
-
-DDA convergence degrades sharply at high refractive-index contrast.
-Same benchmark sphere with m_p = 3.17 + 0.16i (eps_p ~ 10):
-
-| Code          | N DOF  | C_abs error | convergence     |
-|---------------|--------|-------------|-----------------|
-| block-DDA_Py  | 1 496  | 6.8 %       | slow (1/N^0.5)  |
-| block-DDA_Py  | 4 759  | 4.2 %       | slow (1/N^0.5)  |
-| block-VIEM.jl | 1 986  | 3.6 %       | O(h^2)          |
-| block-VIEM.jl | 7 868  | 1.4 %       | O(h^2)          |
-
-At N ~ 5000, DDA still has 4 % error while VIEM reaches 1.4 %.
-For plasmonic Au (m_p = 0.175 + 3.48i), VIEM converges monotonically
-at sub-1 % with N = 2134 DOFs (see Validation above); DDA may not
-converge at all for such materials.
-
-The VIEM advantages come from:
-
-1. **Conforming geometry** -- tetrahedral meshes represent curved
-   surfaces to O(h^2); cubic lattices staircase them to O(d).
-2. **H(div)-conforming basis** -- normal D continuity is built into the
-   SWG basis, not approximated via a polarizability prescription.
-3. **Linear vector basis** -- each tet carries up to 4 SWG functions
-   (linear in position), versus one point dipole per DDA element.
-4. **No polarizability tuning** -- VIEM solves the integral equation
-   directly; DDA requires Clausius-Mossotti + radiative correction.
-
-**Recommendation:** For |m_p/m_m| > 2-3, plasmonic metals,
-extreme aspect ratios, or problems where block-DDA_Py fails to
-converge, use block-VIEM.jl.
+The per-DOF efficiency gap (~ 10 – 12 × in VIEM's favour at high
+contrast), the four mechanisms behind it (conforming geometry,
+$H(\mathrm{div})$-conforming basis, linear vector basis, and no
+polarisability tuning), and the asymptotic cost model are documented
+with full numerical tables in
+**[docs/benchmark_results.md §9](docs/benchmark_results.md#9-per-dof-accuracy-vs-block-dda_py)**.
 
 ### Summary decision rule
 
@@ -480,257 +408,34 @@ create_h5 (template)  →  estimate_cost  →  run_viem  →  check_h5
 ## Benchmark: 2-sphere doublet CAS-v2 vs MSTM
 
 Cross-validation against [MSTMforCAS.jl](https://github.com/MOTEKI-LAB/MSTMforCAS.jl)
-(multi-sphere T-matrix, numerically exact for aggregates of homogeneous
-spheres). The benchmark target is a touching-but-disjoint doublet of
-equal spheres (radius 0.030 μm, gap 0.003 μm along the doublet axis),
-vacuum wavelength 0.638 μm, background n = 1.0. The orientation angle
-β is the angle between the incidence direction and the doublet axis:
-block-VIEM realises it via `cas_orientation(0, β, 0)` (particle fixed
-along lab-z, incidence rotated); MSTM rotates the doublet axis to make
-angle β with the z-axis incidence — physically equivalent setups.
+on a touching doublet of equal spheres (radius 0.030 μm, gap
+0.003 μm, λ₀ = 0.638 μm) at three orientations and two materials
+(polystyrene-like dielectric and Johnson & Christy 1972 gold).
+Numerically exact MSTM reference at VSWF truncation $N = 15$.
+For the dielectric doublet $|S_\text{fw,mean}|$ matches MSTM to
+~ 1.6 %; for the plasmonic Au doublet the error grows from 1.3 % at
+β = 0 to 4.0 % at β = π/2 with strong polarisation anisotropy
+(Im $S_{\text{fw},\theta}$ reaching 10.5 % at β = π/2). Mesh
+refinement to $\ell_c = R/8$ confirms the theoretical SWG
+convergence rate $p \approx 2$ on every observable.
 
-The observable is the CAS-v2 forward amplitude for RCP incidence in
-the block-DDA_Py / block-VIEM convention,
-`S_fw_θ = S11 + i·S12`, `S_fw_φ = S22 − i·S21`,
-`S_fw_mean = (S_fw_θ + S_fw_φ)/2`,
-where the MI02 scattering amplitudes are related to the BH83 forward
-amplitudes `(S₁, S₂, S₃, S₄)` by
-`S11 = S₂/(−ik)`, `S12 = S₃/(ik)`, `S21 = S₄/(ik)`, `S22 = S₁/(−ik)`.
-Combining the two conversions:
-`S_fw_θ = (S₂ − i·S₃)/(−ik)`, `S_fw_φ = (S₁ + i·S₄)/(−ik)`.
-For this reflection-symmetric doublet benchmark `S₃ = S₄ = 0` so the
-off-diagonal terms drop out; the correct signs are retained in the
-driver code for generic aggregates.
+Three numerical-stability fixes contributed to MSTMforCAS ≥ 0.4.3
+(Miller's downward recurrence for $\psi_n$ and $j_n$, and correct
+sizing of `mie_vecs`) made the $N = 15$ reference computable at
+$x \approx 0.3$ in the first place — the package previously stalled
+beyond $N = 6$.
 
-The VIEM side uses 5348 tets / 11501 SWG DOFs (half-SWG, `lc = R/5`)
-and is solved by the AIM block-BiCGSTAB driver with `tol = 1e-7`.
-
-**MSTM VSWF truncation order.** The monomer size parameter is
-`x = k·R ≈ 0.295`, for which MSTMforCAS's automatic Wiscombe-based
-heuristic returns N = 3. For the polystyrene case the single-sphere
-Mie coefficients satisfy `|a_N|,|b_N| < 10⁻⁶` already at N = 3, so
-N = 3 is a converged reference. For **gold**, however, the high
-`|m·x| ≈ 1.03` combined with the multi-sphere translation coupling
-amplifies higher-order multipoles: empirically `|S_fw_mean|` shifts
-by ~5 % going from N = 3 to N = 15 and converges geometrically to a
-relative error ≤ 10⁻⁶ by N = 15. We therefore force
-`truncation_order = 15` for both materials in `run_mstm.jl` —
-computationally cheap for a 2-sphere aggregate (<0.5 s per
-orientation) and delivers a fully converged exact reference.
-
-MSTMforCAS ≥ 0.4.3 incorporates three upstream numerical-stability
-fixes contributed by this benchmark work:
-
-1. Miller's downward recurrence for ψ_n(x) replaces the
-   conditionally-stable upward recurrence (PR #1, see
-   `benchmarks/cas_v2/doublet_mstm/mstm_patch_draft.md`).
-2. Correct sizing of the per-sphere `mie_vecs` vector to
-   `nois[i]` when `truncation_order > mie_nmax(x)` (PR #2, see
-   `mstm_patch_draft_followup.md`).
-3. Miller's downward recurrence for the spherical-Bessel j_n(z)
-   used in the multi-sphere translation operator (PR #3),
-   eliminating the `y_n(kd) ~ (2n−1)!!/(kd)^(n+1)` precision loss
-   that previously destabilised N ≥ 7 at small kd.
-
-With these three patches MSTMforCAS is a numerically robust exact
-reference for sub-wavelength plasmonic aggregates.  The
-`check_trunc_convergence.jl` script verifies geometric convergence
-in N at each benchmark point (target rtol ≤ 10⁻⁶ reached by N = 15
-for both materials).
-
-**Dielectric case — m_p = 1.60 + 0.01i** (polystyrene-like high contrast):
-
-Summary (|S_fw_mean| magnitude + phase, MSTM at N = 15 fully converged):
-
-| β [rad] | \|S_fw_mean\| VIEM | \|S_fw_mean\| MSTM | rel \|·\| err | complex rel err | phase err [rad] |
-|---------|--------------------|--------------------|---------------|-----------------|-----------------|
-| 0       | 1.769e−03          | 1.794e−03          | 1.4 %         | 1.4 %           | 1.3e−04         |
-| π/4     | 1.822e−03          | 1.849e−03          | 1.5 %         | 1.5 %           | 1.6e−04         |
-| π/2     | 1.878e−03          | 1.908e−03          | 1.6 %         | 1.6 %           | 2.0e−04         |
-
-S_fw_θ — real and imaginary parts:
-
-| β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
-|---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +1.7682e−03  | +1.7934e−03  | 1.4 %      | +4.1063e−05  | +4.1991e−05  | 2.2 %      |
-| π/4     | +1.8768e−03  | +1.9066e−03  | 1.6 %      | +4.7872e−05  | +4.9082e−05  | 2.5 %      |
-| π/2     | +1.9933e−03  | +2.0279e−03  | 1.7 %      | +5.5225e−05  | +5.6771e−05  | 2.7 %      |
-
-S_fw_φ — real and imaginary parts:
-
-| β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
-|---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +1.7683e−03  | +1.7934e−03  | 1.4 %      | +4.1285e−05  | +4.1991e−05  | 1.7 %      |
-| π/4     | +1.7651e−03  | +1.7902e−03  | 1.4 %      | +4.2005e−05  | +4.2724e−05  | 1.7 %      |
-| π/2     | +1.7619e−03  | +1.7870e−03  | 1.4 %      | +4.2680e−05  | +4.3463e−05  | 1.8 %      |
-
-**Plasmonic case — m_p = 0.17525 + 3.4830i** (Au @ 638 nm, Johnson &
-Christy 1972):
-
-Summary (MSTM at N = 15 fully converged):
-
-| β [rad] | \|S_fw_mean\| VIEM | \|S_fw_mean\| MSTM | rel \|·\| err | complex rel err | phase err [rad] |
-|---------|--------------------|--------------------|---------------|-----------------|-----------------|
-| 0       | 6.420e−03          | 6.504e−03          | 1.3 %         | 1.3 %           | 5.1e−04         |
-| π/4     | 8.043e−03          | 8.287e−03          | 2.9 %         | 3.0 %           | 4.9e−03         |
-| π/2     | 9.785e−03          | 1.020e−02          | 4.0 %         | 4.1 %           | 7.0e−03         |
-
-S_fw_θ — real and imaginary parts:
-
-| β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
-|---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +6.4046e−03  | +6.4886e−03  | 1.3 %      | +4.3635e−04  | +4.4705e−04  | 2.4 %      |
-| π/4     | +9.6439e−03  | +1.0037e−02  | 3.9 %      | +1.2147e−03  | +1.3381e−03  | 9.2 %      |
-| π/2     | +1.3102e−02  | +1.3818e−02  | 5.2 %      | +2.0467e−03  | +2.2857e−03  | 10.5 %     |
-
-S_fw_φ — real and imaginary parts:
-
-| β [rad] | Re VIEM      | Re MSTM      | rel err Re | Im VIEM      | Im MSTM      | rel err Im |
-|---------|--------------|--------------|------------|--------------|--------------|------------|
-| 0       | +6.4049e−03  | +6.4886e−03  | 1.3 %      | +4.3967e−04  | +4.4705e−04  | 1.7 %      |
-| π/4     | +6.3556e−03  | +6.4392e−03  | 1.3 %      | +4.4777e−04  | +4.5502e−04  | 1.6 %      |
-| π/2     | +6.3084e−03  | +6.3893e−03  | 1.3 %      | +4.5536e−04  | +4.6332e−04  | 1.7 %      |
-
-**Discussion.**
-For the dielectric doublet the agreement is uniform across orientations
-and polarizations: Re parts are recovered to ~1.4 % and Im parts to
-~2 % — the extra factor on Im simply reflects that |Im| is
-30–50× smaller than |Re|, so a fixed absolute discretization error
-maps to a larger relative error on the imaginary axis. Both parts
-converge as `O(h²)` under mesh refinement.
-
-For the plasmonic gold doublet a strong anisotropy emerges. The
-**S_fw_φ** component — which at any β corresponds to the polarization
-channel perpendicular to the plane of incidence and the doublet axis —
-is essentially β-independent (~1.3 % on Re, 1.6–1.7 % on Im). In
-contrast the **S_fw_θ** component, which picks up the polarization
-component *along* the doublet axis after rotation, grows rapidly with
-β: at β = π/2 the real part is off by 5.2 % and the imaginary part
-by **10.5 %**. This is the orientation at which the two spheres are
-excited along their own axis and the electric field concentrates in
-the inter-sphere gap, with surface plasmons living in a skin layer of
-depth δ ≈ λ₀/(2π·Im m_p) ≈ 29 nm — essentially the monomer radius
-itself.
-
-**Measured convergence under mesh refinement.** To test whether this
-residual error is a true discretization error that shrinks with `lc`,
-four Phase A refinement runs were made at `lc = R/k` for `k = 5, 6, 7, 8`
-and compared against the MSTM N=15 reference (raw data:
-`benchmarks/cas_v2/doublet_mstm/phase_a_memory.json`, error-table
-generator: `compute_refinement_errors.py`). Per-component relative
-errors at Au, β = π/2:
-
-| lc / R | \|S_fw_mean\| | Re S_fw_θ | Im S_fw_θ | Re S_fw_φ | Im S_fw_φ |
-|--------|---------------|-----------|-----------|-----------|-----------|
-| 1/5    | 4.36 %        | 5.61 %    | 10.72 %   | 1.38 %    | 2.03 %    |
-| 1/6    | 2.73 %        | 3.47 %    | 6.43 %    | 0.97 %    | 1.82 %    |
-| 1/7    | 1.94 %        | 2.44 %    | 4.62 %    | 0.73 %    | 1.38 %    |
-| 1/8    | 1.60 %        | 2.05 %    | 4.07 %    | 0.50 %    | 0.58 %    |
-
-Log-log least-squares fit of `err ~ (lc/R)^p` over the 4 points yields
-slopes
-
-| component | fitted p |
-|-----------|----------|
-| \|S_fw_mean\| | 2.16 |
-| Re S_fw_θ    | 2.17 |
-| Im S_fw_θ    | 2.10 |
-| Re S_fw_φ    | 2.11 |
-| Im S_fw_φ    | 2.49 |
-
-\-- **every observable converges at the theoretical linear-SWG rate
-`p ≈ 2`** (or faster, for Im S_fw_φ). An earlier two-point fit using
-only R/5 / R/6 had suggested `p ∈ [0.8, 3.4]` with Im S_fw_θ
-\ *fastest* (p = 3.4); that spread is now seen to be a two-point
-artefact. With the clean `p = 2.10` slope on the stiffest observable,
-extrapolation to `lc = R/10` predicts `Im S_fw_θ` error of
-`4.07 % × (8/10)^{2.10} ≈ 2.6 %`, and the `|S_fw_mean|` error of
-`1.60 % × (8/10)^{2.16} ≈ 1.0 %` — refinement to R/10 is the next
-planned step and is feasible on a 16 GB workstation thanks to the
-linear memory scaling of Phase A (see the memory table below).
-
-**Phase A memory scaling (surface-moment AIM).** The original AIM
-release (Phase-1a) stored the boundary kernels K^B + K^C + K^D in a
-dense N_bnd × N sparse matrix `half_swg_extra` that scaled as
-O(N^{5/3}) and dominated live memory at 81–86 % for this dense
-aggregate geometry. The Phase A surface-moment extension (see
-`docs/theory_note.tex` §5.5) folds those kernels into the AIM
-far-field via a single new scalar projection `Wsurf` and absorbs the
-near-field corrections into the existing sparse `precorrection`
-block; `half_swg_extra` is eliminated entirely. Measured on the Au
-doublet (Intel i7-1265U, 16 GB RAM, Julia 1.11, single-threaded
-solve — pre-parallelization baseline; with the v0.6.0 threaded
-setup and block MVP, `t_setup` and `t_solve` drop by ~2–3 × at 4+
-Julia threads, see § *Parallel execution*;
-`benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl`):
-
-| lc / R | N DOF  | N_bnd | Wsurf    | precorrection | total tracked | t_setup | t_solve (3 or.) |
-|--------|--------|-------|----------|---------------|---------------|---------|-----------------|
-| 1/5    | 11 501 |  1 610 | 4.9 MiB  | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s           |
-| 1/6    | 18 919 |  2 254 | 8.1 MiB  | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s           |
-| 1/7    | 29 636 |  3 176 | 12.6 MiB | 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s           |
-| 1/8    | 45 585 |  4 210 | 19.4 MiB | 300.7 MiB     | **413.3 MiB** | 410 s   | 925 s           |
-
-`total tracked` is `Base.summarysize(AIMOperator)` — the in-memory
-footprint of every sparse matrix, the FFT kernel, and the mass
-matrix. For comparison, Phase-1a `half_swg_extra` alone on this
-geometry was 486 MiB at R/5 and 1 074 MiB at R/6 (memory-plan
-measurement, pre-Phase-A); Phase A delivers **5.0× / 6.5× / 11×**
-total-memory reduction at R/5 / R/6 / R/7 respectively. Asymptotic
-scaling: `total tracked` grows as O(N^{1.02}) across R/5 → R/8 —
-essentially linear in N, matching the Phase A design target
-(Phase-1a scaled as O(N^{5/3})).
-
-The R/8 solve completed in sub-450 MiB operator memory (RSS peak
-3.8 GiB during the 3-orientation block-BiCGSTAB), so the next
-refinement step to R/10 (projected ~760 MiB operator memory) is
-feasible on the same 16 GB workstation.
-
-The `Im S_fw_φ` fit returns p = 0.3–1.0 which is anomalously slow,
-but the absolute error there is already in the 1.5 % range and
-likely dominated by MSTM truncation / solver convergence noise; the
-slope is not resolved by the two-point fit.
-
-The key takeaway is that a single-number relative error on
-|S_fw_mean| undersells the orientation / polarization structure of
-the discretization error: at β = π/2 the 4.0 % `|S_fw_mean|` error
-hides a **10.5 %** error on Im S_fw_θ — the imaginary part of the
-axis-aligned-polarization channel is the stiffest observable and
-should be used as the convergence indicator when tuning `lc` for
-plasmonic targets.
-
-A second lesson concerns the reference solution itself. MSTM's
-Wiscombe-based auto-truncation returns N = 3 for `x ≈ 0.3`, which
-is converged for the polystyrene case but badly under-truncates
-gold: `|S_fw_mean|` shifts by 5 % between N = 3 and the
-fully-converged N = 15 reference. Before the three MSTMforCAS
-stability fixes (Miller ψ_n, mie_vecs sizing, Miller j_n for the
-translation operator) this convergence sweep was impossible —
-MSTMforCAS could not take N beyond 6 at `x ≈ 0.3`. The VIEM errors
-quoted above are against a MSTM solution with rtol ≤ 10⁻⁶, so they
-now genuinely reflect the linear-SWG discretization error of the
-VIEM solver itself. For aggregates of plasmonic monomers the
-appropriate MSTM truncation is set by the *inter-sphere coupling*
-amplified by `|m·x|`, not by the single-sphere Mie convergence;
-`check_trunc_convergence.jl` should be run at any new benchmark
-point to confirm a converged reference before comparing against
-VIEM.
-
-Reproduce the benchmark:
+Full numerical conditions, per-orientation Re/Im-resolved tables,
+the $\ell_c$-refinement convergence-rate fit, and the Phase A
+AIM-memory scaling are documented in
+**[docs/benchmark_results.md §7–§8](docs/benchmark_results.md#7-two-sphere-doublet-vs-mstm)**.
 
 ```bash
-# Generate block-VIEM predictions
+# Reproduce the full benchmark
 julia --project=. benchmarks/cas_v2/doublet_mstm/run_viem.jl
-
-# Generate exact MSTM reference (requires MSTMforCAS.jl checked out as a sibling)
 julia --project=/path/to/MSTMforCAS.jl benchmarks/cas_v2/doublet_mstm/run_mstm.jl
-
-# Print / save the relative-error tables
 julia --project=. benchmarks/cas_v2/doublet_mstm/compare.jl
 ```
-
-All scripts read a single `config.jl` so the geometry, wavelength,
-materials, and orientation grid stay in lock-step between the two codes.
 
 ## Conventions
 
@@ -757,6 +462,9 @@ materials, and orientation grid stay in lock-step between the two codes.
 - `docs/descriptions_particle_shape_model.md` — GRE and sphere-aggregate
   shape models, discretisation, `neck_ratio` convention, and
   volume-preserving rescale
+- `docs/benchmark_results.md` — all validation and cross-comparison
+  benchmarks (Mie, MSTM, block-DDA_Py) with full numerical conditions
+  and per-observable error tables
 - `docs/io_spec.md` — block-DDA_Py compatible I/O specification
 - `.claude/reference/` — primary literature (SWG 1984, Volakis-Sertel,
   Sheng-Song, Mousavi-Sukumar 2010)
