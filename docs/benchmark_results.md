@@ -7,7 +7,7 @@ place:
 - Numerical conditions (geometry, material, mesh, solver settings).
 - Reference data (Mie series, MSTM T-matrix, block-DDA_Py).
 - Tabulated relative errors for every observable reported in the
-  paper-production HDF5\,\text{s}chema (`C_ext`, `C_abs`, `C_sca`,
+  paper-production HDF5 schema (`C_ext`, `C_abs`, `C_sca`,
   `S_fw_θ`, `S_fw_φ`, `S_bk`).
 - Mesh-refinement (`ℓ_c` convergence) studies and the corresponding
   fitted convergence rates.
@@ -17,6 +17,7 @@ Per-section quick navigation:
 
 | § | Benchmark | Reference |
 | --- | --- | --- |
+| [§0](#0-conventions-used-in-error-reporting) | Error-reporting conventions | — |
 | [§1](#1-mie-sphere-dielectric) | Mie sphere, dielectric | Mie series |
 | [§2](#2-mie-sphere-plasmonic-gold) | Mie sphere, plasmonic Au | Mie series |
 | [§3](#3-oblate-spheroid-α-symmetry-self-check) | Oblate spheroid α-symmetry | analytical |
@@ -30,6 +31,31 @@ Per-section quick navigation:
 
 Each subsection's first line gives the driver script; reproduction
 is `julia --project=. <script>` unless noted otherwise.
+
+---
+
+
+## 0. Conventions used in error reporting
+
+Throughout this document, relative errors are defined pointwise:
+
+$$
+\text{rel. err.}^{\operatorname{Re}} =
+\frac{|\operatorname{Re} S^\text{VIEM} - \operatorname{Re} S^\text{ref}|}{|\operatorname{Re} S^\text{ref}|}, \quad
+\text{rel. err.}^{\operatorname{Im}} =
+\frac{|\operatorname{Im} S^\text{VIEM} - \operatorname{Im} S^\text{ref}|}{|\operatorname{Im} S^\text{ref}|},
+$$
+
+and "complex relative error" is
+
+$$
+\text{complex rel. err.} =
+\frac{|S^\text{VIEM} - S^\text{ref}|}{|S^\text{ref}|}.
+$$
+
+Cross-section errors are
+$|\Delta C| / C^\text{ref}$. "Phase err." is
+$\arg(S^\text{VIEM} / S^\text{ref})$.
 
 ---
 
@@ -90,10 +116,10 @@ contaminate the discretisation error).
 
 | ℓ_c [μm] | N    | Method       | C_ext  | C_abs  | C_sca  | S_fw,mean | S_bk   | wall  |
 | -------- | ---- | ------------ | ------ | ------ | ------ | --------- | ------ | ----- |
-| 0.020    | 2134 | dense (LU)   | 0.65 % | 0.005 % | 0.75 % | 0.58 %    | 0.28 % | 17\,\text{s}  |
-| 0.020    | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 %    | 0.11 % | 43\,\text{s}  |
-| 0.014    | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 %    | 0.15 % | 68\,\text{s}  |
-| 0.014    | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 %    | 0.07 % | 105\,\text{s} |
+| 0.020    | 2134 | dense (LU)   | 0.65 % | 0.005 % | 0.75 % | 0.58 %    | 0.28 % | 17 s  |
+| 0.020    | 2134 | AIM-BiCGSTAB | 0.25 % | 0.44 % | 0.37 % | 0.32 %    | 0.11 % | 43 s  |
+| 0.014    | 4932 | dense (LU)   | 0.34 % | 0.08 % | 0.41 % | 0.32 %    | 0.15 % | 68 s  |
+| 0.014    | 4932 | AIM-BiCGSTAB | 0.15 % | 0.24 % | 0.22 % | 0.18 %    | 0.07 % | 105 s |
 
 **Findings.**
 
@@ -280,7 +306,7 @@ exact same physical problem.
   MSTM rotates the doublet about $\hat{\boldsymbol{e}}_y$ by $\beta$.
 - Two materials: high-contrast dielectric (polystyrene-like)
   $m_p = 1.60 + 0.01\,i$ and plasmonic
-  $m_p = 0.17525 + 3.4830\,i$ (Au @ 638\,\text{nm}, Johnson & Christy 1972).
+  $m_p = 0.17525 + 3.4830\,i$ (Au @ 638 nm, Johnson & Christy 1972).
 
 The CAS-v2 forward amplitudes are defined in the
 block-DDA_Py / block-VIEM convention (RCP incidence) as
@@ -376,8 +402,8 @@ should be confirmed before any new comparison.
 
 Agreement is essentially polarisation- and orientation-independent
 at this level: Re parts to 1.4 – 1.7 %, Im parts to 1.7 – 2.7 %.
-The extra factor on Im is a pure scale effect — $|\Im S_\text{fw,mean}|$
-is 30 – 50 × smaller than $|\Re S_\text{fw,mean}|$ in the weakly
+The extra factor on Im is a pure scale effect — $|\operatorname{Im} S_\text{fw,mean}|$
+is 30 – 50 × smaller than $|\operatorname{Re} S_\text{fw,mean}|$ in the weakly
 absorbing case so a fixed absolute error appears larger on Im.
 
 ### 7.4 Plasmonic Au doublet — $m_p = 0.17525 + 3.4830\,i$
@@ -422,7 +448,7 @@ error.
   driven in phase along their centre line, the interaction field
   concentrates in the sub-wavelength gap, and the surface plasmon
   lives in a skin layer of depth
-  $\delta = \lambda_0/(2\pi \Im m_p) \approx 29\,\text{nm}$,
+  $\delta = \lambda_0/(2\pi \operatorname{Im} m_p) \approx 29\,\text{nm}$,
   essentially the monomer radius itself. With
   $\ell_c = R/5 = 6\,\text{nm}$ the skin layer is resolved
   by ~ 5 linear tets — adequate for few-percent accuracy but the
@@ -432,7 +458,7 @@ error.
 $|S_\text{fw,mean}|$ undersells the orientation / polarisation
 structure of the discretisation error: at $\beta = \pi/2$ the
 4.0 % $|S_\text{fw,mean}|$ error hides a **10.5 %** error on
-$\Im S_{\text{fw},\theta}$. The Re/Im-resolved component view
+$\operatorname{Im} S_{\text{fw},\theta}$. The Re/Im-resolved component view
 should be used as the convergence indicator when sizing $\ell_c$
 for plasmonic targets. The $\theta$-channel error also converges
 the fastest under refinement (§8), so modest mesh refinement is
@@ -448,12 +474,12 @@ Driver:
 geometry, four refinement levels $\ell_c = R/k$ for
 $k = 5, 6, 7, 8$, all compared against the converged MSTM
 $N = 15$ reference. Single-threaded (Intel i7-1265U,
-16\,\text{GB} RAM, Julia 1.11) — the v0.6.0 threaded setup
+16 GB RAM, Julia 1.11) — the v0.6.0 threaded setup
 + block MVP gives a 2 – 3 × speed-up at 4 + Julia threads.
 
 ### 8.1 Per-component error vs ℓ_c at β = π/2
 
-| ℓ_c / R | $\|S_\text{fw,mean}\|$ | $\Re S_{\text{fw},\theta}$ | $\Im S_{\text{fw},\theta}$ | $\Re S_{\text{fw},\phi}$ | $\Im S_{\text{fw},\phi}$ |
+| ℓ_c / R | $\|S_\text{fw,mean}\|$ | $\operatorname{Re} S_{\text{fw},\theta}$ | $\operatorname{Im} S_{\text{fw},\theta}$ | $\operatorname{Re} S_{\text{fw},\phi}$ | $\operatorname{Im} S_{\text{fw},\phi}$ |
 | ------- | ----- | ----- | ------ | ----- | ----- |
 | 1/5     | 4.36 %| 5.61 %| 10.72 %| 1.38 %| 2.03 %|
 | 1/6     | 2.73 %| 3.47 %|  6.43 %| 0.97 %| 1.82 %|
@@ -467,20 +493,20 @@ $N = 15$ reference. Single-threaded (Intel i7-1265U,
 | Component | $p$ |
 | --------- | --- |
 | $\|S_\text{fw,mean}\|$ | 2.16 |
-| $\Re S_{\text{fw},\theta}$ | 2.17 |
-| $\Im S_{\text{fw},\theta}$ | 2.10 |
-| $\Re S_{\text{fw},\phi}$ | 2.11 |
-| $\Im S_{\text{fw},\phi}$ | 2.49 |
+| $\operatorname{Re} S_{\text{fw},\theta}$ | 2.17 |
+| $\operatorname{Im} S_{\text{fw},\theta}$ | 2.10 |
+| $\operatorname{Re} S_{\text{fw},\phi}$ | 2.11 |
+| $\operatorname{Im} S_{\text{fw},\phi}$ | 2.49 |
 
 **Every observable converges at the theoretical linear-SWG
-rate $p \approx 2$** (or faster for $\Im S_{\text{fw},\phi}$). An
+rate $p \approx 2$** (or faster for $\operatorname{Im} S_{\text{fw},\phi}$). An
 earlier two-point fit using only $R/5, R/6$ had given
-$p \in [0.78, 3.39]$ with $\Im S_{\text{fw},\theta}$ apparently
+$p \in [0.78, 3.39]$ with $\operatorname{Im} S_{\text{fw},\theta}$ apparently
 the *fastest* — that spread is a two-point artefact. The clean
 $p \approx 2$ slope on the stiffest observable extrapolates to
 
 $$
-\Im S_{\text{fw},\theta}(\ell_c = R/10)
+\operatorname{Im} S_{\text{fw},\theta}(\ell_c = R/10)
 \;\approx\; 4.07 \% \times (8/10)^{2.10}
 \;\approx\; 2.6 \%,
 $$
@@ -498,28 +524,28 @@ $\ell_c = R/10$ is the next planned refinement step.
 `total tracked` = `Base.summarysize(AIMOperator)` — every sparse
 matrix, FFT kernel, and mass matrix in the operator. For
 comparison the original Phase-1a `half_swg_extra` matrix alone
-reached 486\,\text{MiB} at $R/5$ and 1074\,\text{MiB}
+reached 486 MiB at $R/5$ and 1074 MiB
 at $R/6$ on the same geometry; Phase A reduces those totals to
-97\,\text{MiB} and 164\,\text{MiB} — a 5.0 × / 6.5 × /
+97 MiB and 164 MiB — a 5.0 × / 6.5 × /
 11 × reduction at $R/5$ / $R/6$ / $R/7$ respectively. Asymptotic:
 total tracked grows as $\mathcal O(N_\text{dof}^{1.02})$ —
 essentially linear in $N$.
 
 | ℓ_c / R | N DOF  | N_bnd | $W^S$    | precorrection | total tracked | t_setup | t_solve (3 orient.) |
 | ------- | ------ | ----- | -------- | ------------- | ------------- | ------- | ------------------- |
-| 1/5     | 11 501 | 1 610 | 4.9\,\text{MiB}  | 67.2\,\text{MiB}      | **96.8\,\text{MiB}**  | 105\,\text{s}   | 201\,\text{s}               |
-| 1/6     | 18 919 | 2 254 | 8.1\,\text{MiB}  | 116.5\,\text{MiB}     | **164.2\,\text{MiB}** | 179\,\text{s}   | 363\,\text{s}               |
-| 1/7     | 29 636 | 3 176 | 12.6\,\text{MiB} | 189.0\,\text{MiB}     | **262.7\,\text{MiB}** | 299\,\text{s}   | 718\,\text{s}               |
-| 1/8     | 45 585 | 4 210 | 19.4\,\text{MiB} | 300.7\,\text{MiB}     | **413.3\,\text{MiB}** | 410\,\text{s}   | 925\,\text{s}               |
+| 1/5     | 11 501 | 1 610 | 4.9 MiB  | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s               |
+| 1/6     | 18 919 | 2 254 | 8.1 MiB  | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s               |
+| 1/7     | 29 636 | 3 176 | 12.6 MiB | 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s               |
+| 1/8     | 45 585 | 4 210 | 19.4 MiB | 300.7 MiB     | **413.3 MiB** | 410 s   | 925 s               |
 
 Setup and solve times both scale as $\mathcal{O}(N_\text{dof})$
 within measurement noise, consistent with the AIM MVP cost
 $\mathcal{O}(N_g \log N_g + N_\text{dof}\, n_\text{near})$ at fixed
-wavelength. With sub-300\,\text{MiB} budgets through $R/7$,
-refinement to $R/8$ used 413\,\text{MiB} operator memory (RSS peak ~ 3.8
+wavelength. With sub-300 MiB budgets through $R/7$,
+refinement to $R/8$ used 413 MiB operator memory (RSS peak ~ 3.8
 GiB during the 3-orientation block-BiCGSTAB). The projected
-760\,\text{MiB} operator memory at $R/10$ is feasible on the
-same 16\,\text{GB} workstation.
+760 MiB operator memory at $R/10$ is feasible on the
+same 16 GB workstation.
 
 ---
 
@@ -537,14 +563,14 @@ parallel setup added in v0.6.0).
 
 | Code          | N DOF | $C_\text{abs}$ rel. err. | t_setup | t_solve | memory |
 | ------------- | ----- | ------------------------ | ------- | ------- | ------ |
-| block-DDA_Py  | 302   | 1.7 %  | < 0.1\,\text{s} | < 0.1\,\text{s} | 6 MB   |
-| block-DDA_Py  | 4 419 | 0.8 %  | < 0.1\,\text{s} | 0.1\,\text{s}   | 64 MB  |
-| block-VIEM.jl | 589   | 8.4 %  | 7.9\,\text{s}   | 2.2\,\text{s}   | 6 MB   |
-| block-VIEM.jl | 1 986 | 3.6 %  | 23.9\,\text{s}  | 0.7\,\text{s}   | 63 MB  |
-| block-VIEM.jl | 7 868 | 1.4 %  | 145.8\,\text{s} | 2.7\,\text{s}   | 991 MB |
+| block-DDA_Py  | 302   | 1.7 %  | < 0.1 s | < 0.1 s | 6 MB   |
+| block-DDA_Py  | 4 419 | 0.8 %  | < 0.1 s | 0.1 s   | 64 MB  |
+| block-VIEM.jl | 589   | 8.4 %  | 7.9 s   | 2.2 s   | 6 MB   |
+| block-VIEM.jl | 1 986 | 3.6 %  | 23.9 s  | 0.7 s   | 63 MB  |
+| block-VIEM.jl | 7 868 | 1.4 %  | 145.8 s | 2.7 s   | 991 MB |
 
-DDA achieves 1.7 % accuracy with 302 dipoles in under 0.1\,\text{s}. VIEM
-needs ~ 2 000 DOFs and ~ 10\,\text{s} of setup (4 threads) for comparable
+DDA achieves 1.7 % accuracy with 302 dipoles in under 0.1 s. VIEM
+needs ~ 2 000 DOFs and ~ 10 s of setup (4 threads) for comparable
 accuracy. The DDA cubic lattice has an exact FFT-MVP with no
 near-field precorrection, so its setup cost is effectively zero.
 **Recommendation:** for $|m_p / m_m| < 2$ and moderate aspect
@@ -685,25 +711,3 @@ shared-Krylov amortisation pays off for the production $L = 100$
 orientation grids.
 
 ---
-
-## Appendix B. Conventions used in error reporting
-
-Throughout this document, relative errors are defined pointwise:
-
-$$
-\text{rel. err.}^{\Re} =
-\frac{|\Re S^\text{VIEM} - \Re S^\text{ref}|}{|\Re S^\text{ref}|}, \quad
-\text{rel. err.}^{\Im} =
-\frac{|\Im S^\text{VIEM} - \Im S^\text{ref}|}{|\Im S^\text{ref}|},
-$$
-
-and "complex relative error" is
-
-$$
-\text{complex rel. err.} =
-\frac{|S^\text{VIEM} - S^\text{ref}|}{|S^\text{ref}|}.
-$$
-
-Cross-section errors are
-$|\Delta C| / C^\text{ref}$. "Phase err." is
-$\arg(S^\text{VIEM} / S^\text{ref})$.
