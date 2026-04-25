@@ -1470,37 +1470,18 @@ $\mathcal{O}(N_{\text{dof}}^{1.02})$ scaling, so the $R/8$
 extrapolation that $\ell_c = R/10$ should bring
 $\Im S_{\text{fw},\theta}$ below \SI{3}{\percent}.
 
-\paragraph{MSTMforCAS numerical-stability fixes.} MSTMforCAS
-$\geq 0.4.3$ incorporates three numerical-stability fixes
-contributed as part of this benchmark work, \emph{without which the
-$N = 15$ reference cannot be computed at $x \approx 0.3$} (the
-package previously failed catastrophically beyond $N = 6$):
-
-\begin{enumerate}
-\item Miller's downward recurrence for the Riccati--Bessel
-      $\psi_n(x)$ replaces the conditionally-stable upward
-      recurrence (Wiscombe 1980).  At $x \approx 0.3$ the upward
-      recurrence amplifies a spurious $\chi_n$ component by
-      $(2n-1)/x \approx 44$ per step while the physical
-      $\psi_n(x) \sim x^n/(2n-1)!!$ underflows to $\sim 10^{-9}$ at
-      $n = 8$, drowning the signal in numerical noise.
-\item Correct sizing of the per-sphere Mie-coefficient buffer
-      \texttt{mie\_vecs[i]} to \texttt{nois[i]} when the
-      user-requested \texttt{truncation\_order} exceeds the default
-      Wiscombe bound \texttt{mie\_nmax(x)}.
-\item Miller's downward recurrence for the spherical-Bessel
-      $j_n(z)$ used in the multi-sphere translation operator,
-      eliminating the analogous
-      $y_n(kd) \sim (2n-1)!!\,(kd)^{-n-1}$ precision loss at small
-      $kd$ that previously destabilised $N \geq 7$.
-\end{enumerate}
-
-For aggregates of plasmonic monomers the appropriate MSTM
-truncation is set by the \emph{inter-sphere coupling} amplified by
-$|m\!\cdot\!x|$, not by the single-sphere Mie convergence.  MSTM
-reference data should always be supplied with an explicit
-$N_{\text{trunc}}$ and a per-point convergence check
-(\texttt{benchmarks/cas\_v2/doublet\_mstm/check\_trunc\_\allowbreak convergence.jl}).
+\paragraph{MSTMforCAS truncation order.} The MSTMforCAS
+auto-truncation returns $N_{\text{trunc}} = 3$ at
+$x \approx 0.30$, which is converged for the dielectric case but
+\emph{under-truncates} the plasmonic Au case --- $|S_{\text{fw,mean}}|$
+shifts by $\approx 5\%$ between $N = 3$ and the converged reference
+because the inter-sphere coupling amplified by $|m\!\cdot\!x|$
+drives higher-order multipoles even though the single-sphere Mie
+expansion has long converged.  We therefore force
+$N_{\text{trunc}} = 15$ in \texttt{run\_mstm.jl} for both materials,
+reaching rtol $\leq 10^{-6}$.  Any new comparison point should
+re-confirm convergence with
+\texttt{benchmarks/cas\_v2/doublet\_mstm/check\_trunc\_\allowbreak convergence.jl}.
 
 \paragraph{}
 The full benchmark setup, the per-orientation Re/Im-resolved error

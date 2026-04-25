@@ -23,11 +23,11 @@ Per-section quick navigation:
 | [§3](#3-oblate-spheroid-α-symmetry-self-check) | Oblate spheroid α-symmetry | analytical |
 | [§4](#4-oblate-spheroid-cross-validation-vs-block-dda_py) | Oblate spheroid vs DDA | block-DDA_Py |
 | [§5](#5-gre-cross-validation-vs-block-dda_py-β--0) | GRE (β > 0) vs DDA | block-DDA_Py |
-| [§6](#6-anisotropic-εp-cross-validation-vs-block-dda_py) | Anisotropic ε_p vs DDA | block-DDA_Py |
+| [§6](#6-anisotropic-ε_p-cross-validation-vs-block-dda_py) | Anisotropic ε_p vs DDA | block-DDA_Py |
 | [§7](#7-two-sphere-doublet-vs-mstm) | 2-sphere doublet vs MSTM | MSTMforCAS.jl |
 | [§8](#8-doublet-mesh-refinement-and-aim-memory) | Doublet ℓ_c convergence + memory | self |
 | [§9](#9-per-dof-accuracy-vs-block-dda_py) | Per-DoF accuracy vs DDA | analytical (Mie) |
-| [§10](#10-paper-production-lc-convergence-protocol) | Paper-production ℓ_c protocol | self |
+| [§10](#10-paper-production-ℓ_c-convergence-protocol) | Paper-production ℓ_c protocol | self |
 
 Each subsection's first line gives the driver script; reproduction
 is `julia --project=. <script>` unless noted otherwise.
@@ -340,39 +340,17 @@ for generic aggregates.
   $N = 11501$ half-SWG DOFs. AIM block-BiCGSTAB at tolerance
   $10^{-7}$, pitch $0.5\bar{h} = 0.0038\,\text{μm}$.
 - MSTM: VSWF truncation order **forced to $N_\text{trunc} = 15$**
-  for both materials. The auto-truncation at $x \approx 0.30$
-  returns $N = 3$, which is converged for the dielectric case but
-  badly under-truncates Au — $|S_\text{fw,mean}|$ shifts by
-  $\approx 5 \%$ between $N = 3$ and the converged $N = 15$
-  reference (geometric convergence, per-order ratio $\approx 0.3$).
-  $N = 15$ reaches rtol $\le 10^{-6}$ on both materials at
-  $x \approx 0.3$. CBICG tolerance $10^{-8}$.
-
-#### MSTMforCAS.jl numerical-stability fixes
-
-MSTMforCAS $\geq$ 0.4.3 incorporates three numerical-stability
-fixes contributed as part of this benchmark work, **without which
-the $N = 15$ reference cannot be computed at $x \approx 0.3$** (the
-package previously failed catastrophically beyond $N = 6$):
-
-1. **Miller's downward recurrence for the Riccati–Bessel
-   $\psi_n(x)$** replaces the conditionally-stable upward
-   recurrence (Wiscombe 1980). The upward recurrence amplifies a
-   spurious $\chi_n$ component by $(2n-1)/x \approx 44$ per step
-   while the physical $\psi_n(x) \sim x^n / (2n-1)!!$ underflows
-   to $\sim 10^{-9}$ at $n = 8$.
-2. **Correct sizing of the per-sphere `mie_vecs[i]` buffer** to
-   `nois[i]` when the user-requested `truncation_order` exceeds
-   the default Wiscombe bound `mie_nmax(x)`.
-3. **Miller's downward recurrence for the spherical-Bessel
-   $j_n(z)$** used in the multi-sphere translation operator,
-   eliminating the analogous
-   $y_n(kd) \sim (2n-1)!!\,(kd)^{-n-1}$ precision loss at small
-   $kd$ that previously destabilised $N \ge 7$.
-
-The `check_trunc_convergence.jl` script verifies geometric
-convergence in $N$ at every benchmark point; rtol $\le 10^{-6}$
-should be confirmed before any new comparison.
+  for both materials.  The MSTMforCAS auto-truncation returns
+  $N = 3$ at $x \approx 0.30$, which is converged for the
+  dielectric case but **under-truncates** the plasmonic Au case
+  by $\approx 5\,\%$ on $|S_\text{fw,mean}|$ — the inter-sphere
+  coupling amplified by $|m\!\cdot\!x|$ drives higher-order
+  multipoles even though the single-sphere Mie expansion is long
+  since converged.  $N = 15$ reaches rtol $\le 10^{-6}$ on both
+  materials at $x \approx 0.3$ (geometric convergence in $N$,
+  per-order ratio $\approx 0.3$).  CBICG tolerance $10^{-8}$.
+  Any new comparison point should re-confirm convergence with
+  `benchmarks/cas_v2/doublet_mstm/check_trunc_convergence.jl`.
 
 ### 7.3 Dielectric doublet — $m_p = 1.60 + 0.01\,i$
 

@@ -419,11 +419,13 @@ For the dielectric doublet $|S_\text{fw,mean}|$ matches MSTM to
 refinement to $\ell_c = R/8$ confirms the theoretical SWG
 convergence rate $p \approx 2$ on every observable.
 
-Three numerical-stability fixes contributed to MSTMforCAS ≥ 0.4.3
-(Miller's downward recurrence for $\psi_n$ and $j_n$, and correct
-sizing of `mie_vecs`) made the $N = 15$ reference computable at
-$x \approx 0.3$ in the first place — the package previously stalled
-beyond $N = 6$.
+**Note on MSTMforCAS truncation order.** The MSTMforCAS
+auto-truncation returns $N_\text{trunc} = 3$ at $x \approx 0.3$,
+which is converged for the dielectric case but under-truncates the
+plasmonic Au case (roughly 5 % shift in $|S_\text{fw,mean}|$
+between $N = 3$ and the converged reference).  We therefore force
+$N_\text{trunc} = 15$ in `run_mstm.jl` for both materials, reaching
+rtol $\le 10^{-6}$ — see `check_trunc_convergence.jl`.
 
 Full numerical conditions, per-orientation Re/Im-resolved tables,
 the $\ell_c$-refinement convergence-rate fit, and the Phase A
