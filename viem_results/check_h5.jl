@@ -48,13 +48,21 @@ h5open(filename, "r") do f
     for name in keys(t)
         name == "simulated_data" && continue
         d = t[name]
-        println("  $name: shape=$(size(d))  dtype=$(eltype(d))")
+        if d isa HDF5.Group
+            println("  $name: (group, $(length(keys(d))) members)")
+        else
+            println("  $name: shape=$(size(d))  dtype=$(eltype(d))")
+        end
     end
 
     println("\n=== simulated_data datasets ===")
     for name in keys(sd)
         d = sd[name]
-        println("  $name: shape=$(size(d))  dtype=$(eltype(d))")
+        if d isa HDF5.Group
+            println("  $name: (group, $(length(keys(d))) members)")
+        else
+            println("  $name: shape=$(size(d))  dtype=$(eltype(d))")
+        end
     end
 
     # ── sweep parameters ─────────────────────────────────────────────────

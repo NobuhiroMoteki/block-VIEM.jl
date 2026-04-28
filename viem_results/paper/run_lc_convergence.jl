@@ -41,7 +41,9 @@ const DUFFY_ORDER     = 5
 const AIM_PITCH_RATIO = 0.5
 const AIM_PADDING     = 4
 const A_EQ_CONV       = 0.1                       # CLAUDE.md §4
-const LC_FACTORS      = [1.5, 1.0, 0.7, 0.5, 0.35]
+const LC_FACTORS      = haskey(ENV, "LC_FACTORS") ?
+                        parse.(Float64, split(ENV["LC_FACTORS"], ',')) :
+                        [1.5, 1.0, 0.7, 0.5, 0.35]
 const SINGLE_ORIENT   = (0.0, 0.0, 0.0)           # ZYZ, identity rotation
 
 # ──────────────────────────────────────────────────────────────────────

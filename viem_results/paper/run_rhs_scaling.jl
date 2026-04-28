@@ -38,6 +38,12 @@ using HDF5
 using Printf
 using Random
 using Dates
+using FFTW
+
+# Single-threaded FFTW to avoid spawn_apply segfault observed at shape
+# transitions on Au sweeps (libfftw3.so signal 11). Julia threads remain
+# available for everything else (assembly, BLAS, AIM grid loops).
+FFTW.set_num_threads(1)
 
 include(joinpath(dirname(@__DIR__), "rss_monitor.jl"))
 using .RSSMonitor
