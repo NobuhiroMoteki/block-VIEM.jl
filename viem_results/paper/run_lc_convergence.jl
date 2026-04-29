@@ -45,6 +45,15 @@ const LC_FACTORS      = haskey(ENV, "LC_FACTORS") ?
                         parse.(Float64, split(ENV["LC_FACTORS"], ',')) :
                         [1.5, 1.0, 0.7, 0.5, 0.35]
 const SINGLE_ORIENT   = (0.0, 0.0, 0.0)           # ZYZ, identity rotation
+# Block size for the underlying block-GMRES solve. Default 1 = the original
+# single-orientation behaviour; values > 1 prepend SINGLE_ORIENT at index 0
+# and fill the remaining BLOCK_SIZE-1 slots with deterministic uniform-on-
+# SO(3) orientations to enrich the Krylov subspace. Only the column 0
+# observables are extracted — the figure result is still single-orientation
+# at SINGLE_ORIENT, the larger block is purely a numerical convergence aid
+# for plasmonic stalls (e.g. GRE × Au).
+const BLOCK_SIZE      = haskey(ENV, "BLOCK_SIZE") ?
+                        parse(Int, ENV["BLOCK_SIZE"]) : 1
 
 # ──────────────────────────────────────────────────────────────────────
 #  Shape / material dispatch
@@ -85,7 +94,16 @@ function solve_one(p::GREParams, lc_value, m_p_xyz, mon::RSSMonitor.Monitor;
         mass       = assemble_mass_matrix(basis)
     end
 
-    euler_list = [SINGLE_ORIENT]
+    euler_list = if BLOCK_SIZE == 1
+        [SINGLE_ORIENT]
+    else
+        # Deterministic uniform-on-SO(3) fillers, separate RNG from solver's.
+        fill_rng = Random.MersenneTwister(RNG_SEED + 1)
+        fillers = [(2π*rand(fill_rng),
+                    acos(2*rand(fill_rng) - 1),
+                    2π*rand(fill_rng)) for _ in 1:(BLOCK_SIZE - 1)]
+        [SINGLE_ORIENT; fillers]
+    end
     solve_info = (iterations = 0, converged = false, residual_norm = NaN)
     local sr
     t_solve = @elapsed begin
