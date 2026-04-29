@@ -65,8 +65,15 @@ function bh83_to_cas_v2_forward(S_fwd::NTuple{4,ComplexF64}, k::Real)
 end
 
 function bh83_to_cas_v2_backward(S_bwd::NTuple{4,ComplexF64}, k::Real)
-    # Reuse the same conversion convention; S₃,S₄ vanish for the axially
-    # symmetric setup but are kept for generality.
+    # OCBS amplitude per docs/theory_note.tex Eq.(eq:S-bk-ocbs) and
+    # bl_dda/scatterer.py:235 (block-DDA_Py reference implementation):
+    #   S_bk_theta = S_M11(π) + i·S_M12(π)
+    #   S_bk_phi   = S_M22(π) - i·S_M21(π)
+    #   S_bk       = (-S_bk_theta + S_bk_phi) / √2
+    #              = (-S_M11 + S_M22 - i·S_M12 - i·S_M21)(π) / √2
+    # where S_M is Mishchenko's amplitude matrix (length units), obtained
+    # from BH83's S₁..S₄ by S_M11 = S₂/(−ik), S_M22 = S₁/(−ik),
+    # S_M12 = S₃/(ik), S_M21 = S₄/(ik).
     S1, S2, S3, S4 = S_bwd
     mik = ComplexF64(0, -k)
     ik  = ComplexF64(0,  k)
@@ -74,7 +81,7 @@ function bh83_to_cas_v2_backward(S_bwd::NTuple{4,ComplexF64}, k::Real)
     S22 = S1 / mik
     S12 = S3 / ik
     S21 = S4 / ik
-    return (S11 + S22 + im*S12 - im*S21) / sqrt(2)        # OCBS S(180°)
+    return (-S11 + S22 - im*S12 - im*S21) / sqrt(2)
 end
 
 # ──────────────────────────────────────────────────────────────────────
