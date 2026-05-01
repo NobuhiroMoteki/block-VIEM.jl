@@ -35,7 +35,12 @@ using .RSSMonitor
 # ──────────────────────────────────────────────────────────────────────
 const RNG_SEED        = 12345
 const SOLVER_TOL      = 1e-5
-const MAXITER         = 200      # v0.7.6: 100→200 (plasmonic Au headroom)
+# v0.7.6: 100→200 (plasmonic Au headroom). Override via MAXITER env var
+# when finest mesh stalls just above the relaxed paper gate (1e-3) — e.g.
+# GRE × Au lc=0.7 reached 2.5e-3 at iter 200, residual still decaying at
+# rate r[k+50]/r[k] ≈ 0.53, so MAXITER=400 brings it well below gate.
+const MAXITER         = haskey(ENV, "MAXITER") ?
+                        parse(Int, ENV["MAXITER"]) : 200
 const N_PW            = 10
 const DUFFY_ORDER     = 5
 const AIM_PITCH_RATIO = 0.5
