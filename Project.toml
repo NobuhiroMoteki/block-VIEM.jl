@@ -1,6 +1,6 @@
 name = "BlockVIEM"
 uuid = "c6c5da73-2b17-47f9-a04b-9516bf8d71c0"
-version = "0.7.8"
+version = "0.7.9"
 authors = ["Nobuhiro Moteki <nobuhiro.moteki@gmail.com>"]
 
 [deps]
