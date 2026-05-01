@@ -22,6 +22,7 @@ using Pkg
 Pkg.activate("/home/moteki/Julia/TransitionMatrices.jl")
 
 using TransitionMatrices
+using FastGaussQuadrature
 using HDF5
 using Printf
 using Dates
@@ -37,6 +38,13 @@ const BC_RATIO  = 3.0     # oblate 3:3:1
 # TMM solver settings — same as production reference.
 const TMM_NMAX = 30
 const TMM_NG   = 200
+
+# Far-field integration for fixed-orientation C_sca (β=0).  TransitionMatrices'
+# built-in scattering_cross_section is orientation-AVERAGED (Mishchenko Eq.
+# 5.140), which differs from the β=0 fixed-orientation value used by the
+# convergence-sweep VIEM observables.  256 Gauss-Legendre nodes on cos θ
+# converge to better than 1e-12 relative for our oblate / λ scale.
+const TMM_CSCA_NTHETA = 256
 
 # Material → m_p (matches CLAUDE.md §2 and viem_results/paper/_common.jl)
 const M_P_MAP = Dict(
@@ -78,6 +86,31 @@ end
 
 _log(msg) = (println("[$(Dates.format(now(), "HH:MM:SS"))] $msg"); flush(stdout))
 
+# Fixed-orientation C_sca at β=0 by far-field integration of |S(θ_s, φ_s)|².
+# For an axisymmetric oblate at β=0 (incidence along +z), |S| is independent
+# of φ_s so the φ_s-integration contributes a factor 2π and only the
+# θ_s-quadrature is needed.  The polarization-averaged (unpolarised)
+# scattering cross section of the 2×2 amplitude matrix is
+#     |S|²_unpol = (|S₁₁|² + |S₁₂|² + |S₂₁|² + |S₂₂|²) / 2
+# which equals the LCP-only or x-pol-only result for axisymmetric β=0 by
+# axial-rotation symmetry.  TransitionMatrices' amplitude_matrix returns S
+# in length units (μm) consistent with the optical-theorem path
+# C_ext = (2π/k) Im[S_θθ + S_φφ], so C_sca = 2π ∫|S|²_unpol sinθ dθ has no
+# 1/k² factor.  Verified on n20 (m_p = 2.0+0i, exactly non-absorbing):
+# C_abs ≡ C_ext − C_sca came out to 1e-9 ≪ C_ext = 4.2e-2 ✓.
+function csca_oblate_beta_zero(T, λ_med::Float64; n_θ::Int = TMM_CSCA_NTHETA)
+    cθ_nodes, w = gausslegendre(n_θ)   # ∫f(cosθ) dcosθ = ∫f(θ) sinθ dθ
+    accum = 0.0
+    @inbounds for k in 1:n_θ
+        θ_s = acos(cθ_nodes[k])
+        S_s = amplitude_matrix(T, 0.0, 0.0, θ_s, 0.0; λ = λ_med)
+        s2  = (abs2(S_s[1,1]) + abs2(S_s[1,2]) +
+                abs2(S_s[2,1]) + abs2(S_s[2,2])) / 2
+        accum += w[k] * s2
+    end
+    return 2π * accum
+end
+
 function run_one(material::String, out_dir::String)
     haskey(M_P_MAP, material) ||
         error("unknown material '$material'; expected one of $(collect(keys(M_P_MAP)))")
@@ -110,15 +143,30 @@ function run_one(material::String, out_dir::String)
     S_theta_theta = 𝐒_fwd[1,1]
     S_phi_phi     = 𝐒_fwd[2,2]
     C_ext_v = (2π / k_med) * imag(S_theta_theta + S_phi_phi)
+
+    # Fixed-orientation C_sca via far-field integration; C_abs from energy
+    # balance.  For axisymmetric β=0 these match the column-0 single-
+    # orientation observables in convergence_oblate_<mat>.hdf5.
+    C_sca_v = csca_oblate_beta_zero(𝐓, λ_med)
+    C_abs_v = C_ext_v - C_sca_v
+
     geom_area = π * a_eq^2
     Q_ext_v   = C_ext_v / geom_area
+    Q_sca_v   = C_sca_v / geom_area
+    Q_abs_v   = C_abs_v / geom_area
 
-    @printf("[%s] Q_ext=%.6f  C_ext=%.4e  |S_fw_θ|=%.4e  |S_fw_φ|=%.4e  |S_bk|=%.4e\n",
-            material, Q_ext_v, C_ext_v, abs(S_fwθ), abs(S_fwφ), abs(S_bkv))
+    @printf("[%s] Q_ext=%.6f  Q_sca=%.6f  Q_abs=%.6f  C_ext=%.4e  C_sca=%.4e  C_abs=%.4e  |S_fw_θ|=%.4e  |S_fw_φ|=%.4e  |S_bk|=%.4e\n",
+            material, Q_ext_v, Q_sca_v, Q_abs_v,
+            C_ext_v, C_sca_v, C_abs_v,
+            abs(S_fwθ), abs(S_fwφ), abs(S_bkv))
 
     # Layout: (n_rv=1, n_β=1) — matches run_tmatrix_oblate_reference.jl
     Q_ext   = reshape([Q_ext_v], (1, 1))
+    Q_sca   = reshape([Q_sca_v], (1, 1))
+    Q_abs   = reshape([Q_abs_v], (1, 1))
     C_ext   = reshape([C_ext_v], (1, 1))
+    C_sca   = reshape([C_sca_v], (1, 1))
+    C_abs   = reshape([C_abs_v], (1, 1))
     S_fw_th = reshape([S_fwθ],   (1, 1))
     S_fw_ph = reshape([S_fwφ],   (1, 1))
     S_fw_mn = reshape([(S_fwθ + S_fwφ)/2], (1, 1))
@@ -145,7 +193,11 @@ function run_one(material::String, out_dir::String)
 
         obs = create_group(g, "observables")
         write_dataset(obs, "Q_ext",      Q_ext)
+        write_dataset(obs, "Q_sca",      Q_sca)
+        write_dataset(obs, "Q_abs",      Q_abs)
         write_dataset(obs, "C_ext",      C_ext)
+        write_dataset(obs, "C_sca",      C_sca)
+        write_dataset(obs, "C_abs",      C_abs)
         write_dataset(obs, "S_fw_theta", S_fw_th)
         write_dataset(obs, "S_fw_phi",   S_fw_ph)
         write_dataset(obs, "S_fw_mean",  S_fw_mn)
