@@ -1,6 +1,6 @@
 # block-VIEM.jl
 
-[![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FNobuhiroMoteki%2Fblock-VIEM.jl%2Fmain%2FProject.toml&query=%24.version&prefix=v&label=version&color=blue)](https://github.com/NobuhiroMoteki/block-VIEM.jl/releases)
+[![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FNobuhiroMoteki%2Fblock-VIEM.jl%2Fmain%2FProject.toml&query=%24.version&prefix=v&label=version&color=blue&cacheSeconds=300)](https://github.com/NobuhiroMoteki/block-VIEM.jl/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Julia ≥ 1.10](https://img.shields.io/badge/julia-%E2%89%A5%201.10-blueviolet.svg)](https://julialang.org/)
 
