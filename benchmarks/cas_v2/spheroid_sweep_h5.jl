@@ -16,13 +16,25 @@ using BlockVIEM
 using BlockVIEM: Vec3
 import Gmsh: gmsh
 
+# ── CLI / preset ─────────────────────────────────────────────────────────────
+# Thin CLI for the pcas_lut_schema adapter: --preset {air,liquid} and --output.
+# Falls back to the VIEM_SWEEP_PRESET env var, then "air".
+function _cli_arg(flag, default)
+    i = findfirst(==(flag), ARGS)
+    (i === nothing || i == length(ARGS)) ? default : ARGS[i + 1]
+end
+const PRESET = lowercase(_cli_arg("--preset", get(ENV, "VIEM_SWEEP_PRESET", "air")))
+
+# (wavelength μm, medium refractive index) pairs per preset
+const MEDIUM_CONDITIONS =
+    PRESET == "air"    ? [(0.638, 1.0), (0.834, 1.0)] :
+    PRESET == "liquid" ? [(0.637, 1.3315), (0.773, 1.3300)] :  # water host 637/773 nm
+    error("unknown preset $(PRESET) (use 'air' or 'liquid')")
+
+const OUT_FILE = _cli_arg("--output", joinpath(@__DIR__,
+    PRESET == "liquid" ? "spheroid_sweep_viem_liquid.h5" : "spheroid_sweep_viem_minimal.h5"))
+
 # ── SETTINGS ─────────────────────────────────────────────────────────────────
-const OUT_FILE = joinpath(@__DIR__, "spheroid_sweep_viem_minimal.h5")
-
-# Wavelengths (μm) and medium refractive index
-const WAVELENGTHS = (0.638, 0.834)
-const M_M         = 1.0
-
 # Sweep grids (kept tiny for the example)
 const D_VE_GRID            = collect(range(0.30, 0.50, length = 2))
 const RI_REAL_GRID         = collect(range(1.50, 1.60, length = 2))
@@ -45,7 +57,7 @@ println("CAS-v2 spheroid sweep → HDF5 (Phase 5.4)")
 println("=" ^ 70)
 @printf("  Grid: %d D_ve × %d RI × %d AR × %d cos_θ × %d φ_o\n",
         N_Dve, N_RI, N_AR, N_u, N_ph)
-@printf("  Wavelengths: %s   m_m = %.3f\n", string(WAVELENGTHS), M_M)
+@printf("  Preset: %s   (wl, m_m) pairs: %s\n", PRESET, string(MEDIUM_CONDITIONS))
 @printf("  Output: %s\n", OUT_FILE)
 
 function spheroid_mesh(b::Float64, c::Float64, lc::Float64)
@@ -68,8 +80,8 @@ function spheroid_mesh(b::Float64, c::Float64, lc::Float64)
     return path
 end
 
-function compute_one_wavelength(wl_0::Float64)
-    k0 = 2π * M_M / wl_0
+function compute_one_wavelength(wl_0::Float64, m_m::Float64)
+    k0 = 2π * m_m / wl_0
 
     S_theta = Array{ComplexF64}(undef, N_Dve, N_RI, N_AR, N_u, N_ph)
     S_phi   = similar(S_theta)
@@ -88,7 +100,7 @@ function compute_one_wavelength(wl_0::Float64)
 
         m_p   = ComplexF64(RI)         # non-absorbing for the example sweep
         eps_p = m_p^2
-        eps_bg = M_M^2
+        eps_bg = m_m^2
 
         @printf("  [%d,%d,%d] D_ve=%.3f RI=%.2f AR=%.3f → semi-axes (%.4f,%.4f,%.4f), lc=%.4f  ",
                 i, j, k, D_ve, RI, AR, b, b, c, lc)
@@ -120,16 +132,16 @@ function compute_one_wavelength(wl_0::Float64)
         end
     end
 
-    return SpheroidSweepData(wl_0, M_M, S_theta, S_phi, converged)
+    return SpheroidSweepData(wl_0, m_m, S_theta, S_phi, converged)
 end
 
 grids = SpheroidSweepGrids(D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID,
                             COS_THETA_O_HALF, PHI_O_GRID)
 
 data_per_wl = SpheroidSweepData[]
-for wl in WAVELENGTHS
-    println("\n--- λ = $wl μm ---")
-    push!(data_per_wl, compute_one_wavelength(wl))
+for (wl, m_m) in MEDIUM_CONDITIONS
+    println("\n--- λ = $wl μm  (m_m = $m_m) ---")
+    push!(data_per_wl, compute_one_wavelength(wl, m_m))
 end
 
 write_spheroid_sweep_h5(OUT_FILE, grids, data_per_wl;
