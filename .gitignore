@@ -58,3 +58,6 @@
 # per-project agent settings, scratchpads.  Kept locally only; never
 # published to the public repository.
 /.claude/
+
+# backup checkpoints (kept locally, not versioned)
+*.bak_L1
