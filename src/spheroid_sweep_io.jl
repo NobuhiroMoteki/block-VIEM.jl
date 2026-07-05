@@ -36,6 +36,39 @@
 # DDA producer for the `phi_o ∈ [0, π]` reduced grid.
 
 using HDF5
+using SHA
+using Dates
+using JSON3
+
+# Provenance block required by the pcas_lut_schema contract (v0.1.0).
+# Records producer git SHA, a tracked-files-only dirty flag, a deterministic
+# hash of the run config, and a UTC timestamp, so a generated LUT is traceable
+# to the exact producer version and settings.
+function _pcas_provenance_attrs(config::AbstractDict, producer_version::AbstractString)
+    repo = dirname(@__DIR__)   # src/ -> package root
+    _git(args...) = try
+        strip(read(Cmd(String["git", "-C", repo, args...]), String))
+    catch
+        ""
+    end
+    git_sha   = _git("rev-parse", "HEAD")
+    git_dirty = !isempty(_git("status", "--porcelain", "--untracked-files=no"))
+    # deterministic config hash: sort keys, hash JSON of each value
+    parts = String[]
+    for (k, v) in sort(collect(pairs(config)); by = first)
+        push!(parts, string(k) * ":" * JSON3.write(v))
+    end
+    config_hash = bytes2hex(sha256(join(parts, ";")))
+    return [
+        "producer_repo"    => "block-VIEM.jl",
+        "producer_version" => String(producer_version),
+        "git_sha"          => git_sha,
+        "git_dirty"        => git_dirty,
+        "contract_version" => "0.1.0",
+        "config_hash"      => config_hash,
+        "created_utc"      => string(Dates.now(Dates.UTC)) * "Z",
+    ]
+end
 
 """
     SpheroidSweepGrids
@@ -167,6 +200,23 @@ function write_spheroid_sweep_h5(filename::AbstractString,
         attrs(f)["block_viem_version"] = String(block_viem_version)
         for (k, v) in extra_root_attrs
             attrs(f)[String(k)] = v
+        end
+
+        # ---- provenance group (pcas_lut_schema contract) ----
+        prov_config = Dict{String,Any}(
+            "D_ve_grid"             => collect(grids.D_ve),
+            "RI_real_grid"          => collect(grids.RI_real),
+            "log_AR_grid"           => collect(grids.log_AR),
+            "cos_theta_o_half_grid" => collect(grids.cos_theta_o_half),
+            "phi_o_grid"            => collect(grids.phi_o),
+            "m_m"                   => m_ms[1],
+            "solver_tol"            => float(solver_tol),
+            "block_viem_version"    => String(block_viem_version),
+            "wavelengths"           => [d.wl_0 for d in data_per_wl],
+        )
+        pg = create_group(f, "provenance")
+        for (k, v) in _pcas_provenance_attrs(prov_config, block_viem_version)
+            attrs(pg)[k] = v
         end
 
         # ---- shared root datasets (grid axes) ----
