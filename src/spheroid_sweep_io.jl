@@ -36,6 +36,63 @@
 # DDA producer for the `phi_o ∈ [0, π]` reduced grid.
 
 using HDF5
+using SHA
+using Dates
+
+# vendored from pcas_lut_schema/reference/canonical_hash.jl (contract v0.1.0)
+# language-independent, bit-exact byte encoding; do not edit — re-vendor from source.
+_ch_enc(::Nothing) = UInt8['n', ';']
+_ch_enc(v::Bool) = v ? UInt8['b', '1', ';'] : UInt8['b', '0', ';']
+_ch_enc(v::Integer) = vcat(UInt8('i'), Vector{UInt8}(string(v)), UInt8(';'))
+function _ch_enc(v::AbstractFloat)
+    bits = hton(reinterpret(UInt64, Float64(v)))
+    vcat(UInt8('f'), reinterpret(UInt8, [bits]))
+end
+function _ch_enc(v::AbstractString)
+    b = Vector{UInt8}(String(v))
+    vcat(UInt8('s'), Vector{UInt8}(string(length(b))), UInt8(':'), b)
+end
+function _ch_enc(v::Union{AbstractVector,Tuple})
+    parts = UInt8[]
+    for x in v
+        append!(parts, _ch_enc(x))
+    end
+    vcat(UInt8('l'), Vector{UInt8}(string(length(v))), UInt8(':'), parts)
+end
+function _ch_enc(v::AbstractDict)
+    ks = sort(collect(keys(v)); by = string)
+    parts = UInt8[]
+    for k in ks
+        append!(parts, _ch_enc(string(k)))
+        append!(parts, _ch_enc(v[k]))
+    end
+    vcat(UInt8('d'), Vector{UInt8}(string(length(ks))), UInt8(':'), parts)
+end
+
+# Provenance block required by the pcas_lut_schema contract (v0.1.0).
+# Records producer git SHA, a tracked-files-only dirty flag, the canonical config
+# hash (contract byte encoding), and a UTC timestamp, so a generated LUT is
+# traceable to the exact producer version and settings.
+function _pcas_provenance_attrs(config::AbstractDict, producer_version::AbstractString)
+    repo = dirname(@__DIR__)   # src/ -> package root
+    _git(args...) = try
+        strip(read(Cmd(String["git", "-C", repo, args...]), String))
+    catch
+        ""
+    end
+    git_sha   = _git("rev-parse", "HEAD")
+    git_dirty = !isempty(_git("status", "--porcelain", "--untracked-files=no"))
+    config_hash = bytes2hex(sha256(_ch_enc(config)))
+    return [
+        "producer_repo"    => "block-VIEM.jl",
+        "producer_version" => String(producer_version),
+        "git_sha"          => git_sha,
+        "git_dirty"        => git_dirty,
+        "contract_version" => "0.1.0",
+        "config_hash"      => config_hash,
+        "created_utc"      => string(Dates.now(Dates.UTC)) * "Z",
+    ]
+end
 
 """
     SpheroidSweepGrids
@@ -167,6 +224,29 @@ function write_spheroid_sweep_h5(filename::AbstractString,
         attrs(f)["block_viem_version"] = String(block_viem_version)
         for (k, v) in extra_root_attrs
             attrs(f)[String(k)] = v
+        end
+
+        # ---- provenance group (pcas_lut_schema contract) ----
+        # Hash grid SPECS (min,max,n), not materialized float arrays: linspace/range
+        # interior points can differ by ULPs across languages, but the endpoints and
+        # count are exact and reproducible by a consumer. n stays Int (avoid Julia's
+        # mixed-list Float promotion by using a Dict).
+        _spec(g) = Dict{String,Any}("min" => float(first(g)), "max" => float(last(g)),
+                                    "n" => length(g))
+        prov_config = Dict{String,Any}(
+            "D_ve_grid"             => _spec(grids.D_ve),
+            "RI_real_grid"          => _spec(grids.RI_real),
+            "log_AR_grid"           => _spec(grids.log_AR),
+            "cos_theta_o_half_grid" => _spec(grids.cos_theta_o_half),
+            "phi_o_grid"            => _spec(grids.phi_o),
+            "m_m"                   => float(m_ms[1]),
+            "solver_tol"            => float(solver_tol),
+            "block_viem_version"    => String(block_viem_version),
+            "wavelengths"           => Float64[d.wl_0 for d in data_per_wl],
+        )
+        pg = create_group(f, "provenance")
+        for (k, v) in _pcas_provenance_attrs(prov_config, block_viem_version)
+            attrs(pg)[k] = v
         end
 
         # ---- shared root datasets (grid axes) ----

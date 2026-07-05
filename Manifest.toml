@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "608b6252e538b6e0a8f614c469135a9df508fd16"
+project_hash = "8bab11ef3658bd503cb41f2453d888cfe4e807fd"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -31,10 +31,10 @@ uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
 
 [[deps.BlockVIEM]]
-deps = ["FFTW", "Gmsh", "HDF5", "IterativeSolvers", "JSON3", "Krylov", "LinearAlgebra", "Printf", "Random", "SparseArrays", "SpecialFunctions", "StaticArrays"]
+deps = ["Dates", "FFTW", "Gmsh", "HDF5", "IterativeSolvers", "JSON3", "Krylov", "LinearAlgebra", "Printf", "Random", "SHA", "SparseArrays", "SpecialFunctions", "StaticArrays"]
 path = "."
 uuid = "c6c5da73-2b17-47f9-a04b-9516bf8d71c0"
-version = "0.7.8"
+version = "0.7.9"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
