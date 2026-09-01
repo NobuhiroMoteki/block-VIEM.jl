@@ -33,6 +33,7 @@
 #     julia --project=. benchmarks/cas_v2/ironoxide_sweep_h5.jl --species hematite
 
 using Printf, Dates
+using Serialization: serialize, deserialize
 using BlockVIEM
 using BlockVIEM: build_swg_basis, n_basis, n_tets, read_msh, mean_edge_length,
                  solve_cas_v2_orientations, aim_grid, build_aim_projection,
@@ -51,6 +52,10 @@ const N_DVE   = parse(Int, _arg("--n-dve", "8"))
 const N_AR    = parse(Int, _arg("--n-ar",  "7"))
 const N_RI    = parse(Int, _arg("--n-ri",  "3"))
 const DRY_RUN = "--dry-run" in ARGS
+# Size range: overridable so the checkpoint/resume path can be exercised cheaply
+# on small particles instead of a run that reaches the expensive top of the grid.
+const DVE_MIN = parse(Float64, _arg("--dve-min", "0.05"))
+const DVE_MAX = parse(Float64, _arg("--dve-max", "0.70"))
 
 # ── species constants (provisional; see the JSON in the PCAS tree) ───────────
 # (wl_um, m_m, Re(m_p) at that wl, Im(m_p) at that wl)
@@ -71,7 +76,7 @@ const OUT_FILE = _arg("--output",
 
 # ── grids ────────────────────────────────────────────────────────────────────
 # Log-spaced sizes: the consumer requires the LOG axis to be equidistant.
-const D_VE_GRID = 10 .^ collect(range(log10(0.05), log10(0.70), length = N_DVE))
+const D_VE_GRID = 10 .^ collect(range(log10(DVE_MIN), log10(DVE_MAX), length = N_DVE))
 const LOG_AR_GRID = collect(range(-0.6, 0.6, length = N_AR))   # AR 0.25 .. 4.0
 const COS_THETA_O_HALF = collect(range(0.0, 1.0, length = 13))
 const PHI_O_GRID = collect(range(0.0, pi, length = 21))         # analytic: free
@@ -80,8 +85,11 @@ const PHI_O_GRID = collect(range(0.0, pi, length = 21))         # analytic: free
 # axis is shared by the wavelength groups, so it has to bracket both.
 _re = [c[3] for c in COND]
 const RI_HALFSPAN = 0.20
-const RI_REAL_GRID = collect(range(minimum(_re) - RI_HALFSPAN,
-                                   maximum(_re) + RI_HALFSPAN, length = N_RI))
+# N_RI = 1 is for cost probes only -- the consumer's spline needs >= 3 per axis and
+# refuses such a table. range() cannot take differing endpoints with length 1.
+const RI_REAL_GRID = N_RI == 1 ?
+    [(minimum(_re) + maximum(_re)) / 2] :
+    collect(range(minimum(_re) - RI_HALFSPAN, maximum(_re) + RI_HALFSPAN, length = N_RI))
 
 # ── solver settings (measured 2026-09-01, see docs/handoff) ──────────────────
 const N_PW        = 10       # mesh cells per wavelength inside the particle
@@ -95,6 +103,11 @@ const DUFFY_ORDER = 5
 function spheroid_mesh(b, c, lc)
     path = joinpath(tempdir(), "viem_fe_$(round(b,digits=6))_$(round(c,digits=6))_$(round(lc,digits=6)).msh")
     isfile(path) && return path
+    # Write to a scratch name and rename: a run killed mid-write would otherwise
+    # leave a truncated .msh that the next run happily reuses. The scratch name
+    # must KEEP the .msh extension -- gmsh picks its output format from it, and a
+    # ".msh.part" suffix fails with "Unknown output file format".
+    tmp = joinpath(dirname(path), "part$(getpid())_" * basename(path))
     gmsh.initialize()
     try
         gmsh.option.setNumber("General.Terminal", 0)
@@ -106,19 +119,70 @@ function spheroid_mesh(b, c, lc)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc)
         gmsh.model.mesh.generate(3)
-        gmsh.write(path)
+        gmsh.write(tmp)
     finally
         gmsh.finalize()
     end
+    mv(tmp, path; force = true)
     path
 end
 
-function sweep_one_wavelength(wl_0, m_m, re_axis, im_fixed)
-    sz = (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID))
-    S_theta = Array{ComplexF64}(undef, sz)
-    S_phi   = similar(S_theta)
-    converged = trues(N_DVE, N_RI, N_AR)
+# ── checkpointing ────────────────────────────────────────────────────────────
+# This sweep runs for the better part of a day. Without a checkpoint a failure in
+# the last hour throws away every hour before it -- which is exactly how 13.5 h
+# went missing on 2026-08-13. State is saved after each geometry row and reloaded
+# on restart, so a rerun with the same settings resumes instead of starting over.
+const CKPT_FILE = _arg("--checkpoint", OUT_FILE * ".ckpt.jls")
+const NO_RESUME = "--no-resume" in ARGS
 
+# Settings that invalidate a checkpoint if they change. Grids are compared by
+# value, not by count: a rerun with the same N but a different range must not
+# silently inherit amplitudes computed on the old grid.
+_ckpt_key() = (SPECIES, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
+               PHI_O_GRID, N_PW, LC_GEOM, TOL, DUFFY_ORDER, COND)
+
+function _load_ckpt()
+    (NO_RESUME || !isfile(CKPT_FILE)) && return nothing
+    try
+        st = open(deserialize, CKPT_FILE)
+        if st.key != _ckpt_key()
+            @warn "checkpoint settings differ from this run; ignoring it" file=CKPT_FILE
+            return nothing
+        end
+        @printf("resuming from %s (%d of %d geometry rows already done)\n",
+                CKPT_FILE, count(st.done), length(st.done))
+        return st
+    catch err
+        @warn "could not read checkpoint; starting fresh" file=CKPT_FILE err
+        return nothing
+    end
+end
+
+function _save_ckpt(st)
+    tmp = CKPT_FILE * ".part"
+    open(f -> serialize(f, st), tmp, "w")
+    mv(tmp, CKPT_FILE; force = true)   # atomic: never leave a half-written checkpoint
+end
+
+mutable struct SweepState
+    key::Any
+    S_theta::Vector{Array{ComplexF64,5}}   # one per wavelength
+    S_phi::Vector{Array{ComplexF64,5}}
+    converged::Vector{Array{Bool,3}}
+    done::Array{Bool,3}                    # (wavelength, D_ve, AR) geometry rows
+end
+
+function _fresh_state()
+    sz = (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID))
+    nw = length(COND)
+    SweepState(_ckpt_key(),
+               [fill(NaN + NaN*im, sz) for _ in 1:nw],
+               [fill(NaN + NaN*im, sz) for _ in 1:nw],
+               [trues(N_DVE, N_RI, N_AR) for _ in 1:nw],
+               falses(nw, N_DVE, N_AR))
+end
+
+function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fixed)
     # The mesh is shared across the real-index axis: lc uses the LARGEST |m_p| on
     # the axis, which is the finest requirement, so the shared mesh is at least as
     # fine as any single index needs. That amortises meshing, the AIM grid, the
@@ -132,6 +196,9 @@ function sweep_one_wavelength(wl_0, m_m, re_axis, im_fixed)
         c = r * AR ^ (-2/3)
         lc = min(wl_0 / (m_worst * N_PW), LC_GEOM * min(b, c))
 
+        if st.done[w, i, k]
+            @printf("  [D=%.4f AR=%.3f] (checkpoint)\n", D_ve, AR); continue
+        end
         @printf("  [D=%.4f AR=%.3f] lc=%.5f ", D_ve, AR, lc); flush(stdout)
         if DRY_RUN
             println("(dry run)"); continue
@@ -158,12 +225,12 @@ function sweep_one_wavelength(wl_0, m_m, re_axis, im_fixed)
                     return_D = true, return_solve_info = true,
                     duffy_rule = duffy_reference_rule(DUFFY_ORDER), symmetrize = true,
                     pitch = pitch, padding = PADDING, projection = proj, mass = mass)
-                info.converged || (converged[i, j, k] = false)
+                st.converged[w][i, j, k] = info.converged
                 for m in 1:length(COS_THETA_O_HALF)
                     Sth, Sph = expand_alpha_from_alpha0(
                         res[m].S_fw_theta, res[m].S_fw_phi, PHI_O_GRID)
-                    S_theta[i, j, k, m, :] .= Sth
-                    S_phi[i, j, k, m, :]   .= Sph
+                    st.S_theta[w][i, j, k, m, :] .= Sth
+                    st.S_phi[w][i, j, k, m, :]   .= Sph
                 end
                 @printf("| n=%.3f %.0fs/%dit%s ", re_axis[j], t, info.iterations,
                         info.converged ? "" : " NOTCONV")
@@ -172,12 +239,17 @@ function sweep_one_wavelength(wl_0, m_m, re_axis, im_fixed)
             println()
         catch err
             println("FAILED: ", sprint(showerror, err)[1:min(90, end)])
-            converged[i, :, k] .= false
-            S_theta[i, :, k, :, :] .= NaN + NaN*im
-            S_phi[i, :, k, :, :]   .= NaN + NaN*im
+            st.converged[w][i, :, k] .= false
+            st.S_theta[w][i, :, k, :, :] .= NaN + NaN*im
+            st.S_phi[w][i, :, k, :, :]   .= NaN + NaN*im
         end
+        # Mark done even on failure: the cell is recorded as non-converged and a
+        # rerun must not silently retry it into a different answer. Use
+        # --no-resume to recompute everything.
+        st.done[w, i, k] = true
+        _save_ckpt(st)
     end
-    SpheroidSweepData(wl_0, m_m, im_fixed, S_theta, S_phi, converged)
+    SpheroidSweepData(wl_0, m_m, im_fixed, st.S_theta[w], st.S_phi[w], st.converged[w])
 end
 
 @printf("iron-oxide sweep  species=%s  %s\n", SPECIES, Dates.format(now(), "yyyy-mm-dd HH:MM"))
@@ -189,12 +261,14 @@ end
         length(COS_THETA_O_HALF), length(PHI_O_GRID))
 @printf("  cells: %d geometries x %d indices x %d wavelengths\n",
         N_DVE * N_AR, N_RI, length(COND))
+@printf("  checkpoint: %s\n", DRY_RUN ? "(dry run)" : CKPT_FILE)
 @printf("  output: %s\n\n", OUT_FILE)
 
+state = something(_load_ckpt(), _fresh_state())
 data = SpheroidSweepData[]
-for (wl, m_m, re_c, im_c) in COND
+for (w, (wl, m_m, re_c, im_c)) in enumerate(COND)
     @printf("--- lambda = %.3f um   m_m = %.4f   Im(m_p) = %.4f (fixed) ---\n", wl, m_m, im_c)
-    push!(data, sweep_one_wavelength(wl, m_m, RI_REAL_GRID, im_c))
+    push!(data, sweep_one_wavelength!(state, w, wl, m_m, RI_REAL_GRID, im_c))
 end
 
 if !DRY_RUN
