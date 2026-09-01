@@ -7,7 +7,10 @@
 # # File layout
 #
 #     /
-#     ├── D_ve_grid                  (N_Dve,)            float64  [shared root]
+#     ├── log_D_ve_grid              (N_Dve,)            float64  [shared root]
+#     │      log10(D_ve/um). The CONSUMER's axis is logarithmic (see the Python
+#     │      tree's ROOT_AXES); the struct field below stays linear for ergonomics
+#     │      and is converted on write/read. Equidistant in log => log-spaced sizes.
 #     ├── RI_real_grid               (N_RI,)             float64
 #     ├── log_AR_grid                (N_AR,)             float64
 #     ├── cos_theta_o_half_grid      (N_u_half,)         float64
@@ -104,7 +107,9 @@ All axes must be **equidistant** (required by the downstream NdimSpline_JAX
 consumer in `build_spheroid_lut.py`).
 
 # Fields
-- `D_ve::Vector{Float64}`            — volume-equivalent diameter [μm]
+- `D_ve::Vector{Float64}`            — volume-equivalent diameter [μm]. Held LINEAR
+  here; written to file as `log_D_ve_grid` = log10(D_ve), which is the consumer's
+  axis. Choose LOG-SPACED values: the consumer requires equidistant axes.
 - `RI_real::Vector{Float64}`         — Re(m_p), dimensionless
 - `log_AR::Vector{Float64}`          — log10 of bc_ratio (b/c). >0 = oblate
 - `cos_theta_o_half::Vector{Float64}` — cos(θ_o) on the half-domain [0, 1]
@@ -127,6 +132,11 @@ laid out in the schema expected by `block-DDA_Py`'s consumer.
 # Fields
 - `wl_0::Float64`            — vacuum wavelength [μm]
 - `m_m::Float64`             — medium refractive index (background)
+- `m_imag::Float64`          — Im(m_p), held FIXED across the whole sweep at this
+  wavelength. The real part is a grid axis (`RI_real`); the imaginary part is not,
+  so it is recorded here for the consumer to check the table against the species
+  constant. Absorbing species (iron oxides) need this PER WAVELENGTH — hematite's
+  Im(m) differs by 2.6x between 637 and 773 nm.
 - `S_fw_theta::Array{ComplexF64,5}` — shape `(N_Dve, N_RI, N_AR, N_u_half, N_ph)`
 - `S_fw_phi::Array{ComplexF64,5}`   — same shape
 - `converged::Array{Bool,3}`        — shape `(N_Dve, N_RI, N_AR)`
@@ -137,10 +147,19 @@ all `(N_u_half, N_ph)` entries.
 struct SpheroidSweepData
     wl_0::Float64
     m_m::Float64
+    m_imag::Float64
     S_fw_theta::Array{ComplexF64,5}
     S_fw_phi::Array{ComplexF64,5}
     converged::Array{Bool,3}
 end
+
+# Back-compatible 5-argument form for non-absorbing sweeps (Im(m_p) = 0).
+SpheroidSweepData(wl_0, m_m, S_fw_theta, S_fw_phi, converged) =
+    SpheroidSweepData(wl_0, m_m, 0.0, S_fw_theta, S_fw_phi, converged)
+
+# Reverse the dimension order so that h5py sees the contract's axis order.
+# Self-inverse, so the same function undoes it on read.
+_to_c_order(A::AbstractArray{T,N}) where {T,N} = permutedims(A, ntuple(i -> N - i + 1, N))
 
 @inline _wl_group_name(wl::Real) = "wl_" * replace(string(float(wl)), "." => "p")
 
@@ -154,7 +173,8 @@ function _check_grids(grids::SpheroidSweepGrids)
                 error("$name grid is not equidistant (diffs vary: $d)")
         end
     end
-    _check_eq("D_ve",            grids.D_ve)
+    # The consumer requires an equidistant LOG axis, which is what is written.
+    _check_eq("log_D_ve",        log10.(grids.D_ve))
     _check_eq("RI_real",         grids.RI_real)
     _check_eq("log_AR",          grids.log_AR)
     _check_eq("cos_theta_o_half", grids.cos_theta_o_half)
@@ -220,6 +240,10 @@ function write_spheroid_sweep_h5(filename::AbstractString,
     h5open(filename, "w") do f
         # ---- root attributes (provenance) ----
         attrs(f)["m_m"]                = m_ms[1]
+        # Root-level fallback for consumers that predate the per-group attribute.
+        # When the wavelengths disagree (absorbing species) the per-group value is
+        # the authoritative one; see the SpheroidSweepData docstring.
+        attrs(f)["m_imag"]             = data_per_wl[1].m_imag
         attrs(f)["solver_tol"]         = float(solver_tol)
         attrs(f)["block_viem_version"] = String(block_viem_version)
         for (k, v) in extra_root_attrs
@@ -234,7 +258,7 @@ function write_spheroid_sweep_h5(filename::AbstractString,
         _spec(g) = Dict{String,Any}("min" => float(first(g)), "max" => float(last(g)),
                                     "n" => length(g))
         prov_config = Dict{String,Any}(
-            "D_ve_grid"             => _spec(grids.D_ve),
+            "log_D_ve_grid"         => _spec(log10.(grids.D_ve)),
             "RI_real_grid"          => _spec(grids.RI_real),
             "log_AR_grid"           => _spec(grids.log_AR),
             "cos_theta_o_half_grid" => _spec(grids.cos_theta_o_half),
@@ -250,7 +274,7 @@ function write_spheroid_sweep_h5(filename::AbstractString,
         end
 
         # ---- shared root datasets (grid axes) ----
-        write_dataset(f, "D_ve_grid",              grids.D_ve)
+        write_dataset(f, "log_D_ve_grid",          log10.(grids.D_ve))
         write_dataset(f, "RI_real_grid",           grids.RI_real)
         write_dataset(f, "log_AR_grid",            grids.log_AR)
         write_dataset(f, "cos_theta_o_half_grid",  grids.cos_theta_o_half)
@@ -261,12 +285,19 @@ function write_spheroid_sweep_h5(filename::AbstractString,
             grp = create_group(f, _wl_group_name(d.wl_0))
             attrs(grp)["wl_0"] = d.wl_0
             attrs(grp)["m_m"]  = d.m_m
+            attrs(grp)["m_imag"] = d.m_imag
 
-            write_dataset(grp, "S_fw_theta_re", real.(d.S_fw_theta))
-            write_dataset(grp, "S_fw_theta_im", imag.(d.S_fw_theta))
-            write_dataset(grp, "S_fw_phi_re",   real.(d.S_fw_phi))
-            write_dataset(grp, "S_fw_phi_im",   imag.(d.S_fw_phi))
-            write_dataset(grp, "converged",     d.converged)
+            # Julia is column-major and HDF5 is row-major, so HDF5.jl declares the
+            # dimensions reversed: a Julia (N_Dve, N_RI, N_AR, N_u, N_ph) array is
+            # seen by h5py as (N_ph, N_u, N_AR, N_RI, N_Dve). The consumer's contract
+            # fixes the h5py-side order, so permute on write (and back on read).
+            # A grid with all axes equal in length hides this: the shapes match and
+            # only the VALUES are silently transposed.
+            write_dataset(grp, "S_fw_theta_re", _to_c_order(real.(d.S_fw_theta)))
+            write_dataset(grp, "S_fw_theta_im", _to_c_order(imag.(d.S_fw_theta)))
+            write_dataset(grp, "S_fw_phi_re",   _to_c_order(real.(d.S_fw_phi)))
+            write_dataset(grp, "S_fw_phi_im",   _to_c_order(imag.(d.S_fw_phi)))
+            write_dataset(grp, "converged",     _to_c_order(d.converged))
         end
     end
     return filename
@@ -282,7 +313,7 @@ grids and a `Vector{SpheroidSweepData}`, one entry per wavelength group.
 function read_spheroid_sweep_h5(filename::AbstractString)
     h5open(filename, "r") do f
         grids = SpheroidSweepGrids(
-            read(f["D_ve_grid"]),
+            10.0 .^ read(f["log_D_ve_grid"]),
             read(f["RI_real_grid"]),
             read(f["log_AR_grid"]),
             read(f["cos_theta_o_half_grid"]),
@@ -296,12 +327,13 @@ function read_spheroid_sweep_h5(filename::AbstractString)
             wl_0 = haskey(attrs(obj), "wl_0") ? Float64(attrs(obj)["wl_0"]) :
                    parse(Float64, replace(name[4:end], "p" => "."))
             m_m = haskey(attrs(obj), "m_m") ? Float64(attrs(obj)["m_m"]) : 1.0
-            S_re = read(obj["S_fw_theta_re"]); S_im = read(obj["S_fw_theta_im"])
-            T_re = read(obj["S_fw_phi_re"]);   T_im = read(obj["S_fw_phi_im"])
+            m_i = haskey(attrs(obj), "m_imag") ? Float64(attrs(obj)["m_imag"]) : 0.0
+            S_re = _to_c_order(read(obj["S_fw_theta_re"])); S_im = _to_c_order(read(obj["S_fw_theta_im"]))
+            T_re = _to_c_order(read(obj["S_fw_phi_re"]));   T_im = _to_c_order(read(obj["S_fw_phi_im"]))
             S_fw_theta = ComplexF64.(S_re) .+ im .* S_im
             S_fw_phi   = ComplexF64.(T_re) .+ im .* T_im
-            converged  = read(obj["converged"])
-            push!(data_per_wl, SpheroidSweepData(wl_0, m_m,
+            converged  = _to_c_order(read(obj["converged"]))
+            push!(data_per_wl, SpheroidSweepData(wl_0, m_m, m_i,
                                                  S_fw_theta, S_fw_phi, converged))
         end
         # Sort by wavelength for deterministic order
