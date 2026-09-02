@@ -61,3 +61,9 @@
 
 # backup checkpoints (kept locally, not versioned)
 *.bak_L1
+
+# Sweep outputs and their checkpoints: generated artifacts, and the consumer
+# stores the tables content-addressed in ~/.cache/pcas_lut with a manifest entry.
+benchmarks/cas_v2/*.h5
+benchmarks/cas_v2/*.ckpt.jls
+benchmarks/cas_v2/*_sweep*.log
