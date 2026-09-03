@@ -56,6 +56,28 @@ const DRY_RUN = "--dry-run" in ARGS
 # on small particles instead of a run that reaches the expensive top of the grid.
 const DVE_MIN = parse(Float64, _arg("--dve-min", "0.05"))
 const DVE_MAX = parse(Float64, _arg("--dve-max", "0.70"))
+# Shape-axis half-width in log10(AR), and the mesh coarseness multiplier. Both were
+# measured on 2026-09-03 rather than chosen: the largest amplitude stratum needs
+# |log10 AR| ~ 0.98 (extrapolating the table's own slope of 1.01), and coarsening lc
+# by 1.6 costs 4.5x less while |B/A| moves only inside the convergence wobble --
+# 2.02% at 1.0 against 2.89% at 1.6, with 2.5 breaking down at -14%.
+const LOG_AR_MAX = parse(Float64, _arg("--log-ar-max", "0.6"))
+const LC_FACTOR  = parse(Float64, _arg("--lc-factor", "1.0"))
+# Solve ONE index and replicate it across a degenerate real-index axis.
+#
+# The consumer's schema puts an axis on Re(m_p) and bakes Im(m_p) in as an
+# attribute, and its spline needs three points on every axis -- so a fixed-index
+# species pays 3x for an axis it never queries off-centre. The user's call
+# (2026-09-03): if a sensitivity study is worth running it should be on the
+# IMAGINARY part, which carries the larger uncertainty -- goethite's k is digitised
+# off a figure with a spread near 30% and is carried to one significant figure,
+# while the real parts are read cleanly. That study cannot be an axis here, so it
+# becomes a SECOND TABLE at a different Im, and the real axis stops being paid for.
+#
+# The file says so in its own attributes, and the consumer refuses to be queried
+# off the degenerate value -- otherwise a table that LOOKS like it has an index axis
+# would return the same amplitudes for every index, silently.
+const DEGENERATE_RI = "--degenerate-ri" in ARGS
 
 # ── species constants (provisional; see the JSON in the PCAS tree) ───────────
 # (wl_um, m_m, Re(m_p) at that wl, Im(m_p) at that wl)
@@ -77,7 +99,7 @@ const OUT_FILE = _arg("--output",
 # ── grids ────────────────────────────────────────────────────────────────────
 # Log-spaced sizes: the consumer requires the LOG axis to be equidistant.
 const D_VE_GRID = 10 .^ collect(range(log10(DVE_MIN), log10(DVE_MAX), length = N_DVE))
-const LOG_AR_GRID = collect(range(-0.6, 0.6, length = N_AR))   # AR 0.25 .. 4.0
+const LOG_AR_GRID = collect(range(-LOG_AR_MAX, LOG_AR_MAX, length = N_AR))
 const COS_THETA_O_HALF = collect(range(0.0, 1.0, length = 13))
 const PHI_O_GRID = collect(range(0.0, pi, length = 21))         # analytic: free
 
@@ -138,8 +160,8 @@ const NO_RESUME = "--no-resume" in ARGS
 # Settings that invalidate a checkpoint if they change. Grids are compared by
 # value, not by count: a rerun with the same N but a different range must not
 # silently inherit amplitudes computed on the old grid.
-_ckpt_key() = (SPECIES, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
-               PHI_O_GRID, N_PW, LC_GEOM, TOL, DUFFY_ORDER, COND)
+_ckpt_key() = (SPECIES, DEGENERATE_RI, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
+               PHI_O_GRID, N_PW, LC_GEOM, LC_FACTOR, TOL, DUFFY_ORDER, COND)
 
 function _load_ckpt()
     (NO_RESUME || !isfile(CKPT_FILE)) && return nothing
@@ -182,19 +204,27 @@ function _fresh_state()
                falses(nw, N_DVE, N_AR))
 end
 
-function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fixed)
+function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fixed,
+                               re_fixed)
+    # With a degenerate axis one index is solved and copied across. It must be the
+    # species' own value FOR THIS BAND, not the axis midpoint: the axis is shared by
+    # the two wavelengths and their real parts differ (goethite 2.22 against 2.18,
+    # hematite 3.006 against 2.7895), so the midpoint matches neither.
+    solve_idx = DEGENERATE_RI ? [(length(re_axis) + 1) ÷ 2] : collect(1:N_RI)
+    re_used = DEGENERATE_RI ? fill(re_fixed, length(re_axis)) : re_axis
     # The mesh is shared across the real-index axis: lc uses the LARGEST |m_p| on
     # the axis, which is the finest requirement, so the shared mesh is at least as
     # fine as any single index needs. That amortises meshing, the AIM grid, the
     # projection and the mass matrix over N_RI solves -- none of them depend on m_p.
-    m_worst = maximum(abs(complex(re, im_fixed)) for re in re_axis)
+    m_worst = DEGENERATE_RI ? abs(complex(re_fixed, im_fixed)) :
+              maximum(abs(complex(re, im_fixed)) for re in re_axis)
 
     for i in 1:N_DVE, k in 1:N_AR
         D_ve = D_VE_GRID[i]; AR = 10.0 ^ LOG_AR_GRID[k]
         r = D_ve / 2
         b = r * AR ^ ( 1/3)          # AR > 1 oblate (b > c), AR < 1 prolate
         c = r * AR ^ (-2/3)
-        lc = min(wl_0 / (m_worst * N_PW), LC_GEOM * min(b, c))
+        lc = min(LC_FACTOR * wl_0 / (m_worst * N_PW), LC_GEOM * min(b, c))
 
         if st.done[w, i, k]
             @printf("  [D=%.4f AR=%.3f] (checkpoint)\n", D_ve, AR); continue
@@ -216,8 +246,8 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
             # (block-Krylov halves the iteration count against single-RHS solves),
             # and the azimuth is expanded analytically from alpha = 0.
             eul = [(0.0, acos(u), 0.0) for u in COS_THETA_O_HALF]
-            for j in 1:N_RI
-                m_p = complex(re_axis[j], im_fixed)
+            for j in solve_idx
+                m_p = complex(re_used[j], im_fixed)
                 t = @elapsed res, _, info = solve_cas_v2_orientations(
                     basis, eul;
                     wl_0 = wl_0, m_m = m_m, m_p = [m_p, m_p, m_p],
@@ -232,9 +262,19 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
                     st.S_theta[w][i, j, k, m, :] .= Sth
                     st.S_phi[w][i, j, k, m, :]   .= Sph
                 end
-                @printf("| n=%.3f %.0fs/%dit%s ", re_axis[j], t, info.iterations,
+                @printf("| n=%.3f %.0fs/%dit%s ", re_used[j], t, info.iterations,
                         info.converged ? "" : " NOTCONV")
                 flush(stdout)
+            end
+            if DEGENERATE_RI
+                j0 = solve_idx[1]
+                for j in 1:N_RI
+                    j == j0 && continue
+                    st.S_theta[w][i, j, k, :, :] .= st.S_theta[w][i, j0, k, :, :]
+                    st.S_phi[w][i, j, k, :, :]   .= st.S_phi[w][i, j0, k, :, :]
+                    st.converged[w][i, j, k] = st.converged[w][i, j0, k]
+                end
+                @printf("| (%d indices replicated) ", N_RI - 1)
             end
             println()
         catch err
@@ -256,7 +296,10 @@ end
 @printf("  D_ve  %d points  %.3f .. %.3f um (log-spaced)\n", N_DVE, first(D_VE_GRID), last(D_VE_GRID))
 @printf("  AR    %d points  %.3f .. %.3f (prolate through oblate)\n",
         N_AR, 10.0^first(LOG_AR_GRID), 10.0^last(LOG_AR_GRID))
-@printf("  Re(m) %d points  %.3f .. %.3f\n", N_RI, first(RI_REAL_GRID), last(RI_REAL_GRID))
+@printf("  mesh  lc factor %.2f  (1.0 = ten cells per wavelength inside the particle)\n", LC_FACTOR)
+@printf("  Re(m) %d points  %.3f .. %.3f%s\n", N_RI, first(RI_REAL_GRID), last(RI_REAL_GRID),
+        DEGENERATE_RI ? "  DEGENERATE: solved per band at " *
+                        join([string(c[3]) for c in COND], "/") * ", copied across" : "")
 @printf("  theta %d (one block)   phi %d (analytic)\n",
         length(COS_THETA_O_HALF), length(PHI_O_GRID))
 @printf("  cells: %d geometries x %d indices x %d wavelengths\n",
@@ -268,7 +311,7 @@ state = something(_load_ckpt(), _fresh_state())
 data = SpheroidSweepData[]
 for (w, (wl, m_m, re_c, im_c)) in enumerate(COND)
     @printf("--- lambda = %.3f um   m_m = %.4f   Im(m_p) = %.4f (fixed) ---\n", wl, m_m, im_c)
-    push!(data, sweep_one_wavelength!(state, w, wl, m_m, RI_REAL_GRID, im_c))
+    push!(data, sweep_one_wavelength!(state, w, wl, m_m, RI_REAL_GRID, im_c, re_c))
 end
 
 if !DRY_RUN
@@ -276,9 +319,21 @@ if !DRY_RUN
                                COS_THETA_O_HALF, PHI_O_GRID)
     write_spheroid_sweep_h5(OUT_FILE, grids, data;
         block_viem_version = "0.1.1", solver_tol = TOL,
-        extra_root_attrs = Dict("producer" => "block-VIEM.jl",
-                                "species" => SPECIES,
-                                "index_status" => "provisional literature constants"))
+        extra_root_attrs = merge(
+            Dict("producer" => "block-VIEM.jl",
+                 "species" => SPECIES,
+                 "index_status" => "provisional literature constants"),
+            DEGENERATE_RI ?
+                Dict("ri_axis_degenerate" => 1,
+                     "ri_axis_value_per_wl" =>
+                        join(["$(c[1])=$(c[3])" for c in COND], ","),
+                     "ri_axis_note" =>
+                        "Re(m_p) was solved at ri_axis_value_per_wl (one value PER BAND, " *
+                        "since the two bands' real parts differ) and copied across the " *
+                        "axis. Querying any other index returns the SAME amplitudes. " *
+                        "A refractive-index sensitivity study belongs on Im(m_p) and is " *
+                        "a separate table, not a point on this axis.") :
+                Dict{String,Any}()))
     n_bad = sum(!d.converged[i] for d in data for i in eachindex(d.converged))
     @printf("\nWrote %s   non-converged cells: %d\n", OUT_FILE, n_bad)
     n_bad == 0 || @warn "non-converged cells present; the consumer's surrogate REFUSES a LUT with NaNs"
