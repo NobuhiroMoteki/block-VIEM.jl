@@ -89,6 +89,17 @@ const SPECIES_TABLE = Dict(
     # The 773 nm value is SUBSTITUTED from ~0.70 um, the end of the published range.
     "goethite" => [(0.637, 1.3315, 2.2200, 0.0800),
                    (0.773, 1.3300, 2.1800, 0.1100)],
+    # "Soft" goethite: the EFFECTIVE index the Koju standard's mean-amplitude cloud asks
+    # for (PCAS handoff 2026-09-05/07). At 2.22+0.08i the model's arg A runs ahead of the
+    # data by up to 22 degrees and no spheroid shape brings it back; a Mie sphere scan
+    # reproduces the phase-versus-|A| trend at 1.60+0.04i (637 nm) and 1.70+0.02i
+    # (773 nm) to about a degree, and the silicate table (k = 0) pinned at its 1.69
+    # ceiling and still fell short -- the cloud wants BOTH the low real part and the
+    # small absorption. Far below the crystal's principal indices (2.26-2.52): porous
+    # needle aggregates, presumably. Real axis kept non-degenerate so Phase 1 can
+    # estimate Re(m) on it; Im(m) fixed per band from the sphere scan.
+    "goethite_soft" => [(0.637, 1.3315, 1.6000, 0.0400),
+                        (0.773, 1.3300, 1.7000, 0.0200)],
 )
 haskey(SPECIES_TABLE, SPECIES) ||
     error("unknown species $(SPECIES) (have: $(join(sort(collect(keys(SPECIES_TABLE))), ", ")))")
@@ -106,7 +117,9 @@ const PHI_O_GRID = collect(range(0.0, pi, length = 21))         # analytic: free
 # Real-index axis: 3 points spanning BOTH wavelengths' values with margin. The
 # axis is shared by the wavelength groups, so it has to bracket both.
 _re = [c[3] for c in COND]
-const RI_HALFSPAN = 0.20
+# Overridable: a narrower axis interpolates better when Re(m) will be ESTIMATED on it
+# (three cubic-spline points over 0.3 rather than 0.5 of index).
+const RI_HALFSPAN = parse(Float64, _arg("--ri-halfspan", "0.20"))
 # N_RI = 1 is for cost probes only -- the consumer's spline needs >= 3 per axis and
 # refuses such a table. range() cannot take differing endpoints with length 1.
 const RI_REAL_GRID = N_RI == 1 ?
