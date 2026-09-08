@@ -100,6 +100,12 @@ const SPECIES_TABLE = Dict(
     # estimate Re(m) on it; Im(m) fixed per band from the sphere scan.
     "goethite_soft" => [(0.637, 1.3315, 1.6000, 0.0400),
                         (0.773, 1.3300, 1.7000, 0.0200)],
+    # Same finding for hematite (PCAS handoff 2026-09-08): the Koju standard's phase-
+    # versus-|A| trend wants n ~ 2.2 with k 0.05-0.08 (rms 3 / 1 degree) against 20 / 14
+    # for the Querry epsilon-average 3.006+0.08i. The observed cloud is also Mie-side cut,
+    # so the sphere scan is a guide and the posterior-predictive check decides.
+    "hematite_soft" => [(0.637, 1.3315, 2.2000, 0.0800),
+                        (0.773, 1.3300, 2.2000, 0.0500)],
 )
 haskey(SPECIES_TABLE, SPECIES) ||
     error("unknown species $(SPECIES) (have: $(join(sort(collect(keys(SPECIES_TABLE))), ", ")))")
