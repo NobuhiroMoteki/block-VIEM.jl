@@ -78,6 +78,20 @@ const LC_FACTOR  = parse(Float64, _arg("--lc-factor", "1.0"))
 # off the degenerate value -- otherwise a table that LOOKS like it has an index axis
 # would return the same amplitudes for every index, silently.
 const DEGENERATE_RI = "--degenerate-ri" in ARGS
+# FORM BIREFRINGENCE (PCAS handoff 2026-09-08, user's choice): the particle is a porous
+# aggregate of needles aligned with the spheroid's symmetry axis z, modelled as a
+# uniaxial Maxwell-Garnett medium of crystal cylinders in the host. The index axis then
+# carries the FILL FRACTION f (three points), and each point maps to a per-band tensor
+#   eps_par  = f eps_c + (1-f) eps_m,   eps_perp = eps_m [(1+f)eps_c + (1-f)eps_m] / [(1-f)eps_c + (1+f)eps_m]
+# with m_p = [n_perp, n_perp, n_par] locked to the mesh frame. Axial symmetry is kept,
+# so the analytic azimuth expansion and the consumer's table format are unchanged. The
+# axis VALUE written to the file is Re of the eps-average index at the first band, so the
+# consumer's "RI" coordinate keeps its meaning of an effective real index; the fills and
+# per-band tensors are recorded as attributes. Measured (form_birefringence_probe.jl):
+# a prolate-3 aggregate at fill 0.5 depolarizes 0.25 at beta = 90, twice the isotropic
+# control, which is what the small goethite particles show and the isotropic tables cannot.
+const FORM_BIREF = "--form-biref" in ARGS
+const FILLS = FORM_BIREF ? parse.(Float64, split(_arg("--fills", "0.4,0.5,0.6"), ",")) : Float64[]
 
 # ── species constants (provisional; see the JSON in the PCAS tree) ───────────
 # (wl_um, m_m, Re(m_p) at that wl, Im(m_p) at that wl)
@@ -106,6 +120,11 @@ const SPECIES_TABLE = Dict(
     # so the sphere scan is a guide and the posterior-predictive check decides.
     "hematite_soft" => [(0.637, 1.3315, 2.2000, 0.0800),
                         (0.773, 1.3300, 2.2000, 0.0500)],
+    # --form-biref only: (wl, m_m, Re m_c, Im m_c) of the CRYSTAL needles. The real part is a
+    # representative goethite value at red wavelengths (principal indices 2.26-2.52 at Na D,
+    # strong dispersion); the imaginary part follows the sphere scan's k ratio between bands.
+    "goethite_needle" => [(0.637, 1.3315, 2.3000, 0.1000),
+                          (0.773, 1.3300, 2.3000, 0.0600)],
 )
 haskey(SPECIES_TABLE, SPECIES) ||
     error("unknown species $(SPECIES) (have: $(join(sort(collect(keys(SPECIES_TABLE))), ", ")))")
@@ -120,6 +139,12 @@ const LOG_AR_GRID = collect(range(-LOG_AR_MAX, LOG_AR_MAX, length = N_AR))
 const COS_THETA_O_HALF = collect(range(0.0, 1.0, length = 13))
 const PHI_O_GRID = collect(range(0.0, pi, length = 21))         # analytic: free
 
+function mg_uniaxial(m_c, m_m, f)
+    ec, em = m_c^2, m_m^2
+    e_par  = f * ec + (1 - f) * em
+    e_perp = em * ((1 + f) * ec + (1 - f) * em) / ((1 - f) * ec + (1 + f) * em)
+    return sqrt(e_par), sqrt(e_perp), sqrt((e_par + 2e_perp) / 3)
+end
 # Real-index axis: 3 points spanning BOTH wavelengths' values with margin. The
 # axis is shared by the wavelength groups, so it has to bracket both.
 _re = [c[3] for c in COND]
@@ -128,9 +153,13 @@ _re = [c[3] for c in COND]
 const RI_HALFSPAN = parse(Float64, _arg("--ri-halfspan", "0.20"))
 # N_RI = 1 is for cost probes only -- the consumer's spline needs >= 3 per axis and
 # refuses such a table. range() cannot take differing endpoints with length 1.
-const RI_REAL_GRID = N_RI == 1 ?
+const RI_REAL_GRID = FORM_BIREF ?
+    [real(mg_uniaxial(complex(COND[1][3], COND[1][4]), COND[1][2], f)[3]) for f in FILLS] :
+    N_RI == 1 ?
     [(minimum(_re) + maximum(_re)) / 2] :
     collect(range(minimum(_re) - RI_HALFSPAN, maximum(_re) + RI_HALFSPAN, length = N_RI))
+FORM_BIREF && length(FILLS) != N_RI && error("--fills has $(length(FILLS)) values but --n-ri is $N_RI")
+FORM_BIREF && DEGENERATE_RI && error("--form-biref and --degenerate-ri are alternatives")
 
 # ── solver settings (measured 2026-09-01, see docs/handoff) ──────────────────
 const N_PW        = 10       # mesh cells per wavelength inside the particle
@@ -236,7 +265,12 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
     # fine as any single index needs. That amortises meshing, the AIM grid, the
     # projection and the mass matrix over N_RI solves -- none of them depend on m_p.
     m_worst = DEGENERATE_RI ? abs(complex(re_fixed, im_fixed)) :
+              FORM_BIREF ? maximum(abs(mg_uniaxial(complex(re_fixed, im_fixed), m_m, f)[1]) for f in FILLS) :
               maximum(abs(complex(re, im_fixed)) for re in re_axis)
+    # per-index particle tensor [x, y, z] in the mesh frame (z = symmetry axis)
+    tensor_of(j) = FORM_BIREF ?
+        (let (np_, nq_, _) = mg_uniaxial(complex(re_fixed, im_fixed), m_m, FILLS[j]); [nq_, nq_, np_] end) :
+        (let mp = complex(re_used[j], im_fixed); [mp, mp, mp] end)
 
     for i in 1:N_DVE, k in 1:N_AR
         D_ve = D_VE_GRID[i]; AR = 10.0 ^ LOG_AR_GRID[k]
@@ -266,10 +300,10 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
             # and the azimuth is expanded analytically from alpha = 0.
             eul = [(0.0, acos(u), 0.0) for u in COS_THETA_O_HALF]
             for j in solve_idx
-                m_p = complex(re_used[j], im_fixed)
+                m_vec = tensor_of(j)
                 t = @elapsed res, _, info = solve_cas_v2_orientations(
                     basis, eul;
-                    wl_0 = wl_0, m_m = m_m, m_p = [m_p, m_p, m_p],
+                    wl_0 = wl_0, m_m = m_m, m_p = m_vec,
                     method = :aim_gmres, tol = TOL, maxiter = MAXITER,
                     return_D = true, return_solve_info = true,
                     duffy_rule = duffy_reference_rule(DUFFY_ORDER), symmetrize = true,
@@ -281,8 +315,10 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
                     st.S_theta[w][i, j, k, m, :] .= Sth
                     st.S_phi[w][i, j, k, m, :]   .= Sph
                 end
-                @printf("| n=%.3f %.0fs/%dit%s ", re_used[j], t, info.iterations,
-                        info.converged ? "" : " NOTCONV")
+                @printf("| %s %.0fs/%dit%s ",
+                        FORM_BIREF ? @sprintf("f=%.2f n⊥=%.3f n∥=%.3f", FILLS[j], real(m_vec[1]), real(m_vec[3])) :
+                                     @sprintf("n=%.3f", re_used[j]),
+                        t, info.iterations, info.converged ? "" : " NOTCONV")
                 flush(stdout)
             end
             if DEGENERATE_RI
@@ -318,7 +354,16 @@ end
 @printf("  mesh  lc factor %.2f  (1.0 = ten cells per wavelength inside the particle)\n", LC_FACTOR)
 @printf("  Re(m) %d points  %.3f .. %.3f%s\n", N_RI, first(RI_REAL_GRID), last(RI_REAL_GRID),
         DEGENERATE_RI ? "  DEGENERATE: solved per band at " *
-                        join([string(c[3]) for c in COND], "/") * ", copied across" : "")
+                        join([string(c[3]) for c in COND], "/") * ", copied across" :
+        FORM_BIREF ? "  FORM BIREFRINGENCE: axis = eps-average Re(n) at band 1 for fills " *
+                     join(string.(FILLS), "/") * " (uniaxial MG, needles along z)" : "")
+if FORM_BIREF
+    for (wl, m_m, re_c, im_c) in COND, f in FILLS
+        np_, nq_, ni_ = mg_uniaxial(complex(re_c, im_c), m_m, f)
+        @printf("    wl %.3f fill %.2f: n∥ %.3f%+.3fi  n⊥ %.3f%+.3fi  eps-avg %.3f%+.3fi\n", wl, f,
+                real(np_), imag(np_), real(nq_), imag(nq_), real(ni_), imag(ni_))
+    end
+end
 @printf("  theta %d (one block)   phi %d (analytic)\n",
         length(COS_THETA_O_HALF), length(PHI_O_GRID))
 @printf("  cells: %d geometries x %d indices x %d wavelengths\n",
@@ -341,7 +386,16 @@ if !DRY_RUN
         extra_root_attrs = merge(
             Dict("producer" => "block-VIEM.jl",
                  "species" => SPECIES,
-                 "index_status" => "provisional literature constants"),
+                 "index_status" => FORM_BIREF ? "uniaxial Maxwell-Garnett effective medium of aligned needles; RI axis = eps-average Re(n) at band 1" :
+                                                "provisional literature constants"),
+            FORM_BIREF ? Dict(
+                "form_birefringence" => 1,
+                "fill_fractions" => join(string.(FILLS), ","),
+                "crystal_m_per_wl" => join([@sprintf("%.3f:%.4f+%.4fi", c[1], c[3], c[4]) for c in COND], ";"),
+                "n_par_n_perp_per_wl_per_fill" => join([@sprintf("%.3f:f%.2f:%.4f+%.4fi/%.4f+%.4fi", c[1], f,
+                    real(mg_uniaxial(complex(c[3], c[4]), c[2], f)[1]), imag(mg_uniaxial(complex(c[3], c[4]), c[2], f)[1]),
+                    real(mg_uniaxial(complex(c[3], c[4]), c[2], f)[2]), imag(mg_uniaxial(complex(c[3], c[4]), c[2], f)[2]))
+                    for c in COND for f in FILLS], ";")) : Dict(),
             DEGENERATE_RI ?
                 Dict("ri_axis_degenerate" => 1,
                      "ri_axis_value_per_wl" =>
