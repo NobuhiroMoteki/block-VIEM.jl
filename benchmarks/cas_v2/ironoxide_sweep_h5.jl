@@ -379,7 +379,15 @@ for (w, (wl, m_m, re_c, im_c)) in enumerate(COND)
 end
 
 if !DRY_RUN
-    grids = SpheroidSweepGrids(D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID,
+    # The consumer's spline needs an EQUIDISTANT axis. Under --form-biref the axis values
+    # are eps-average indices of the fills, which are not exactly equidistant (0.4/0.5/0.6
+    # -> 1.683/1.773/1.867, spacings 0.0907 and 0.0937), so the written axis is the
+    # linear interpolant between the end values; the middle point moves by 0.002 in index
+    # (0.1 %), far below the table's own mesh error. The true values stay in the attributes.
+    # Kept out of the checkpoint key on purpose, so a finished sweep can be re-written.
+    ri_axis_written = FORM_BIREF ?
+        collect(range(first(RI_REAL_GRID), last(RI_REAL_GRID), length = N_RI)) : RI_REAL_GRID
+    grids = SpheroidSweepGrids(D_VE_GRID, ri_axis_written, LOG_AR_GRID,
                                COS_THETA_O_HALF, PHI_O_GRID)
     write_spheroid_sweep_h5(OUT_FILE, grids, data;
         block_viem_version = "0.1.1", solver_tol = TOL,
@@ -391,6 +399,9 @@ if !DRY_RUN
             FORM_BIREF ? Dict(
                 "form_birefringence" => 1,
                 "fill_fractions" => join(string.(FILLS), ","),
+                "ri_axis_true_values" => join([@sprintf("%.4f", v) for v in RI_REAL_GRID], ","),
+                "ri_axis_note" => "axis written equidistant between the end eps-average indices; " *
+                                  "ri_axis_true_values are the exact eps-average Re(n) at band 1 per fill",
                 "crystal_m_per_wl" => join([@sprintf("%.3f:%.4f+%.4fi", c[1], c[3], c[4]) for c in COND], ";"),
                 "n_par_n_perp_per_wl_per_fill" => join([@sprintf("%.3f:f%.2f:%.4f+%.4fi/%.4f+%.4fi", c[1], f,
                     real(mg_uniaxial(complex(c[3], c[4]), c[2], f)[1]), imag(mg_uniaxial(complex(c[3], c[4]), c[2], f)[1]),
