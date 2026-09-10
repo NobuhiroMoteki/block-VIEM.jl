@@ -120,6 +120,12 @@ const SPECIES_TABLE = Dict(
     # so the sphere scan is a guide and the posterior-predictive check decides.
     "hematite_soft" => [(0.637, 1.3315, 2.2000, 0.0800),
                         (0.773, 1.3300, 2.2000, 0.0500)],
+    # The fit on hematite_soft pinned Re(m) at its 2.35 ceiling (PCAS handoff 2026-09-10), so
+    # the axis moves up: centre 2.40 with --ri-halfspan 0.2 gives 2.2/2.4/2.6. Built with a
+    # finer mesh (--lc-factor 1.3) because the 1.6 table's sphere cells missed Mie by 6-9
+    # degrees of phase at 0.3 um.
+    "hematite_soft2" => [(0.637, 1.3315, 2.4000, 0.0800),
+                         (0.773, 1.3300, 2.4000, 0.0500)],
     # --form-biref only: (wl, m_m, Re m_c, Im m_c) of the CRYSTAL needles. The real part is a
     # representative goethite value at red wavelengths (principal indices 2.26-2.52 at Na D,
     # strong dispersion); the imaginary part follows the sphere scan's k ratio between bands.
