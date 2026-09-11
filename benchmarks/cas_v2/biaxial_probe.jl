@@ -83,8 +83,12 @@ n_iso = sqrt((nx^2 + ny^2 + nz^2) / 3)
         real(nx), imag(nx), real(ny), imag(ny), real(nz), imag(nz), real(nx) - real(ny), real(nz) - real(n_t))
 @printf("  uniaxial comparison n_t %.3f  n_z %.3f;  isotropic %.3f%+.3fi\n\n", real(n_t), real(nz), real(n_iso), imag(n_iso))
 m_worst = maximum(abs, (nx, ny, nz))
-const SPINS = (0.0, 45.0, 90.0)                       # rotation about the needle axis (ZYZ alpha)
-eul = [(deg2rad(a), deg2rad(b), 0.0) for a in SPINS for b in BETAS]
+const SPINS = (0.0, 45.0, 90.0)                       # rotation about the needle axis (ZYZ GAMMA)
+# The 2026-09-10 run put the spin in alpha, which is the rotation about the lab z (the beam):
+# its three "spins" were azimuths, |B/A| was identical across them and the spin average was
+# the gamma = 0 value. The spin about the particle's own axis is gamma (postprocess.jl:
+# R = Rz(alpha) Ry(beta) Rz(gamma), gamma acts on particle coordinates first).
+eul = [(0.0, deg2rad(b), deg2rad(g)) for g in SPINS for b in BETAS]
 
 @printf("%-10s %-5s %-10s  spin  %s   sinb-avg\n", "shape", "D_ve", "medium", join([@sprintf("|B/A|@%2.0f", b) for b in BETAS], "  "))
 for (name, AR) in SHAPES, D in D_VE_LIST

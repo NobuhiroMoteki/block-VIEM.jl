@@ -91,7 +91,17 @@ const DEGENERATE_RI = "--degenerate-ri" in ARGS
 # a prolate-3 aggregate at fill 0.5 depolarizes 0.25 at beta = 90, twice the isotropic
 # control, which is what the small goethite particles show and the isotropic tables cannot.
 const FORM_BIREF = "--form-biref" in ARGS
-const FILLS = FORM_BIREF ? parse.(Float64, split(_arg("--fills", "0.4,0.5,0.6"), ",")) : Float64[]
+# BIAXIAL (PCAS handoff 2026-09-11, user's choice (b)): the needles' crystal axes are aligned
+# too, so the aggregate is biaxial -- n_beta along the needle (z), n_gamma along x, n_alpha
+# along y (Handbook of Mineralogy: X = b, Y = c, Z = a). Per-axis Maxwell-Garnett at each
+# fill. The particle then depends on its spin psi about z, which becomes a sixth table axis;
+# a diagonal tensor is mirror-symmetric, so psi in [0, pi/2] (3 nodes) covers the period pi.
+# Measured (biaxial_probe.jl): the along-beam zero lifts to 0.05 and the level gains a tenth.
+const FORM_BIAX = "--biaxial" in ARGS
+const ANISO = FORM_BIREF || FORM_BIAX
+const FILLS = ANISO ? parse.(Float64, split(_arg("--fills", "0.4,0.5,0.6"), ",")) : Float64[]
+const PSI_GRID = FORM_BIAX ? collect(range(0.0, pi / 2, length = parse(Int, _arg("--n-psi", "3")))) : Float64[]
+const LOG_AR_MIN = parse(Float64, _arg("--log-ar-min", "NaN"))   # NaN = symmetric -LOG_AR_MAX
 
 # ── species constants (provisional; see the JSON in the PCAS tree) ───────────
 # (wl_um, m_m, Re(m_p) at that wl, Im(m_p) at that wl)
@@ -131,7 +141,13 @@ const SPECIES_TABLE = Dict(
     # strong dispersion); the imaginary part follows the sphere scan's k ratio between bands.
     "goethite_needle" => [(0.637, 1.3315, 2.3000, 0.1000),
                           (0.773, 1.3300, 2.3000, 0.0600)],
+    # --biaxial only: Re(m) here is the nominal n_beta; the principal triple is below.
+    "goethite_biaxial" => [(0.637, 1.3315, 2.4000, 0.1000),
+                           (0.773, 1.3300, 2.4000, 0.0600)],
 )
+# principal indices (n_alpha, n_beta, n_gamma) of the crystal for --biaxial, Na D values
+# (Handbook of Mineralogy; dispersion neglected -- a declared approximation)
+const BIAXIAL_CRYSTAL = Dict("goethite_biaxial" => (2.26, 2.40, 2.45))
 haskey(SPECIES_TABLE, SPECIES) ||
     error("unknown species $(SPECIES) (have: $(join(sort(collect(keys(SPECIES_TABLE))), ", ")))")
 const COND = SPECIES_TABLE[SPECIES]
@@ -141,10 +157,17 @@ const OUT_FILE = _arg("--output",
 # ── grids ────────────────────────────────────────────────────────────────────
 # Log-spaced sizes: the consumer requires the LOG axis to be equidistant.
 const D_VE_GRID = 10 .^ collect(range(log10(DVE_MIN), log10(DVE_MAX), length = N_DVE))
-const LOG_AR_GRID = collect(range(-LOG_AR_MAX, LOG_AR_MAX, length = N_AR))
+const LOG_AR_GRID = collect(range(isnan(LOG_AR_MIN) ? -LOG_AR_MAX : LOG_AR_MIN, LOG_AR_MAX, length = N_AR))
 const COS_THETA_O_HALF = collect(range(0.0, 1.0, length = 13))
 const PHI_O_GRID = collect(range(0.0, pi, length = 21))         # analytic: free
 
+mg_par(m_c, m_m, f)  = sqrt(f * m_c^2 + (1 - f) * m_m^2)
+mg_perp(m_c, m_m, f) = (ec = m_c^2; em = m_m^2; sqrt(em * ((1 + f) * ec + (1 - f) * em) / ((1 - f) * ec + (1 + f) * em)))
+# biaxial aggregate tensor [n_x, n_y, n_z] and its isotropic average, for crystal (na, nb, ng) + k
+function mg_biaxial(na, nb, ng, k, m_m, f)
+    nx = mg_perp(complex(ng, k), m_m, f); ny = mg_perp(complex(na, k), m_m, f); nz = mg_par(complex(nb, k), m_m, f)
+    return nx, ny, nz, sqrt((nx^2 + ny^2 + nz^2) / 3)
+end
 function mg_uniaxial(m_c, m_m, f)
     ec, em = m_c^2, m_m^2
     e_par  = f * ec + (1 - f) * em
@@ -159,13 +182,17 @@ _re = [c[3] for c in COND]
 const RI_HALFSPAN = parse(Float64, _arg("--ri-halfspan", "0.20"))
 # N_RI = 1 is for cost probes only -- the consumer's spline needs >= 3 per axis and
 # refuses such a table. range() cannot take differing endpoints with length 1.
-const RI_REAL_GRID = FORM_BIREF ?
+const RI_REAL_GRID = FORM_BIAX ?
+    [real(mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., COND[1][4], COND[1][2], f)[4]) for f in FILLS] :
+    FORM_BIREF ?
     [real(mg_uniaxial(complex(COND[1][3], COND[1][4]), COND[1][2], f)[3]) for f in FILLS] :
     N_RI == 1 ?
     [(minimum(_re) + maximum(_re)) / 2] :
     collect(range(minimum(_re) - RI_HALFSPAN, maximum(_re) + RI_HALFSPAN, length = N_RI))
-FORM_BIREF && length(FILLS) != N_RI && error("--fills has $(length(FILLS)) values but --n-ri is $N_RI")
-FORM_BIREF && DEGENERATE_RI && error("--form-biref and --degenerate-ri are alternatives")
+ANISO && length(FILLS) != N_RI && error("--fills has $(length(FILLS)) values but --n-ri is $N_RI")
+ANISO && DEGENERATE_RI && error("anisotropic modes and --degenerate-ri are alternatives")
+FORM_BIREF && FORM_BIAX && error("--form-biref and --biaxial are alternatives")
+FORM_BIAX && !haskey(BIAXIAL_CRYSTAL, SPECIES) && error("--biaxial needs a species with principal indices")
 
 # ── solver settings (measured 2026-09-01, see docs/handoff) ──────────────────
 const N_PW        = 10       # mesh cells per wavelength inside the particle
@@ -215,7 +242,7 @@ const NO_RESUME = "--no-resume" in ARGS
 # value, not by count: a rerun with the same N but a different range must not
 # silently inherit amplitudes computed on the old grid.
 _ckpt_key() = (SPECIES, DEGENERATE_RI, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
-               PHI_O_GRID, N_PW, LC_GEOM, LC_FACTOR, TOL, DUFFY_ORDER, COND)
+               PHI_O_GRID, N_PW, LC_GEOM, LC_FACTOR, TOL, DUFFY_ORDER, COND, FORM_BIREF, FORM_BIAX, PSI_GRID, FILLS)
 
 function _load_ckpt()
     (NO_RESUME || !isfile(CKPT_FILE)) && return nothing
@@ -242,14 +269,15 @@ end
 
 mutable struct SweepState
     key::Any
-    S_theta::Vector{Array{ComplexF64,5}}   # one per wavelength
-    S_phi::Vector{Array{ComplexF64,5}}
+    S_theta::Vector{Array{ComplexF64}}     # one per wavelength; 5-D, or 6-D (psi last) when biaxial
+    S_phi::Vector{Array{ComplexF64}}
     converged::Vector{Array{Bool,3}}
     done::Array{Bool,3}                    # (wavelength, D_ve, AR) geometry rows
 end
 
 function _fresh_state()
-    sz = (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID))
+    sz = FORM_BIAX ? (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID), length(PSI_GRID)) :
+                     (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID))
     nw = length(COND)
     SweepState(_ckpt_key(),
                [fill(NaN + NaN*im, sz) for _ in 1:nw],
@@ -271,10 +299,13 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
     # fine as any single index needs. That amortises meshing, the AIM grid, the
     # projection and the mass matrix over N_RI solves -- none of them depend on m_p.
     m_worst = DEGENERATE_RI ? abs(complex(re_fixed, im_fixed)) :
+              FORM_BIAX ? maximum(maximum(abs, mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., im_fixed, m_m, f)[1:3]) for f in FILLS) :
               FORM_BIREF ? maximum(abs(mg_uniaxial(complex(re_fixed, im_fixed), m_m, f)[1]) for f in FILLS) :
               maximum(abs(complex(re, im_fixed)) for re in re_axis)
     # per-index particle tensor [x, y, z] in the mesh frame (z = symmetry axis)
-    tensor_of(j) = FORM_BIREF ?
+    tensor_of(j) = FORM_BIAX ?
+        (let (nx, ny, nz, _) = mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., im_fixed, m_m, FILLS[j]); [nx, ny, nz] end) :
+        FORM_BIREF ?
         (let (np_, nq_, _) = mg_uniaxial(complex(re_fixed, im_fixed), m_m, FILLS[j]); [nq_, nq_, np_] end) :
         (let mp = complex(re_used[j], im_fixed); [mp, mp, mp] end)
 
@@ -304,7 +335,15 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
             # One block per index: the polar grid is the multi-RHS dimension
             # (block-Krylov halves the iteration count against single-RHS solves),
             # and the azimuth is expanded analytically from alpha = 0.
-            eul = [(0.0, acos(u), 0.0) for u in COS_THETA_O_HALF]
+            # biaxial: the spin psi about the particle's own axis is a table axis; the block
+            # holds every (psi, theta) pair, psi outer. In R = Rz(alpha) Ry(beta) Rz(gamma)
+            # (postprocess.jl) the spin is GAMMA -- it acts on particle coordinates first.
+            # Alpha is the rotation about the LAB z, i.e. the beam: putting psi there
+            # (2026-09-11, first TEST table) only rotated B by exp(2i psi) and left |B/A|
+            # identical across the psi axis. The azimuth expansion is exactly that alpha
+            # rotation, so it stays valid for a biaxial particle.
+            eul = FORM_BIAX ? [(0.0, acos(u), psi) for psi in PSI_GRID for u in COS_THETA_O_HALF] :
+                              [(0.0, acos(u), 0.0) for u in COS_THETA_O_HALF]
             for j in solve_idx
                 m_vec = tensor_of(j)
                 t = @elapsed res, _, info = solve_cas_v2_orientations(
@@ -316,14 +355,24 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
                     pitch = pitch, padding = PADDING, projection = proj, mass = mass)
                 st.converged[w][i, j, k] = info.converged
                 for m in 1:length(COS_THETA_O_HALF)
-                    Sth, Sph = expand_alpha_from_alpha0(
-                        res[m].S_fw_theta, res[m].S_fw_phi, PHI_O_GRID)
-                    st.S_theta[w][i, j, k, m, :] .= Sth
-                    st.S_phi[w][i, j, k, m, :]   .= Sph
+                    if FORM_BIAX
+                        for (pidx, _) in enumerate(PSI_GRID)
+                            r = (pidx - 1) * length(COS_THETA_O_HALF) + m
+                            Sth, Sph = expand_alpha_from_alpha0(
+                                res[r].S_fw_theta, res[r].S_fw_phi, PHI_O_GRID)
+                            st.S_theta[w][i, j, k, m, :, pidx] .= Sth
+                            st.S_phi[w][i, j, k, m, :, pidx]   .= Sph
+                        end
+                    else
+                        Sth, Sph = expand_alpha_from_alpha0(
+                            res[m].S_fw_theta, res[m].S_fw_phi, PHI_O_GRID)
+                        st.S_theta[w][i, j, k, m, :] .= Sth
+                        st.S_phi[w][i, j, k, m, :]   .= Sph
+                    end
                 end
                 @printf("| %s %.0fs/%dit%s ",
-                        FORM_BIREF ? @sprintf("f=%.2f n⊥=%.3f n∥=%.3f", FILLS[j], real(m_vec[1]), real(m_vec[3])) :
-                                     @sprintf("n=%.3f", re_used[j]),
+                        ANISO ? @sprintf("f=%.2f n=(%.3f,%.3f,%.3f)", FILLS[j], real(m_vec[1]), real(m_vec[2]), real(m_vec[3])) :
+                                @sprintf("n=%.3f", re_used[j]),
                         t, info.iterations, info.converged ? "" : " NOTCONV")
                 flush(stdout)
             end
@@ -341,8 +390,8 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
         catch err
             println("FAILED: ", sprint(showerror, err)[1:min(90, end)])
             st.converged[w][i, :, k] .= false
-            st.S_theta[w][i, :, k, :, :] .= NaN + NaN*im
-            st.S_phi[w][i, :, k, :, :]   .= NaN + NaN*im
+            selectdim(selectdim(st.S_theta[w], 1, i), 2, k) .= NaN + NaN*im
+            selectdim(selectdim(st.S_phi[w], 1, i), 2, k)   .= NaN + NaN*im
         end
         # Mark done even on failure: the cell is recorded as non-converged and a
         # rerun must not silently retry it into a different answer. Use
@@ -361,6 +410,9 @@ end
 @printf("  Re(m) %d points  %.3f .. %.3f%s\n", N_RI, first(RI_REAL_GRID), last(RI_REAL_GRID),
         DEGENERATE_RI ? "  DEGENERATE: solved per band at " *
                         join([string(c[3]) for c in COND], "/") * ", copied across" :
+        FORM_BIAX ? "  BIAXIAL: axis = isotropic-average Re(n) at band 1 for fills " *
+                    join(string.(FILLS), "/") * " (per-axis MG, crystal " * string(BIAXIAL_CRYSTAL[SPECIES]) *
+                    "), psi axis " * string(round.(rad2deg.(PSI_GRID), digits = 1)) * " deg" :
         FORM_BIREF ? "  FORM BIREFRINGENCE: axis = eps-average Re(n) at band 1 for fills " *
                      join(string.(FILLS), "/") * " (uniaxial MG, needles along z)" : "")
 if FORM_BIREF
@@ -391,17 +443,25 @@ if !DRY_RUN
     # linear interpolant between the end values; the middle point moves by 0.002 in index
     # (0.1 %), far below the table's own mesh error. The true values stay in the attributes.
     # Kept out of the checkpoint key on purpose, so a finished sweep can be re-written.
-    ri_axis_written = FORM_BIREF ?
+    ri_axis_written = ANISO ?
         collect(range(first(RI_REAL_GRID), last(RI_REAL_GRID), length = N_RI)) : RI_REAL_GRID
     grids = SpheroidSweepGrids(D_VE_GRID, ri_axis_written, LOG_AR_GRID,
-                               COS_THETA_O_HALF, PHI_O_GRID)
+                               COS_THETA_O_HALF, PHI_O_GRID, PSI_GRID)
     write_spheroid_sweep_h5(OUT_FILE, grids, data;
         block_viem_version = "0.1.1", solver_tol = TOL,
         extra_root_attrs = merge(
             Dict("producer" => "block-VIEM.jl",
                  "species" => SPECIES,
-                 "index_status" => FORM_BIREF ? "uniaxial Maxwell-Garnett effective medium of aligned needles; RI axis = eps-average Re(n) at band 1" :
+                 "index_status" => FORM_BIAX ? "BIAXIAL Maxwell-Garnett effective medium of aligned needles with aligned crystal axes; RI axis = isotropic-average Re(n) at band 1; psi axis = spin about the needle" :
+                                   FORM_BIREF ? "uniaxial Maxwell-Garnett effective medium of aligned needles; RI axis = eps-average Re(n) at band 1" :
                                                 "provisional literature constants"),
+            FORM_BIAX ? Dict(
+                "biaxial" => 1,
+                "fill_fractions" => join(string.(FILLS), ","),
+                "crystal_principal_indices" => join(string.(BIAXIAL_CRYSTAL[SPECIES]), ","),
+                "ri_axis_true_values" => join([@sprintf("%.4f", v) for v in RI_REAL_GRID], ","),
+                "tensor_per_wl_per_fill" => join([@sprintf("%.3f:f%.2f:%.4f/%.4f/%.4f", c[1], f,
+                    real.(mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., c[4], c[2], f)[1:3])...) for c in COND for f in FILLS], ";")) :
             FORM_BIREF ? Dict(
                 "form_birefringence" => 1,
                 "fill_fractions" => join(string.(FILLS), ","),

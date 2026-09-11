@@ -121,7 +121,14 @@ struct SpheroidSweepGrids
     log_AR::Vector{Float64}
     cos_theta_o_half::Vector{Float64}
     phi_o::Vector{Float64}
+    # Optional sixth axis (2026-09-11): spin psi about the spheroid's symmetry axis, for a
+    # BIAXIAL particle whose scattering depends on it. Empty for the ordinary 5-D table.
+    # By the mirror symmetry of a diagonal tensor, psi in [0, pi/2] covers the period pi.
+    psi::Vector{Float64}
 end
+SpheroidSweepGrids(D_ve, RI_real, log_AR, cos_theta_o_half, phi_o) =
+    SpheroidSweepGrids(D_ve, RI_real, log_AR, cos_theta_o_half, phi_o, Float64[])
+has_psi(g::SpheroidSweepGrids) = !isempty(g.psi)
 
 """
     SpheroidSweepData
@@ -148,8 +155,8 @@ struct SpheroidSweepData
     wl_0::Float64
     m_m::Float64
     m_imag::Float64
-    S_fw_theta::Array{ComplexF64,5}
-    S_fw_phi::Array{ComplexF64,5}
+    S_fw_theta::Array{ComplexF64}      # 5-D, or 6-D with the psi axis last
+    S_fw_phi::Array{ComplexF64}
     converged::Array{Bool,3}
 end
 
@@ -179,12 +186,14 @@ function _check_grids(grids::SpheroidSweepGrids)
     _check_eq("log_AR",          grids.log_AR)
     _check_eq("cos_theta_o_half", grids.cos_theta_o_half)
     _check_eq("phi_o",           grids.phi_o)
+    has_psi(grids) && _check_eq("psi", grids.psi)
     return nothing
 end
 
 function _check_data_shape(data::SpheroidSweepData, grids::SpheroidSweepGrids)
     expected = (length(grids.D_ve), length(grids.RI_real), length(grids.log_AR),
                 length(grids.cos_theta_o_half), length(grids.phi_o))
+    has_psi(grids) && (expected = (expected..., length(grids.psi)))
     size(data.S_fw_theta) == expected ||
         error("S_fw_theta shape $(size(data.S_fw_theta)) != expected $expected")
     size(data.S_fw_phi) == expected ||
@@ -268,6 +277,7 @@ function write_spheroid_sweep_h5(filename::AbstractString,
             "block_viem_version"    => String(block_viem_version),
             "wavelengths"           => Float64[d.wl_0 for d in data_per_wl],
         )
+        has_psi(grids) && (prov_config["psi_grid"] = _spec(grids.psi))
         pg = create_group(f, "provenance")
         for (k, v) in _pcas_provenance_attrs(prov_config, block_viem_version)
             attrs(pg)[k] = v
@@ -279,6 +289,12 @@ function write_spheroid_sweep_h5(filename::AbstractString,
         write_dataset(f, "log_AR_grid",            grids.log_AR)
         write_dataset(f, "cos_theta_o_half_grid",  grids.cos_theta_o_half)
         write_dataset(f, "phi_o_grid",             grids.phi_o)
+        if has_psi(grids)
+            write_dataset(f, "psi_grid", grids.psi)
+            attrs(f)["axis_order"] = "log_D_ve_grid,RI_real_grid,log_AR_grid,cos_theta_o_half_grid,phi_o_grid,psi_grid"
+            attrs(f)["psi_note"] = "spin about the symmetry axis [rad]; the particle is biaxial, so " *
+                                   "S depends on it; period pi, mirror-symmetric, tabulated on [0, pi/2]"
+        end
 
         # ---- per-wavelength groups ----
         for d in data_per_wl
@@ -318,6 +334,7 @@ function read_spheroid_sweep_h5(filename::AbstractString)
             read(f["log_AR_grid"]),
             read(f["cos_theta_o_half_grid"]),
             read(f["phi_o_grid"]),
+            haskey(f, "psi_grid") ? read(f["psi_grid"]) : Float64[],
         )
         data_per_wl = SpheroidSweepData[]
         for name in keys(f)
