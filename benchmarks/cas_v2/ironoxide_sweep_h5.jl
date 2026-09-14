@@ -98,9 +98,18 @@ const FORM_BIREF = "--form-biref" in ARGS
 # a diagonal tensor is mirror-symmetric, so psi in [0, pi/2] (3 nodes) covers the period pi.
 # Measured (biaxial_probe.jl): the along-beam zero lifts to 0.05 and the level gains a tenth.
 const FORM_BIAX = "--biaxial" in ARGS
+# --triaxial R2 (2026-09-14): the SHAPE, not the index, breaks the axial symmetry. The transverse
+# semi-axes become b/sqrt(R2) and b*sqrt(R2) (geometric mean and volume unchanged), the index
+# stays isotropic, and the spin psi about the z axis becomes a table axis exactly as in the
+# biaxial mode (the table format is the same 6-axis one). Measured with triaxial_probe.jl: a
+# large oblate ellipsoid with R2 = 1.5 gives the depolarization floor the hematite standard
+# shows (p10 0.048, p50 0.160 at 0.35 um) where the spheroid gives p10 0.017.
+const TRIAXIAL = "--triaxial" in ARGS
+const R2 = TRIAXIAL ? parse(Float64, _arg("--triaxial", "1.5")) : 1.0
+const SPIN = FORM_BIAX || TRIAXIAL        # six-axis table (psi last)
 const ANISO = FORM_BIREF || FORM_BIAX
 const FILLS = ANISO ? parse.(Float64, split(_arg("--fills", "0.4,0.5,0.6"), ",")) : Float64[]
-const PSI_GRID = FORM_BIAX ? collect(range(0.0, pi / 2, length = parse(Int, _arg("--n-psi", "3")))) : Float64[]
+const PSI_GRID = SPIN ? collect(range(0.0, pi / 2, length = parse(Int, _arg("--n-psi", "3")))) : Float64[]
 const LOG_AR_MIN = parse(Float64, _arg("--log-ar-min", "NaN"))   # NaN = symmetric -LOG_AR_MAX
 
 # ── species constants (provisional; see the JSON in the PCAS tree) ───────────
@@ -192,6 +201,8 @@ const RI_REAL_GRID = FORM_BIAX ?
 ANISO && length(FILLS) != N_RI && error("--fills has $(length(FILLS)) values but --n-ri is $N_RI")
 ANISO && DEGENERATE_RI && error("anisotropic modes and --degenerate-ri are alternatives")
 FORM_BIREF && FORM_BIAX && error("--form-biref and --biaxial are alternatives")
+TRIAXIAL && ANISO && error("--triaxial is a shape mode; combine it with an anisotropic index only after the tensor frame is defined for it")
+TRIAXIAL && R2 <= 1.0 && error("--triaxial R2 must exceed 1 (R2 = 1 is the spheroid)")
 FORM_BIAX && !haskey(BIAXIAL_CRYSTAL, SPECIES) && error("--biaxial needs a species with principal indices")
 
 # ── solver settings (measured 2026-09-01, see docs/handoff) ──────────────────
@@ -203,8 +214,10 @@ const TOL         = 1e-5
 const MAXITER     = 600
 const DUFFY_ORDER = 5
 
-function spheroid_mesh(b, c, lc)
-    path = joinpath(tempdir(), "viem_fe_$(round(b,digits=6))_$(round(c,digits=6))_$(round(lc,digits=6)).msh")
+function spheroid_mesh(b, c, lc; r2 = 1.0)
+    # r2 > 1: triaxial ellipsoid with transverse semi-axes b/sqrt(r2) (x) and b*sqrt(r2) (y)
+    bx, by = b / sqrt(r2), b * sqrt(r2)
+    path = joinpath(tempdir(), "viem_fe_$(round(bx,digits=6))_$(round(by,digits=6))_$(round(c,digits=6))_$(round(lc,digits=6)).msh")
     isfile(path) && return path
     # Write to a scratch name and rename: a run killed mid-write would otherwise
     # leave a truncated .msh that the next run happily reuses. The scratch name
@@ -216,7 +229,7 @@ function spheroid_mesh(b, c, lc)
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("sph")
         s = gmsh.model.occ.addSphere(0.0, 0.0, 0.0, 1.0)
-        gmsh.model.occ.dilate([(3, s)], 0.0, 0.0, 0.0, b, b, c)
+        gmsh.model.occ.dilate([(3, s)], 0.0, 0.0, 0.0, bx, by, c)
         gmsh.model.occ.synchronize()
         gmsh.model.addPhysicalGroup(3, [s], 1)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc)
@@ -242,7 +255,7 @@ const NO_RESUME = "--no-resume" in ARGS
 # value, not by count: a rerun with the same N but a different range must not
 # silently inherit amplitudes computed on the old grid.
 _ckpt_key() = (SPECIES, DEGENERATE_RI, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
-               PHI_O_GRID, N_PW, LC_GEOM, LC_FACTOR, TOL, DUFFY_ORDER, COND, FORM_BIREF, FORM_BIAX, PSI_GRID, FILLS)
+               PHI_O_GRID, N_PW, LC_GEOM, LC_FACTOR, TOL, DUFFY_ORDER, COND, FORM_BIREF, FORM_BIAX, PSI_GRID, FILLS, TRIAXIAL, R2)
 
 function _load_ckpt()
     (NO_RESUME || !isfile(CKPT_FILE)) && return nothing
@@ -276,7 +289,7 @@ mutable struct SweepState
 end
 
 function _fresh_state()
-    sz = FORM_BIAX ? (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID), length(PSI_GRID)) :
+    sz = SPIN ? (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID), length(PSI_GRID)) :
                      (N_DVE, N_RI, N_AR, length(COS_THETA_O_HALF), length(PHI_O_GRID))
     nw = length(COND)
     SweepState(_ckpt_key(),
@@ -314,7 +327,7 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
         r = D_ve / 2
         b = r * AR ^ ( 1/3)          # AR > 1 oblate (b > c), AR < 1 prolate
         c = r * AR ^ (-2/3)
-        lc = min(LC_FACTOR * wl_0 / (m_worst * N_PW), LC_GEOM * min(b, c))
+        lc = min(LC_FACTOR * wl_0 / (m_worst * N_PW), LC_GEOM * min(b / sqrt(R2), c))
 
         if st.done[w, i, k]
             @printf("  [D=%.4f AR=%.3f] (checkpoint)\n", D_ve, AR); continue
@@ -324,7 +337,7 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
             println("(dry run)"); continue
         end
         try
-            mesh = read_msh(spheroid_mesh(b, c, lc))
+            mesh = read_msh(spheroid_mesh(b, c, lc; r2 = R2))
             basis = build_swg_basis(mesh; include_boundary_faces = true)
             pitch = PITCH_RATIO * mean_edge_length(mesh)
             grid  = aim_grid(basis.mesh; pitch = pitch, padding = PADDING)
@@ -342,7 +355,7 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
             # (2026-09-11, first TEST table) only rotated B by exp(2i psi) and left |B/A|
             # identical across the psi axis. The azimuth expansion is exactly that alpha
             # rotation, so it stays valid for a biaxial particle.
-            eul = FORM_BIAX ? [(0.0, acos(u), psi) for psi in PSI_GRID for u in COS_THETA_O_HALF] :
+            eul = SPIN ? [(0.0, acos(u), psi) for psi in PSI_GRID for u in COS_THETA_O_HALF] :
                               [(0.0, acos(u), 0.0) for u in COS_THETA_O_HALF]
             for j in solve_idx
                 m_vec = tensor_of(j)
@@ -355,7 +368,7 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
                     pitch = pitch, padding = PADDING, projection = proj, mass = mass)
                 st.converged[w][i, j, k] = info.converged
                 for m in 1:length(COS_THETA_O_HALF)
-                    if FORM_BIAX
+                    if SPIN
                         for (pidx, _) in enumerate(PSI_GRID)
                             r = (pidx - 1) * length(COS_THETA_O_HALF) + m
                             Sth, Sph = expand_alpha_from_alpha0(
@@ -415,6 +428,8 @@ end
                     "), psi axis " * string(round.(rad2deg.(PSI_GRID), digits = 1)) * " deg" :
         FORM_BIREF ? "  FORM BIREFRINGENCE: axis = eps-average Re(n) at band 1 for fills " *
                      join(string.(FILLS), "/") * " (uniaxial MG, needles along z)" : "")
+TRIAXIAL && @printf("  TRIAXIAL shape: transverse semi-axes b/sqrt(%.2f) and b*sqrt(%.2f) (b/a = %.2f), isotropic index; psi axis %s deg\n",
+                    R2, R2, R2, string(round.(rad2deg.(PSI_GRID), digits = 1)))
 if FORM_BIREF
     for (wl, m_m, re_c, im_c) in COND, f in FILLS
         np_, nq_, ni_ = mg_uniaxial(complex(re_c, im_c), m_m, f)
@@ -462,6 +477,11 @@ if !DRY_RUN
                 "ri_axis_true_values" => join([@sprintf("%.4f", v) for v in RI_REAL_GRID], ","),
                 "tensor_per_wl_per_fill" => join([@sprintf("%.3f:f%.2f:%.4f/%.4f/%.4f", c[1], f,
                     real.(mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., c[4], c[2], f)[1:3])...) for c in COND for f in FILLS], ";")) :
+            TRIAXIAL ? Dict(
+                "triaxial" => 1,
+                "triaxial_b_over_a" => R2,
+                "triaxial_note" => "ellipsoid semi-axes (b/sqrt(R2), b*sqrt(R2), c) with b, c the spheroid's; " *
+                                   "log_AR axis = log10(b/c) as for the spheroid; psi = spin about z, [0, pi/2] by mirror symmetry") :
             FORM_BIREF ? Dict(
                 "form_birefringence" => 1,
                 "fill_fractions" => join(string.(FILLS), ","),
