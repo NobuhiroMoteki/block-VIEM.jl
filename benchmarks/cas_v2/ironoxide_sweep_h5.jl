@@ -31,6 +31,19 @@
 #
 # Run with:
 #     julia --project=. benchmarks/cas_v2/ironoxide_sweep_h5.jl --species hematite
+#
+# BAND SELECTION (2026-10-14, third CAS-v2 band 512 nm): `--wavelengths 0.512` (comma list)
+# selects which bands of the species table are computed; the default is 0.637,0.773, so
+# every earlier command is unchanged. The 512 nm entries carry a NaN particle index -- no
+# adopted value exists yet -- and `--m-p-512 n+k` is mandatory (generally `--m-p-<nm>`
+# overrides one band's index; under --form-biref it is the CRYSTAL index). A band set other
+# than the default must also state how the real-index axis is built, because the default
+# rule spans the SELECTED bands' real parts and a one-band file would get an axis of its
+# own that cannot be merged with the two-band table:
+#     --ri-axis-bands 0.637,0.773   apply the existing rule to these bands' table entries
+#                                   (bit-identical axis to the two-band file), or
+#     --ri-axis lo,hi               explicit endpoints, N_RI equidistant points.
+# Without --output, such a run writes ..._liquid_wl512.h5, never the production name.
 
 using Printf, Dates
 using Serialization: serialize, deserialize
@@ -154,14 +167,45 @@ const SPECIES_TABLE = Dict(
     "goethite_biaxial" => [(0.637, 1.3315, 2.4000, 0.1000),
                            (0.773, 1.3300, 2.4000, 0.0600)],
 )
+# 512 nm (third CAS-v2 band): host 1.3345 (Hale & Querry 1973, linear interpolation of
+# 0.500/0.525 um). The particle index is NaN for every species -- none is adopted yet, it is
+# to be searched against the 512 nm standards -- so --m-p-512 is mandatory and a sweep cannot
+# run on a placeholder. Appended per species; selected only with --wavelengths.
+for v in values(SPECIES_TABLE)
+    push!(v, (0.512, 1.3345, NaN, NaN))
+end
+# n+k form (trailing i optional), as in PCAS scripts/run_mstm_sampled_sweep.jl
+function _parse_index(s::AbstractString)
+    m = match(r"^\s*([0-9.]+)\s*([+-])\s*([0-9.]+)\s*i?\s*$", s)
+    m === nothing && error("index must look like 3.15+0.60 (got $(repr(s)))")
+    (parse(Float64, m[1]), (m[2] == "-" ? -1 : 1) * parse(Float64, m[3]))
+end
+_band_key(wl) = "--m-p-" * string(round(Int, wl * 1000))
+_overridden(wl) = _arg(_band_key(wl), "") != ""
+# table entry of one band with its --m-p-<nm> override applied
+function _band(entries, wl)
+    i = findfirst(c -> abs(c[1] - wl) < 1e-6, entries)
+    i === nothing && error("band $wl not in the species table (have $(join([c[1] for c in entries], ", ")))")
+    c = entries[i]; ov = _arg(_band_key(wl), "")
+    isempty(ov) && return c
+    re, im_ = _parse_index(ov)
+    (c[1], c[2], re, im_)
+end
+const WL_DEFAULT = "0.637,0.773"
+const WL_KEEP = parse.(Float64, split(_arg("--wavelengths", WL_DEFAULT), ","))
+const DEFAULT_BANDS = WL_KEEP == parse.(Float64, split(WL_DEFAULT, ","))
 # principal indices (n_alpha, n_beta, n_gamma) of the crystal for --biaxial, Na D values
 # (Handbook of Mineralogy; dispersion neglected -- a declared approximation)
 const BIAXIAL_CRYSTAL = Dict("goethite_biaxial" => (2.26, 2.40, 2.45))
 haskey(SPECIES_TABLE, SPECIES) ||
     error("unknown species $(SPECIES) (have: $(join(sort(collect(keys(SPECIES_TABLE))), ", ")))")
-const COND = SPECIES_TABLE[SPECIES]
+const COND = [_band(SPECIES_TABLE[SPECIES], wl) for wl in WL_KEEP]
+for c in COND
+    isnan(c[3]) && error("no adopted particle index at $(c[1]) um: pass $(_band_key(c[1])) n+k")
+end
 const OUT_FILE = _arg("--output",
-    joinpath(@__DIR__, "spheroid_sweep_viem_$(SPECIES)_liquid.h5"))
+    joinpath(@__DIR__, "spheroid_sweep_viem_$(SPECIES)_liquid" *
+             (DEFAULT_BANDS ? "" : "_wl" * join(string.(round.(Int, WL_KEEP .* 1000)), "_")) * ".h5"))
 
 # ── grids ────────────────────────────────────────────────────────────────────
 # Log-spaced sizes: the consumer requires the LOG axis to be equidistant.
@@ -185,16 +229,32 @@ function mg_uniaxial(m_c, m_m, f)
 end
 # Real-index axis: 3 points spanning BOTH wavelengths' values with margin. The
 # axis is shared by the wavelength groups, so it has to bracket both.
-_re = [c[3] for c in COND]
+# The axis is built from AX_COND, which is COND unless --ri-axis-bands names other bands
+# (2026-10-14; see the header -- a non-default band set must pick one of the two options).
+const RI_AXIS_BANDS = _arg("--ri-axis-bands", "")
+const RI_AXIS_EXPLICIT = _arg("--ri-axis", "")
+!isempty(RI_AXIS_BANDS) && !isempty(RI_AXIS_EXPLICIT) && error("--ri-axis-bands and --ri-axis are alternatives")
+!DEFAULT_BANDS && isempty(RI_AXIS_BANDS) && isempty(RI_AXIS_EXPLICIT) &&
+    error("--wavelengths $(join(WL_KEEP, ",")) needs an explicit real-index axis: " *
+          "--ri-axis-bands 0.637,0.773 (same axis as the two-band table) or --ri-axis lo,hi")
+const AX_COND = isempty(RI_AXIS_BANDS) ? COND :
+    [_band(SPECIES_TABLE[SPECIES], parse(Float64, w)) for w in split(RI_AXIS_BANDS, ",")]
+_re = [c[3] for c in AX_COND]
 # Overridable: a narrower axis interpolates better when Re(m) will be ESTIMATED on it
 # (three cubic-spline points over 0.3 rather than 0.5 of index).
 const RI_HALFSPAN = parse(Float64, _arg("--ri-halfspan", "0.20"))
 # N_RI = 1 is for cost probes only -- the consumer's spline needs >= 3 per axis and
 # refuses such a table. range() cannot take differing endpoints with length 1.
+# --ri-axis lo,hi: isotropic modes are SOLVED on it; anisotropic modes WRITE it as the label
+# axis (the fills decide the tensors) and keep the true eps-average values in the attributes.
+const RI_AXIS_LOHI = isempty(RI_AXIS_EXPLICIT) ? Float64[] : parse.(Float64, split(RI_AXIS_EXPLICIT, ","))
+isempty(RI_AXIS_EXPLICIT) || length(RI_AXIS_LOHI) == 2 || error("--ri-axis takes lo,hi")
 const RI_REAL_GRID = FORM_BIAX ?
-    [real(mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., COND[1][4], COND[1][2], f)[4]) for f in FILLS] :
+    [real(mg_biaxial(BIAXIAL_CRYSTAL[SPECIES]..., AX_COND[1][4], AX_COND[1][2], f)[4]) for f in FILLS] :
     FORM_BIREF ?
-    [real(mg_uniaxial(complex(COND[1][3], COND[1][4]), COND[1][2], f)[3]) for f in FILLS] :
+    [real(mg_uniaxial(complex(AX_COND[1][3], AX_COND[1][4]), AX_COND[1][2], f)[3]) for f in FILLS] :
+    !isempty(RI_AXIS_LOHI) ?
+    collect(range(RI_AXIS_LOHI[1], RI_AXIS_LOHI[2], length = N_RI)) :
     N_RI == 1 ?
     [(minimum(_re) + maximum(_re)) / 2] :
     collect(range(minimum(_re) - RI_HALFSPAN, maximum(_re) + RI_HALFSPAN, length = N_RI))
@@ -423,10 +483,12 @@ end
 @printf("  Re(m) %d points  %.3f .. %.3f%s\n", N_RI, first(RI_REAL_GRID), last(RI_REAL_GRID),
         DEGENERATE_RI ? "  DEGENERATE: solved per band at " *
                         join([string(c[3]) for c in COND], "/") * ", copied across" :
-        FORM_BIAX ? "  BIAXIAL: axis = isotropic-average Re(n) at band 1 for fills " *
+        FORM_BIAX ? "  BIAXIAL: axis = isotropic-average Re(n) at " *
+                     (isempty(RI_AXIS_BANDS) ? "band 1" : "$(AX_COND[1][1]) um") * " for fills " *
                     join(string.(FILLS), "/") * " (per-axis MG, crystal " * string(BIAXIAL_CRYSTAL[SPECIES]) *
                     "), psi axis " * string(round.(rad2deg.(PSI_GRID), digits = 1)) * " deg" :
-        FORM_BIREF ? "  FORM BIREFRINGENCE: axis = eps-average Re(n) at band 1 for fills " *
+        FORM_BIREF ? "  FORM BIREFRINGENCE: axis = eps-average Re(n) at " *
+                     (isempty(RI_AXIS_BANDS) ? "band 1" : "$(AX_COND[1][1]) um") * " for fills " *
                      join(string.(FILLS), "/") * " (uniaxial MG, needles along z)" : "")
 TRIAXIAL && @printf("  TRIAXIAL shape: transverse semi-axes b/sqrt(%.2f) and b*sqrt(%.2f) (b/a = %.2f), isotropic index; psi axis %s deg\n",
                     R2, R2, R2, string(round.(rad2deg.(PSI_GRID), digits = 1)))
@@ -459,7 +521,8 @@ if !DRY_RUN
     # (0.1 %), far below the table's own mesh error. The true values stay in the attributes.
     # Kept out of the checkpoint key on purpose, so a finished sweep can be re-written.
     ri_axis_written = ANISO ?
-        collect(range(first(RI_REAL_GRID), last(RI_REAL_GRID), length = N_RI)) : RI_REAL_GRID
+        (isempty(RI_AXIS_LOHI) ? collect(range(first(RI_REAL_GRID), last(RI_REAL_GRID), length = N_RI)) :
+                                 collect(range(RI_AXIS_LOHI[1], RI_AXIS_LOHI[2], length = N_RI))) : RI_REAL_GRID
     grids = SpheroidSweepGrids(D_VE_GRID, ri_axis_written, LOG_AR_GRID,
                                COS_THETA_O_HALF, PHI_O_GRID, PSI_GRID)
     write_spheroid_sweep_h5(OUT_FILE, grids, data;
@@ -503,7 +566,19 @@ if !DRY_RUN
                         "axis. Querying any other index returns the SAME amplitudes. " *
                         "A refractive-index sensitivity study belongs on Im(m_p) and is " *
                         "a separate table, not a point on this axis.") :
-                Dict{String,Any}()))
+                Dict{String,Any}(),
+            # band selection / index overrides / axis rule (2026-10-14): written ONLY when used,
+            # so a default invocation writes exactly the attributes it wrote before
+            (DEFAULT_BANDS && !any(_overridden(c[1]) for c in COND) && isempty(RI_AXIS_BANDS) && isempty(RI_AXIS_EXPLICIT)) ?
+                Dict{String,Any}() :
+                Dict{String,Any}(
+                    "wavelength_selection" => join(string.(WL_KEEP), ","),
+                    "m_p_override_per_wl" => join([@sprintf("%.3f:%.4f%+.4fi", c[1], c[3], c[4])
+                                                   for c in COND if _overridden(c[1])], ";"),
+                    "ri_axis_rule" => !isempty(RI_AXIS_EXPLICIT) ? "explicit --ri-axis " * RI_AXIS_EXPLICIT :
+                                      !isempty(RI_AXIS_BANDS) ? "default rule applied to bands " * RI_AXIS_BANDS *
+                                          " (table entries with their --m-p-<nm> overrides)" :
+                                      "default rule on the selected bands")))
     n_bad = sum(!d.converged[i] for d in data for i in eachindex(d.converged))
     @printf("\nWrote %s   non-converged cells: %d\n", OUT_FILE, n_bad)
     n_bad == 0 || @warn "non-converged cells present; the consumer's surrogate REFUSES a LUT with NaNs"
