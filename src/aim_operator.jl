@@ -384,13 +384,18 @@ function assemble_precorrection(basis::AbstractDivBasis, proj::AIMProjection,
     for p in near_pairs(basis)
         push!(pairs, p)
     end
-    unique!(pairs)
     # Z is complex-symmetric under reciprocity (isotropic + diagonal-aniso ε).
     # Store only upper-triangle (m ≤ n) entries; the MVP reconstructs the
     # lower triangle as (K + Kᵀ − D) x.  Halves sparse-matrix memory and
     # the stencil inner-sum work; K_direct is computed for both orderings
     # and averaged so the result matches `symmetrize=true` on the dense path.
     filter!(p -> p[1] <= p[2], pairs)
+    # Sort before de-duplicating (same pair set as unique! then filter!).
+    # 2026-10-15, 512 nm hematite probe: `unique!` on the hash-ordered
+    # pairs (from the two Sets above) went near-quadratic and single-
+    # threaded, >24 min on 7.0e7 pairs; sorted input takes seconds.
+    sort!(pairs)
+    unique!(pairs)
     N = n_basis(basis)
 
     col_to_rows = Dict{Int,Vector{Int}}()
@@ -624,16 +629,17 @@ end
     return y
 end
 
-@inline function _sym_upper_axpy!(Y::AbstractMatrix, A::SparseMatrixCSC,
-                                  diag_A::AbstractVector, X::AbstractMatrix,
-                                  scale::Number)
-    mul!(Y, A, X, scale, one(eltype(Y)))
-    mul!(Y, transpose(A), X, scale, one(eltype(Y)))
-    N, L = size(X)
-    @inbounds for j in 1:L
-        for i in 1:N
-            Y[i, j] -= scale * diag_A[i] * X[i, j]
-        end
+# Block form: one column per task, each through the vector kernel above,
+# so every column gets the same operations as a serial loop (bitwise
+# identical result). 2026-10-15, 512 nm hematite probe: the sparse
+# near-field product was single-threaded and took 26.5 s of a 26.7 s
+# block MVP (39 columns); threaded over the columns, 2.6 s.
+function _sym_upper_axpy!(Y::AbstractMatrix, A::SparseMatrixCSC,
+                          diag_A::AbstractVector, X::AbstractMatrix,
+                          scale::Number)
+    size(Y) == size(X) || throw(DimensionMismatch("Y $(size(Y)) vs X $(size(X))"))
+    Threads.@threads for j in 1:size(X, 2)
+        _sym_upper_axpy!(view(Y, :, j), A, diag_A, view(X, :, j), scale)
     end
     return Y
 end
