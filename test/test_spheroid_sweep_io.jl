@@ -156,3 +156,21 @@ end
     @test_throws ErrorException write_spheroid_sweep_h5(path, grids, [data_bad_shape])
     rm(path; force = true)
 end
+
+@testset "config_hash depends on Im(m_p) and the root shape/index attrs" begin
+    grids = SpheroidSweepGrids([0.3, 0.5], [1.3, 1.5], [-0.3, 0.0, 0.3],
+                               [0.0, 0.5, 1.0], [0.0, π])
+    mk(k) = SpheroidSweepData(0.637, 1.3315, k,
+                              zeros(ComplexF64, 2, 2, 3, 3, 2),
+                              zeros(ComplexF64, 2, 2, 3, 3, 2), trues(2, 2, 3))
+    function stamp(k; extra = Dict{String,Any}())
+        path = joinpath(tempdir(), "spheroid_sweep_hash_$(getpid()).h5")
+        write_spheroid_sweep_h5(path, grids, [mk(k)]; extra_root_attrs = extra)
+        h = h5open(f -> read(attributes(f["provenance"])["config_hash"]), path)
+        rm(path; force = true)
+        return h
+    end
+    @test stamp(0.08) == stamp(0.08)
+    @test stamp(0.08) != stamp(0.60)
+    @test stamp(0.08) != stamp(0.08; extra = Dict{String,Any}("triaxial_b_over_a" => 1.5))
+end

@@ -276,8 +276,17 @@ function write_spheroid_sweep_h5(filename::AbstractString,
             "solver_tol"            => float(solver_tol),
             "block_viem_version"    => String(block_viem_version),
             "wavelengths"           => Float64[d.wl_0 for d in data_per_wl],
+            # Per-band particle imaginary index and host index (2026-10-25): without them two
+            # tables that differ only in Im(m_p) (or in a later band's m_m) got the same hash,
+            # and a consumer registry keyed by it could hold only one of them.
+            "m_imag_per_wl"         => Float64[d.m_imag for d in data_per_wl],
+            "m_m_per_wl"            => Float64[d.m_m for d in data_per_wl],
         )
         has_psi(grids) && (prov_config["psi_grid"] = _spec(grids.psi))
+        # The shape/index settings a driver passes as root attributes (triaxial ratio, fill
+        # fractions, crystal index, ...) are part of what was computed, so they are hashed too.
+        isempty(extra_root_attrs) ||
+            (prov_config["extra_root_attrs"] = Dict{String,Any}(String(k) => v for (k, v) in extra_root_attrs))
         pg = create_group(f, "provenance")
         for (k, v) in _pcas_provenance_attrs(prov_config, block_viem_version)
             attrs(pg)[k] = v
