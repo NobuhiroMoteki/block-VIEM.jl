@@ -34,7 +34,7 @@ end
     # Minimal grid for fast testing
     N_Dve, N_RI, N_AR, N_u, N_ph = 2, 2, 3, 4, 5
     grids = SpheroidSweepGrids(
-        collect(range(0.30, 0.50, length = N_Dve)),
+        10.0 .^ collect(range(log10(0.30), log10(0.50), length = N_Dve)),  # log-spaced: the file axis is log10(D_ve)
         collect(range(1.30, 1.60, length = N_RI)),
         collect(range(-0.5, 0.5, length = N_AR)),
         collect(range(0.0, 1.0, length = N_u)),
@@ -68,7 +68,9 @@ end
 
     # Schema-level checks
     h5open(path, "r") do f
-        @test haskey(f, "D_ve_grid")
+        @test haskey(f, "log_D_ve_grid")
+        @test !haskey(f, "D_ve_grid")
+        @test read(f["log_D_ve_grid"]) == log10.(grids.D_ve)
         @test haskey(f, "RI_real_grid")
         @test haskey(f, "log_AR_grid")
         @test haskey(f, "cos_theta_o_half_grid")
@@ -85,16 +87,21 @@ end
         @test attrs(grp)["wl_0"] == 0.638
         @test attrs(grp)["m_m"] == 1.0
 
-        @test size(read(grp["S_fw_theta_re"])) == (N_Dve, N_RI, N_AR, N_u, N_ph)
-        @test size(read(grp["S_fw_theta_im"])) == (N_Dve, N_RI, N_AR, N_u, N_ph)
-        @test size(read(grp["S_fw_phi_re"]))   == (N_Dve, N_RI, N_AR, N_u, N_ph)
-        @test size(read(grp["S_fw_phi_im"]))   == (N_Dve, N_RI, N_AR, N_u, N_ph)
-        @test size(read(grp["converged"]))     == (N_Dve, N_RI, N_AR)
+        # The file is in C order for the h5py consumer, which sees
+        # (N_Dve, N_RI, N_AR, N_u, N_ph); HDF5.jl (column-major) reports the reverse.
+        @test size(read(grp["S_fw_theta_re"])) == (N_ph, N_u, N_AR, N_RI, N_Dve)
+        @test size(read(grp["S_fw_theta_im"])) == (N_ph, N_u, N_AR, N_RI, N_Dve)
+        @test size(read(grp["S_fw_phi_re"]))   == (N_ph, N_u, N_AR, N_RI, N_Dve)
+        @test size(read(grp["S_fw_phi_im"]))   == (N_ph, N_u, N_AR, N_RI, N_Dve)
+        @test size(read(grp["converged"]))     == (N_AR, N_RI, N_Dve)
+        # Values, not only shapes: element (i,j,k,m,n) in Julia is [n,m,k,j,i] on disk.
+        @test read(grp["S_fw_theta_re"])[5, 4, 3, 2, 2] == real(data1.S_fw_theta[2, 2, 3, 4, 5])
+        @test read(grp["S_fw_theta_im"])[1, 2, 3, 2, 2] == imag(data1.S_fw_theta[2, 2, 3, 2, 1])
     end
 
     # Round-trip via the public reader
     grids2, data_per_wl2 = read_spheroid_sweep_h5(path)
-    @test grids2.D_ve              == grids.D_ve
+    @test grids2.D_ve              ≈ grids.D_ve  rtol = 1e-14  # via log10 and back
     @test grids2.RI_real           == grids.RI_real
     @test grids2.log_AR            == grids.log_AR
     @test grids2.cos_theta_o_half  == grids.cos_theta_o_half
