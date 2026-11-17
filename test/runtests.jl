@@ -23,6 +23,7 @@ using BlockVIEM
     include("test_mie_validation.jl")
     include("test_cas_v2.jl")
     include("test_block_krylov.jl")
+    include("test_shifted_krylov.jl")
     include("test_spheroid_sweep_io.jl")
     include("test_gre_mesh.jl")
     include("test_aggregate_mesh.jl")

@@ -105,7 +105,7 @@ export basis_moments, divergence_moments, multi_indices, n_moments
 export build_green_toeplitz, precompute_green_fft, fft_convolve, fft_convolve!
 export assemble_mass_matrix, near_pairs, near_pairs_by_distance
 export aim_far_mvp, aim_radiation_element, assemble_precorrection
-export AIMOperator, build_aim_operator, aim_mvp
+export AIMOperator, build_aim_operator, aim_mvp, aim_K0_mvp
 
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
 # Phase 4: Solver
@@ -116,6 +116,10 @@ include("solver.jl")
 export project_plane_wave, SolveResult
 export solve_direct, solve_iterative, solve_iterative_block
 export BlockSolveResult, block_bicgstab, block_gmres
+export ShiftedBlockSolveResult, block_gmres_shifted
+
+# Shifted refractive-index sweep (operator pieces)
+include("shifted_sweep.jl")
 
 # Phase 5: PostProcess (CAS-v2 observables)
 include("postprocess.jl")

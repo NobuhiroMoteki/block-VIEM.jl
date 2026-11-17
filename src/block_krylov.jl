@@ -242,3 +242,258 @@ function block_gmres(A, B::AbstractMatrix; tol::Real = 1e-5,
     # Unreachable — the loop returns on the final iteration.
     return BlockSolveResult(zeros(ComplexF64, N, L), false, err, iter, residual_history)
 end
+
+# ---------------------------------------------------------------------------
+# Shifted block GMRES: one block Arnoldi process for a family of shifts
+# ---------------------------------------------------------------------------
+
+"""
+    ShiftedBlockSolveResult
+
+Return type of [`block_gmres_shifted`](@ref). `S` is the number of shifts.
+
+# Fields
+- `X::Vector{Matrix{ComplexF64}}`     — `X[s]` solves `(tau_s I − C) X = B`, shape `(N, L)`
+- `converged::Vector{Bool}`           — whether shift `s` reached `tol`
+- `residual_norm::Vector{Float64}`    — final `‖B − (tau_s I − C) X[s]‖_F / ‖B‖_F`
+- `iterations::Vector{Int}`           — block iterations used by shift `s`
+- `residual_history::Matrix{Float64}` — shape `(k_fin, S)`; row `k` holds the
+  relative residual of every shift after block iteration `k`. Entries after
+  the convergence of a shift are `NaN`.
+"""
+struct ShiftedBlockSolveResult
+    X::Vector{Matrix{ComplexF64}}
+    converged::Vector{Bool}
+    residual_norm::Vector{Float64}
+    iterations::Vector{Int}
+    residual_history::Matrix{Float64}
+end
+
+# Outcome of the shared block Arnoldi process before the solutions are formed.
+# `V[j]` is the j-th orthonormal basis block, shape (N, L). `Y[s]` holds the
+# coefficients of shift `s`, shape (iterations[s] * L, L), so that
+# X_s = sum_j V[j] * Y[s][(j-1)L+1 : jL, :]. Keeping this form lets a caller
+# build one solution at a time instead of holding all S of them.
+struct _ShiftedKrylov
+    V::Vector{Matrix{ComplexF64}}
+    Y::Vector{Matrix{ComplexF64}}
+    converged::Vector{Bool}
+    residual_norm::Vector{Float64}
+    iterations::Vector{Int}
+    residual_history::Matrix{Float64}
+end
+
+# col[1:(j+1)L, :] = j-th block column of (tau * Ibar − Hbar).
+function _shifted_column!(col::Matrix{ComplexF64}, Hc::Matrix{ComplexF64},
+                          tau::ComplexF64, j::Int, L::Int)
+    n = (j + 1) * L
+    @inbounds for c in 1:L
+        for r in 1:n
+            col[r, c] = -Hc[r, c]
+        end
+        col[(j - 1) * L + c, c] += tau
+    end
+    return col
+end
+
+# Apply the stored block-Givens rotations 1..nrot to a block column.
+# Rotation j acts on rows (j-1)L+1 : (j+1)L. `tmp` has shape (2L, L).
+function _apply_block_rotations!(col::Matrix{ComplexF64},
+                                 Q::Vector{Matrix{ComplexF64}}, nrot::Int, L::Int,
+                                 tmp::Matrix{ComplexF64})
+    for j in 1:nrot
+        rows = (j - 1) * L + 1 : (j + 1) * L
+        blk = view(col, rows, :)
+        mul!(tmp, Q[j]', blk)
+        blk .= tmp
+    end
+    return col
+end
+
+# Coefficients of one shift after k block iterations. The triangular factor
+# is not kept during the iteration (it would cost (kL)^2 per shift); it is
+# rebuilt here from the shared Hessenberg columns and the rotations of the shift.
+function _shifted_coefficients(Hcols::Vector{Matrix{ComplexF64}},
+                               Q::Vector{Matrix{ComplexF64}},
+                               gtop::Vector{Matrix{ComplexF64}},
+                               tau::ComplexF64, k::Int, L::Int)
+    n = k * L
+    R = zeros(ComplexF64, n, n)                       # shape: (kL, kL)
+    col = Matrix{ComplexF64}(undef, (k + 1) * L, L)
+    tmp = Matrix{ComplexF64}(undef, 2 * L, L)
+    G = Matrix{ComplexF64}(undef, n, L)               # shape: (kL, L)
+    for j in 1:k
+        _shifted_column!(col, Hcols[j], tau, j, L)
+        _apply_block_rotations!(col, Q, j, L, tmp)
+        @views R[1 : j * L, (j - 1) * L + 1 : j * L] .= col[1 : j * L, :]
+        @views G[(j - 1) * L + 1 : j * L, :] .= gtop[j]
+    end
+    ldiv!(UpperTriangular(R), G)
+    return G
+end
+
+# Solution block of shift `s`: X_s = sum_j V[j] * Y[s]_j, shape (N, L).
+function _shifted_solution(kry::_ShiftedKrylov, s::Integer)
+    V1 = kry.V[1]
+    L = size(V1, 2)
+    X = zeros(ComplexF64, size(V1))
+    Ys = kry.Y[s]
+    for j in 1:kry.iterations[s]
+        @views mul!(X, kry.V[j], Ys[(j - 1) * L + 1 : j * L, :], one(ComplexF64), one(ComplexF64))
+    end
+    return X
+end
+
+@noinline function _log_shifted_gmres(k::Int, n_active::Int, err_max::Float64)
+    @info "block_gmres_shifted" iter = k active = n_active err_max = err_max
+    return nothing
+end
+
+function _block_gmres_shifted_core(C, B::Matrix{ComplexF64}, taus::Vector{ComplexF64},
+                                   tol::Float64, maxiter::Int, verbose::Bool)
+    N, L = size(B)
+    S = length(taus)
+    Bnorm = norm(B)
+    converged = fill(false, S)
+    resnorm = fill(NaN, S)
+    iters = zeros(Int, S)
+    Ycoef = [zeros(ComplexF64, 0, L) for _ in 1:S]
+    if Bnorm == 0 || S == 0
+        fill!(converged, true)
+        fill!(resnorm, 0.0)
+        return _ShiftedKrylov([zeros(ComplexF64, N, L)], Ycoef, converged, resnorm,
+                              iters, zeros(Float64, 0, S))
+    end
+
+    # B = V_1 Λ. The Krylov space of C from B is shared by every shift because
+    # (tau I − C) V_k = V_{k+1} (tau Ibar_k − Hbar_k).
+    Qfac = qr(B)
+    Λ = Matrix{ComplexF64}(Qfac.R)                    # shape: (L, L)
+    V = Matrix{ComplexF64}[Matrix{ComplexF64}(Qfac.Q)[:, 1:L]]
+    Hcols = Matrix{ComplexF64}[]                      # Hcols[k]: ((k+1)L, L)
+
+    # Per-shift state of the incremental block-Givens QR of (tau Ibar − Hbar):
+    # the rotations, the finished blocks of the rotated right-hand side and its
+    # last block, whose Frobenius norm is the residual norm.
+    Qrot = [Matrix{ComplexF64}[] for _ in 1:S]        # Qrot[s][j]: (2L, 2L)
+    gtop = [Matrix{ComplexF64}[] for _ in 1:S]        # gtop[s][j]: (L, L)
+    glast = [copy(Λ) for _ in 1:S]                    # glast[s]:   (L, L)
+
+    tmp = Matrix{ComplexF64}(undef, 2 * L, L)
+    g2 = Matrix{ComplexF64}(undef, 2 * L, L)
+    sup = Matrix{ComplexF64}(undef, 2 * L, L)
+    active = collect(1:S)
+    history = Vector{Float64}[]
+
+    for k in 1:maxiter
+        W = convert(Matrix{ComplexF64}, C * V[k])     # shape: (N, L)
+        size(W) == (N, L) || throw(DimensionMismatch(
+            "C * V returned $(size(W)), expected $((N, L))"))
+
+        # ── Block Gram–Schmidt and thin QR (same steps as block_gmres) ──
+        Hc = zeros(ComplexF64, (k + 1) * L, L)
+        for i in 1:k
+            Hik = V[i]' * W                           # shape: (L, L)
+            @views Hc[(i - 1) * L + 1 : i * L, :] .= Hik
+            mul!(W, V[i], Hik, -one(ComplexF64), one(ComplexF64))
+        end
+        Qfk = qr!(W)
+        push!(V, Matrix{ComplexF64}(Qfk.Q)[:, 1:L])
+        @views Hc[k * L + 1 : (k + 1) * L, :] .= Qfk.R
+        push!(Hcols, Hc)
+
+        # ── Advance the small QR of every unconverged shift ──
+        errs = fill(NaN, S)
+        col = Matrix{ComplexF64}(undef, (k + 1) * L, L)
+        still_active = Int[]
+        for s in active
+            tau = taus[s]
+            _shifted_column!(col, Hc, tau, k, L)
+            _apply_block_rotations!(col, Qrot[s], k - 1, L, tmp)
+
+            # New rotation from the QR of the (2L, L) block [H_kk; H_{k+1,k}].
+            @views sup .= col[(k - 1) * L + 1 : (k + 1) * L, :]
+            F = qr!(sup)
+            Qm = zeros(ComplexF64, 2 * L, 2 * L)
+            @inbounds for d in 1:2*L
+                Qm[d, d] = 1
+            end
+            lmul!(F.Q, Qm)                            # full (2L, 2L) Q
+            push!(Qrot[s], Qm)
+
+            @views g2[1:L, :] .= glast[s]
+            @views g2[L+1:2*L, :] .= 0
+            mul!(tmp, Qm', g2)
+            push!(gtop[s], tmp[1:L, :])
+            @views glast[s] .= tmp[L+1:2*L, :]
+
+            err = norm(glast[s]) / Bnorm
+            errs[s] = err
+            if err < tol || k == maxiter
+                Ycoef[s] = _shifted_coefficients(Hcols, Qrot[s], gtop[s], tau, k, L)
+                iters[s] = k
+                resnorm[s] = err
+                converged[s] = err < tol
+                empty!(Qrot[s])
+                empty!(gtop[s])
+            else
+                push!(still_active, s)
+            end
+        end
+        push!(history, errs)
+        verbose && _log_shifted_gmres(k, length(still_active),
+                                      maximum(errs[s] for s in active))
+        active = still_active
+        isempty(active) && break
+    end
+
+    k_fin = length(history)
+    hist = Matrix{Float64}(undef, k_fin, S)           # shape: (k_fin, S)
+    for k in 1:k_fin
+        @views hist[k, :] .= history[k]
+    end
+    return _ShiftedKrylov(V, Ycoef, converged, resnorm, iters, hist)
+end
+
+"""
+    block_gmres_shifted(C, B::AbstractMatrix, taus::AbstractVector{<:Number};
+                        tol = 1e-5, maxiter = 100, verbose = false)
+        -> ShiftedBlockSolveResult
+
+Unrestarted block GMRES for the family of shifted systems
+
+    (tau_s I − C) X_s = B,        s = 1, …, S,
+
+with `B` of shape `(N, L)`. `C` is any operator that supports
+`C * V::AbstractMatrix` and returns an `(N, L)` block. One block Arnoldi
+process on `C` serves all shifts, because the block Krylov space of
+`tau I − C` from `B` does not depend on `tau`. Each block iteration costs
+one product `C * V`. The Gram–Schmidt step and the thin QR are the ones of
+[`block_gmres`](@ref).
+
+Every shift minimises its own residual over the shared space. A shift is
+frozen at the first iteration where `‖B − (tau_s I − C) X_s‖_F / ‖B‖_F < tol`.
+The process stops when all shifts are frozen or after `maxiter` block
+iterations. Shifts that have not reached `tol` by then are returned with
+`converged[s] == false` and their current minimum-residual iterate.
+
+For a single shift the result agrees with `block_gmres(tau*I − C, B)` to
+rounding error and uses the same number of iterations.
+
+Memory: the basis takes `16 N L (k+1)` bytes as in `block_gmres`. The
+shared block Hessenberg matrix takes about `8 (kL)^2` bytes. Each shift
+keeps `k` rotations of shape `(2L, 2L)`. The triangular factor of a shift
+is formed only when that shift is frozen (`16 (kL)^2` bytes, transient).
+"""
+function block_gmres_shifted(C, B::AbstractMatrix, taus::AbstractVector{<:Number};
+                             tol::Real = 1e-5, maxiter::Integer = 100,
+                             verbose::Bool = false)
+    maxiter >= 1 || throw(ArgumentError("maxiter must be ≥ 1, got $maxiter"))
+    size(B, 1) >= size(B, 2) || throw(ArgumentError(
+        "B must have at least as many rows as columns, got $(size(B))"))
+    kry = _block_gmres_shifted_core(C, Matrix{ComplexF64}(B), Vector{ComplexF64}(taus),
+                                    Float64(tol), Int(maxiter), verbose)
+    X = [_shifted_solution(kry, s) for s in eachindex(kry.Y)]
+    return ShiftedBlockSolveResult(X, kry.converged, kry.residual_norm,
+                                   kry.iterations, kry.residual_history)
+end

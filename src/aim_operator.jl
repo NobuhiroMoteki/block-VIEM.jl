@@ -807,3 +807,67 @@ function aim_mvp(op::AIMOperator, X::AbstractMatrix)
     end
     return Y
 end
+
+# ---------------------------------------------------------------------------
+# Radiation operator without the contrast factor (shifted refractive-index sweep)
+# ---------------------------------------------------------------------------
+
+# Contrast kappa of an isotropic operator. Throws for an anisotropic operator
+# and for kappa = 0, where K0 cannot be recovered from the stored pieces.
+function _isotropic_kappa(op::AIMOperator)
+    kv = op.kappa_v
+    ie = op.inv_eps_v
+    (kv[1] == kv[2] == kv[3] && ie[1] == ie[2] == ie[3]) || throw(ArgumentError(
+        "aim_K0_mvp needs an isotropic particle (equal eps_p along x, y, z)"))
+    iszero(kv[1]) && throw(ArgumentError(
+        "aim_K0_mvp: kappa = 0 (eps_p == eps_bg), K0 is not defined by this operator"))
+    return kv[1]
+end
+
+"""
+    aim_K0_mvp(op::AIMOperator, x::AbstractVector) -> Vector{ComplexF64}
+    aim_K0_mvp(op::AIMOperator, X::AbstractMatrix) -> Matrix{ComplexF64}
+
+Apply the radiation operator `K0` of an isotropic, homogeneous particle.
+`K0` is defined by
+
+    Z(eps_p) = (1/eps_p) M − (kappa/eps_bg) K0,     kappa = (eps_p − eps_bg)/eps_p,
+
+and does not depend on `eps_p`: the far-field AIM term, the near-field
+precorrection and the half-SWG surface terms all carry `kappa` as an overall
+factor. The product is formed from those stored pieces divided by `kappa`,
+so no cancellation against the mass term occurs. An operator built for one
+`eps_p` therefore gives `K0` for every other isotropic `eps_p` at the same
+`k0` and `eps_bg`.
+
+`X` has shape `(N, L)`. Throws `ArgumentError` for an anisotropic operator
+and for `eps_p == eps_bg`.
+"""
+function aim_K0_mvp(op::AIMOperator, x::AbstractVector)
+    kappa = _isotropic_kappa(op)
+    y = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
+                             op.kappa_v, op.kappa_avg, x)
+    _sym_upper_axpy!(y, op.precorrection, op.diag_precorrection, x, one(ComplexF64))
+    if nnz(op.half_swg_extra) > 0
+        # Stored with the factor −(kappa/eps_bg); undo it before the division.
+        _sym_upper_axpy!(y, op.half_swg_extra, op.diag_half_swg_extra, x, -op.eps_bg)
+    end
+    y ./= kappa
+    return y
+end
+
+function aim_K0_mvp(op::AIMOperator, X::AbstractMatrix)
+    kappa = _isotropic_kappa(op)
+    N, L = size(X)
+    Y = Matrix{ComplexF64}(undef, N, L)               # shape: (N, L)
+    Threads.@threads for j in 1:L
+        Y[:, j] = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
+                                       op.kappa_v, op.kappa_avg, view(X, :, j))
+    end
+    _sym_upper_axpy!(Y, op.precorrection, op.diag_precorrection, X, one(ComplexF64))
+    if nnz(op.half_swg_extra) > 0
+        _sym_upper_axpy!(Y, op.half_swg_extra, op.diag_half_swg_extra, X, -op.eps_bg)
+    end
+    Y ./= kappa
+    return Y
+end
