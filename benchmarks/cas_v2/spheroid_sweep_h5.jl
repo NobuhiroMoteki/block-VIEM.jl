@@ -8,6 +8,14 @@
 #
 # Run with:
 #     julia --project=. benchmarks/cas_v2/spheroid_sweep_h5.jl
+#
+# With `--shifted-ri` all refractive indices of a (D_ve, AR) slot are solved in
+# one shifted block-GMRES process (`solve_cas_v2_orientations_shifted`): the
+# AIM operator is built once per slot and the indices share one block Krylov
+# space. The mesh does not depend on the index in this driver, so both modes
+# use the same mesh and agree to the solver tolerance. The default mode is
+# unchanged. The file records the shifted mode in the root attribute
+# `shifted_ri`.
 
 using LinearAlgebra: norm
 using Printf
@@ -30,6 +38,8 @@ const MEDIUM_CONDITIONS =
     PRESET == "air"    ? [(0.638, 1.0), (0.834, 1.0)] :
     PRESET == "liquid" ? [(0.637, 1.3315), (0.773, 1.3300)] :  # water host 637/773 nm
     error("unknown preset $(PRESET) (use 'air' or 'liquid')")
+
+const SHIFTED_RI = "--shifted-ri" in ARGS
 
 const OUT_FILE = _cli_arg("--output", joinpath(@__DIR__,
     PRESET == "liquid" ? "spheroid_sweep_viem_liquid.h5" : "spheroid_sweep_viem_minimal.h5"))
@@ -59,6 +69,7 @@ println("=" ^ 70)
         N_Dve, N_RI, N_AR, N_u, N_ph)
 @printf("  Preset: %s   (wl, m_m) pairs: %s\n", PRESET, string(MEDIUM_CONDITIONS))
 @printf("  Output: %s\n", OUT_FILE)
+SHIFTED_RI && println("  RI axis: one shifted block-GMRES process per (D_ve, AR) slot")
 
 function spheroid_mesh(b::Float64, c::Float64, lc::Float64)
     path = joinpath(tempdir(), "viem_sweep_$(b)_$(c)_$(lc).msh")
@@ -135,19 +146,72 @@ function compute_one_wavelength(wl_0::Float64, m_m::Float64)
     return SpheroidSweepData(wl_0, m_m, S_theta, S_phi, converged)
 end
 
+# --shifted-ri: same grid, mesh and orientations; the RI axis of a slot is
+# solved in one process.
+function compute_one_wavelength_shifted(wl_0::Float64, m_m::Float64)
+    S_theta = Array{ComplexF64}(undef, N_Dve, N_RI, N_AR, N_u, N_ph)
+    S_phi   = similar(S_theta)
+    converged = trues(N_Dve, N_RI, N_AR)
+    m_p_list = ComplexF64.(RI_REAL_GRID)       # non-absorbing, as in the default mode
+
+    for i in 1:N_Dve, k in 1:N_AR
+        D_ve = D_VE_GRID[i]
+        AR   = 10.0 ^ LOG_AR_GRID[k]
+        r_ve = D_ve / 2
+        b = r_ve * AR ^ ( 1/3)
+        c = r_ve * AR ^ (-2/3)
+        lc = LC_FACTOR * min(b, c)
+
+        @printf("  [%d,:,%d] D_ve=%.3f RI=%.2f..%.2f AR=%.3f → semi-axes (%.4f,%.4f,%.4f), lc=%.4f  ",
+                i, k, D_ve, first(RI_REAL_GRID), last(RI_REAL_GRID), AR, b, b, c, lc)
+        flush(stdout)
+
+        try
+            mesh = read_msh(spheroid_mesh(b, c, lc))
+            basis = build_swg_basis(mesh; include_boundary_faces = true)
+            beta_list = [(0.0, acos(cos_th), 0.0) for cos_th in COS_THETA_O_HALF]
+            t = @elapsed results, info = solve_cas_v2_orientations_shifted(
+                basis, beta_list;
+                wl_0 = wl_0, m_m = m_m, m_p_list = m_p_list,
+                duffy_rule = duffy_reference_rule(7))
+            @printf("N=%d  %.1fs  iterations %s\n", n_basis(basis), t, string(info.iterations))
+
+            for j in 1:N_RI
+                converged[i,j,k] = info.converged[j]
+                for m in 1:N_u
+                    Sth_a, Sph_a = expand_alpha_from_alpha0(
+                        results[j,m].S_fw_theta, results[j,m].S_fw_phi, PHI_O_GRID)
+                    S_theta[i,j,k,m,:] .= Sth_a
+                    S_phi[i,j,k,m,:]   .= Sph_a
+                end
+            end
+        catch err
+            @warn "Solve failed" wl_0 i k err
+            converged[i,:,k] .= false
+            S_theta[i,:,k,:,:] .= NaN + NaN*im
+            S_phi[i,:,k,:,:]   .= NaN + NaN*im
+        end
+    end
+
+    return SpheroidSweepData(wl_0, m_m, S_theta, S_phi, converged)
+end
+
 grids = SpheroidSweepGrids(D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID,
                             COS_THETA_O_HALF, PHI_O_GRID)
 
 data_per_wl = SpheroidSweepData[]
 for (wl, m_m) in MEDIUM_CONDITIONS
     println("\n--- λ = $wl μm  (m_m = $m_m) ---")
-    push!(data_per_wl, compute_one_wavelength(wl, m_m))
+    push!(data_per_wl, SHIFTED_RI ? compute_one_wavelength_shifted(wl, m_m) :
+                                    compute_one_wavelength(wl, m_m))
 end
 
 write_spheroid_sweep_h5(OUT_FILE, grids, data_per_wl;
                         block_viem_version = "0.1.1",
                         solver_tol = 1.0e-8,
-                        extra_root_attrs = Dict("producer" => "block-VIEM.jl"))
+                        extra_root_attrs = SHIFTED_RI ?
+                            Dict("producer" => "block-VIEM.jl", "shifted_ri" => 1) :
+                            Dict("producer" => "block-VIEM.jl"))
 
 println("\nWrote $(OUT_FILE)")
 println("\nVerifying round-trip read…")
