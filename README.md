@@ -194,6 +194,54 @@ The `return_D=true` keyword causes `solve_cas_v2_orientations` to return
 D-field expansion coefficients for computing cross sections or other
 post-processing.
 
+### Refractive-index sweep with one Krylov process
+
+For a homogeneous isotropic particle the systems of different refractive
+indices on one mesh are shifts of one operator,
+`Z(m_p) = (kappa/eps_bg) (tau M - K)` with `tau = 1/((m_p/m_m)^2 - 1)`.
+`solve_cas_v2_orientations_shifted` solves all of them, for all
+orientations, with a single shifted block-GMRES process:
+
+```julia
+m_p_list = [2.7 + 0.1im, 2.9 + 0.1im, 3.1 + 0.1im]
+results, info = solve_cas_v2_orientations_shifted(
+    basis, euler_list;
+    wl_0 = 0.638, m_m = 1.0, m_p_list = m_p_list,
+    tol = 1e-5, maxiter = 200,
+)
+# results[s, i]: CASv2Result of m_p_list[s] and euler_list[i]
+# info.iterations, info.converged, info.residual_norm: one entry per refractive index
+```
+
+- The AIM operator is built once per mesh instead of once per refractive
+  index. The block Krylov space is shared, so the number of block
+  products is that of the slowest index. Measured gain over one solve
+  per index on the same mesh: 3.0–3.2 for 3 indices, 9.9–10.4 for 10
+  and 29–30 for 30 (25,680 to 124,049 unknowns,
+  [docs/benchmark_results.md §11](docs/benchmark_results.md#11-shifted-block-gmres-for-refractive-index-sweeps)).
+- The convergence criterion is the one of `solve_cas_v2_orientations`,
+  `‖B − Z D‖_F / ‖B‖_F < tol`, for every refractive index. The results
+  agree with independent solves on the same mesh to the solver tolerance.
+- The mesh is shared. Build it for the largest `|m_p|` of the list.
+- Refractive indices of similar contrast should be solved together,
+  because the slowest one sets the iteration count.
+- Isotropic indices only. A 3-component `m_p` raises an `ArgumentError`.
+
+The sweep drivers `benchmarks/cas_v2/ironoxide_sweep_h5.jl` and
+`benchmarks/cas_v2/spheroid_sweep_h5.jl` use this path with
+`--shifted-ri`. Their default mode is unchanged. The solver itself is
+exposed as `block_gmres_shifted(C, B, taus; tol, maxiter)` for any
+operator `C` supporting `C * X::AbstractMatrix`. The formulation is in
+`docs/theory_note.pdf` (Sec. 11, "Shifted Block GMRES for
+Refractive-Index Sweeps").
+
+**Mass-matrix preconditioning for ordinary solves.**
+`solve_cas_v2_orientations(...; precond = :mass_right)` runs the block
+solver on `Z M⁻¹` (sparse Cholesky of the mass matrix). The convergence
+criterion is unchanged. In the tests of the theory note the block-GMRES
+iteration count dropped to 0.23–0.59 of the unpreconditioned one. The
+default is `precond = :none`.
+
 ### Parallel execution
 
 Launch Julia with `-t N` (or set `JULIA_NUM_THREADS=N`) and all of

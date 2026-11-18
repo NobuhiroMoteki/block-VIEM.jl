@@ -61,7 +61,7 @@ Row times and iterations (default mode, then --shifted-ri), --tol 1e-8:
   [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | n=2.589 52s/36it | n=2.898 50s/36it | n=3.206 52s/37it 
   [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | n=2.589 90s/41it | n=2.898 88s/41it | n=3.206 88s/43it 
   [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | n=2.589 49s/36it | n=2.898 49s/37it | n=3.206 50s/38it 
-  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | n=2.589 78s/41it | n=2.898 69s/42it | n=3.206 69s/43it fatal: not a git repository (or any of the parent directories): .git
+  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | n=2.589 78s/41it | n=2.898 69s/42it | n=3.206 69s/43it
   [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | shifted 53s (op 45s, solve 7s, post 0s) n=2.589:14 n=2.898:16 n=3.206:17 it 
   [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | shifted 88s (op 79s, solve 8s, post 0s) n=2.589:14 n=2.898:16 n=3.206:18 it 
   [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | shifted 49s (op 43s, solve 5s, post 0s) n=2.589:15 n=2.898:17 n=3.206:19 it 
@@ -69,7 +69,7 @@ Row times and iterations (default mode, then --shifted-ri), --tol 1e-8:
   [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | shifted 50s (op 45s, solve 5s, post 0s) n=2.589:13 n=2.898:15 n=3.206:17 it 
   [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | shifted 88s (op 79s, solve 9s, post 0s) n=2.589:14 n=2.898:16 n=3.206:17 it 
   [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | shifted 52s (op 45s, solve 6s, post 0s) n=2.589:14 n=2.898:16 n=3.206:18 it 
-  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | shifted 84s (op 77s, solve 7s, post 0s) n=2.589:14 n=2.898:16 n=3.206:19 it fatal: not a git repository (or any of the parent directories): .git
+  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | shifted 84s (op 77s, solve 7s, post 0s) n=2.589:14 n=2.898:16 n=3.206:19 it
 
 Phase 3 acceptance: benchmarks/cas_v2/spheroid_sweep_h5.jl, laptop, 2026-11-18 (fixed 2 x 2 x 3 grid, two wavelengths, default tolerance 1e-5)
 
