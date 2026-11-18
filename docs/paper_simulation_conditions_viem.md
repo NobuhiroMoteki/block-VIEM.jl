@@ -213,7 +213,7 @@ v0.7.4 以前は serial bottleneck があったが O(kL²) Givens QR への書�
 | `C_abs` | Float64 | 同上 | μm² | 吸収断面積 |
 | `S_fw_PCAS_theta` | ComplexF64 | 同上 | μm | 前方散乱振幅 θ 成分 = `S11(0) + i·S12(0)` |
 | `S_fw_PCAS_phi` | ComplexF64 | 同上 | μm | 前方散乱振幅 φ 成分 = `S22(0) − i·S21(0)` |
-| `S_bk_OCBS` | ComplexF64 | 同上 | μm | 後方散乱振幅 = `(−S11+S22−i·S12−i·S21)(180°)/√2` (theory_note.tex §S-bk; `(−S_bk_θ + S_bk_φ)/√2` with `S_bk_θ = S11+i·S12`, `S_bk_φ = S22−i·S21` at θ=π)。**注記 (2026-11-19)**: これは `viem_results/paper/` の論文用データを生成した時点の定義 (Moteki and Adachi 2024 の印刷版 Eq. (28)) で、保存済みファイルはこの定義のまま残してある。2026-11-19 以降のコードは erratum の修正式 `(−S11+S22)(180°)/2` に従い、値は保存済みデータの 1/√2 倍になる (位相、VIEM/参照値の比は同じ)。block-DDA_Py は v0.8.2 から修正式。 |
+| `S_bk_OCBS` | ComplexF64 | 同上 | μm | 後方散乱振幅 = `(−S11+S22−i·S12−i·S21)(180°)/√2` (theory_note.tex §S-bk; `(−S_bk_θ + S_bk_φ)/√2` with `S_bk_θ = S11+i·S12`, `S_bk_φ = S22−i·S21` at θ=π)。**注記 (2026-11-19)**: これは `viem_results/paper/` の論文用データを生成した時点の定義 (Moteki and Adachi 2024 の印刷版 Eq. (28)) で、保存済みファイルはこの定義のまま残してある。v0.8.0 (2026-11-19) 以降のコードは erratum の修正式 `(−S11+S22)(180°)/2` に従い、値は保存済みデータの 1/√2 倍になる (位相、VIEM/参照値の比は同じ)。block-DDA_Py は v0.8.2 から修正式。 |
 | `Euler_angles` | Float64 | (...,100,3) | rad | (α, β, γ) per orientation |
 | `r_ve` | Float64 | (N_rv,1,1,1) | μm | 離散化メッシュ体積から計算した実効体積等価半径 |
 

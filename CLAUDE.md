@@ -4,6 +4,7 @@
 
 本リポジトリはソルバの実装・検証を完了している。**新規モジュールを設計する段階ではない**；論文掲載用の本番計算を `src/` の既存実装で実行するフェーズ。
 
+- 検証状況 (2026-11-19, v0.8.0): 14,720 / 14,720 テスト全パス on Julia 1.12.5（v0.7.9 までの 14,439 件 + shift スイープ 238 件 + `S_bk` 43 件）。
 - 検証状況 (2026-04-21): 14,422 / 14,422 テスト全パス on Julia 1.12.5。Mie 球面 (低/高屈折率・Au)、CAS-v2 2 球 doublet (vs MSTM)、AIM vs 直接法、block-DDA_Py 出力互換の各検証で回帰なし。
 - 実装モジュール (src/):
   - メッシュ・基底: [gmsh_io.jl](src/gmsh_io.jl), [mesh.jl](src/mesh.jl), [swg.jl](src/swg.jl), [gre_mesh.jl](src/gre_mesh.jl), [aggregate_mesh.jl](src/aggregate_mesh.jl), [spheroid_sweep_io.jl](src/spheroid_sweep_io.jl)
@@ -12,6 +13,7 @@
   - AIM: [aim_grid.jl](src/aim_grid.jl), [aim_projection.jl](src/aim_projection.jl), [aim_toeplitz.jl](src/aim_toeplitz.jl), [aim_operator.jl](src/aim_operator.jl)
   - ソルバ: [solver.jl](src/solver.jl), [block_krylov.jl](src/block_krylov.jl)
   - 入射・後処理: [incident.jl](src/incident.jl), [postprocess.jl](src/postprocess.jl)
+  - 屈折率スイープ (v0.8.0): [shifted_sweep.jl](src/shifted_sweep.jl)（`block_gmres_shifted` は block_krylov.jl、`aim_K0_mvp` は aim_operator.jl）
 - 本番計算のエントリポイント:
   - GRE / spheroid / single sphere スイープ: [viem_results/create_h5.jl](viem_results/create_h5.jl), [viem_results/run_viem.jl](viem_results/run_viem.jl), [viem_results/check_h5.jl](viem_results/check_h5.jl)
   - 2 球 doublet: [benchmarks/cas_v2/doublet_mstm/run_viem.jl](benchmarks/cas_v2/doublet_mstm/run_viem.jl) が generic aggregate ドライバ
@@ -140,3 +142,26 @@ HDF5 スイープを起動する前に必ず:
 - [docs/theory_note.tex](docs/theory_note.tex) / `docs/theory_note.pdf`（本ソルバの理論ノート、セクション番号で参照）
 - [README.md](README.md)（実装方針、ベンチマーク結果、block-DDA_Py との定義対応）
 - `block-DDA_Py` — `~/Python/block-DDA_Py`（出力フォーマット互換の参照元、姉妹プロジェクト [CLAUDE.md](file:///home/moteki/Python/block-DDA_Py/CLAUDE.md)）
+
+## 10. 屈折率スイープ（shifted block GMRES、v0.8.0）
+
+等方・均質粒子では `Z(m_p) = (κ/ε_bg)(τM − K)`、`τ = 1/((m_p/m_m)² − 1)`。`M⁻¹` 右前処理により全 m_p が `K M⁻¹` の shift になり、1 回のブロック Arnoldi で解ける。
+
+- エントリポイント: `solve_cas_v2_orientations_shifted(basis, eulers; wl_0, m_m, m_p_list, ...)`
+- ドライバ: `benchmarks/cas_v2/{ironoxide,spheroid}_sweep_h5.jl --shifted-ri`、[viem_results/run_viem.jl](viem_results/run_viem.jl) `--shifted-ri`（block-DDA_Py の `run_dda.py --shifted-ri` に対応）
+- 既定動作は不変。`--shifted-ri` なしの出力は変更前と一致する（`benchmarks/shifted/results/` の `p3_driver_check.txt`, `run_viem_shifted_check.txt`）
+- 収束判定は現行と同じ `‖B − Z D‖_F/‖B‖_F < tol`。メッシュは屈折率軸で共通（リスト内の最大 |m_p| で作る）。既定モードでも共通メッシュなので、shift モードの値は既定モードとソルバ許容誤差の範囲で一致する
+- 非対応: 異方性（`--form-biref`, `--biaxial`、`m_p_xyz` の 3 成分が異なる行）、非均質粒子、`:aim_bicgstab`。`run_viem.jl` は異方性の行を従来どおり 1 つずつ解く
+- バッチはコントラストの近い m_p でまとめる（反復数は最難の m_p で決まる）。Au と誘電体の混在は未測定
+- `run_viem.jl --shifted-ri` の `/target/cost/`: 同じバッチで解いた行の `t_solve_s`, `t_total_s` はバッチ時間を行数で割った値、`peak_rss_bytes` はバッチのピーク。`iters`, `converged`, `solver_err`, `residual_history` は屈折率ごと。モードは `/target` の属性 `shifted_ri` に記録し、1 ファイルに 2 つのモードを混在させない
+- 通常求解の `precond = :mass_right`（`M⁻¹` 右前処理）はオプション。既定は `:none`
+- 回帰ガード: [test/test_shifted_krylov.jl](test/test_shifted_krylov.jl), [test/test_shifted_sweep.jl](test/test_shifted_sweep.jl) は常時グリーン
+- ベンチマーク: [benchmarks/shifted/run_shift_scaling.jl](benchmarks/shifted/run_shift_scaling.jl)。結果は docs/benchmark_results.md §11、理論は docs/theory_note.pdf 第 11 節。実測の加速率は N_m = 3 / 10 / 30 で約 3 / 10 / 29–30 倍
+
+## 11. 後方散乱振幅 `S_bk` の定義（v0.8.0 で訂正）
+
+- `S_bk`（HDF5 の `S_bk_OCBS`）は `(−S_bk_θ + S_bk_φ)/2 = (−S11 + S22)(180°)/2`。Moteki and Adachi (2024) Eq. (28) の erratum の修正式で、block-DDA_Py v0.8.2 以降と同じ
+- v0.7.9 以前は印刷版の `1/√2` を使っており、`S_bk` は現行の √2 倍だった（位相、VIEM/参照値の比、前方散乱振幅、断面積は同じ）
+- `viem_results/paper/` の保存済み HDF5（VIEM、Mie、MSTM、T-matrix）は旧定義のまま残す。書き換えない。新旧を比べるときは保存済みの `S_bk` に 1/√2 を掛ける
+- 新しく作る HDF5 の `S_definition` 属性は `.../2`。`run_viem.jl` は旧定義の結果が入ったファイルへの追記を拒否する
+- 回帰ガード: [test/test_backward_amplitude.jl](test/test_backward_amplitude.jl) は常時グリーン

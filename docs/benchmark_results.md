@@ -58,7 +58,7 @@ Cross-section errors are
 $|\Delta C| / C^\text{ref}$. "Phase err." is
 $\arg(S^\text{VIEM} / S^\text{ref})$.
 
-**Backward amplitude.** Since 2026-11-19 `S_bk` is
+**Backward amplitude.** Since v0.8.0 (2026-11-19) `S_bk` is
 $(-S_{11} + S_{22})/2$ at the backward direction, the corrected Eq. (28)
 of Moteki and Adachi (2024). The benchmarks of §1–§10 were run with the
 printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The VIEM
@@ -831,11 +831,26 @@ Differences are relative to the largest $|S|$ of the wavelength group.
 | `ironoxide_sweep_h5.jl` | same with `--triaxial 1.5 --n-psi 2` | 2.8e-10 |
 | `spheroid_sweep_h5.jl` | default mode, before (e74a75f) vs after | 0 (numbers, attributes and config hash) |
 | `spheroid_sweep_h5.jl` | default vs `--shifted-ri`, tol 1e-5 | 1.5e-06 |
+| `viem_results/run_viem.jl` | default mode, before (8dfceee) vs after | 0 (all datasets of `/target/simulated_data`) |
+| `viem_results/run_viem.jl` | default vs `--shifted-ri`, tol 1e-8 | 7.8e-10 |
+| `viem_results/run_viem.jl` | default vs `--shifted-ri`, tol 1e-5 | 1.5e-06 |
 
 Iron-oxide settings: hematite, 2 sizes (0.05 and 0.10 μm), 2 aspect
 ratios, 3 real indices, 2 wavelengths, $N$ = 4056–7079. One row of 3
 indices took 150–300 s in the default mode and 50–90 s with
 `--shifted-ri` (4 threads, `supermicro-647`).
+
+`run_viem.jl` settings
+([run_viem_shifted_check.txt](../benchmarks/shifted/results/run_viem_shifted_check.txt)):
+2 wavelengths, refractive indices 1.5, 1.6, 1.7 + 0.02i and one
+anisotropic entry (1.5, 1.5, 1.6), one spheroid ($L = 3$ solved) and one
+triaxial ellipsoid ($L = 12$). The differences are relative to the
+largest magnitude of each dataset and cover `C_abs`, `C_ext` and the
+three amplitudes. The three isotropic entries of a slot are solved in
+one batch and the anisotropic entry by the existing solver. The sum of
+`t_total_s` over the 16 conditions was 1787 s in the default mode and
+769 s with `--shifted-ri` (tol 1e-5, laptop, 4 threads, other runs in
+parallel).
 
 ---
 

@@ -15,7 +15,7 @@ Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
 \date{Last updated: 2026-11-19 (Sec.~\ref{sec:shifted-gmres} added and
-Sec.~\ref{sec:S-bk} corrected after block-VIEM.jl v0.7.9; the other
+Sec.~\ref{sec:S-bk} corrected in block-VIEM.jl v0.8.0; the other
 sections correspond to v0.7.7)}
 
 \begin{document}
@@ -1255,10 +1255,9 @@ $S_{\text{bk}}^{\text{OCBS}} = S_{22}(\pi)$.
 In the Rayleigh limit $S_{\text{bk}}^{\text{OCBS}}$ equals the forward
 amplitude.
 
-Until 2026-11-19 block-VIEM.jl used the printed equation.
-The values of $S_{\text{bk}}^{\text{OCBS}}$ computed before that date,
-including the Mie, MSTM and T-matrix reference values, are $\sqrt{2}$
-times the present ones.
+Versions of block-VIEM.jl up to 0.7.9 used the printed equation.
+Their $S_{\text{bk}}^{\text{OCBS}}$, including the Mie, MSTM and
+T-matrix reference values, is $\sqrt{2}$ times the present one.
 The phase is the same, and so is the ratio of a VIEM value to its
 reference value.
 The stored files under \texttt{viem\_results/paper/} were produced with
@@ -1729,6 +1728,7 @@ The solver is \texttt{block\_gmres\_shifted}
 (\texttt{src/block\_krylov.jl}).
 The sweep function is \texttt{solve\_cas\_v2\_orientations\_shifted}
 (\texttt{src/shifted\_sweep.jl}).
+Both are available from v0.8.0.
 
 %----------------------------------------------------------------------
 \subsection{Shift structure of the impedance matrix}
@@ -2072,6 +2072,20 @@ It is rejected for the anisotropic index modes.
 A file written with the option carries the root attribute
 \texttt{shifted\_ri}, which also enters the configuration hash.
 The output of the default mode is unchanged.
+\end{sloppypar}
+
+\begin{sloppypar}
+The general sweep driver \nolinkurl{viem_results/run_viem.jl} accepts
+the same option.
+All isotropic entries of the refractive-index list of a (shape,
+wavelength) slot are solved together on the per-shape mesh of the
+default mode.
+Anisotropic entries are solved one at a time as before.
+In the cost group of the output file the time fields of the entries
+solved together hold the time of the batch divided by the number of
+entries, and the iteration count, the convergence flag and the residual
+are those of the individual refractive index.
+This corresponds to \texttt{run\_dda.py --shifted-ri} of block-DDA\_Py.
 \end{sloppypar}
 
 %----------------------------------------------------------------------

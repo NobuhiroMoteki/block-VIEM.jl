@@ -447,7 +447,7 @@ Per-orientation CAS-v2 forward and backward scattering observables, in the
   `S_bk_phi = S22 - i S21`, so `S_bk = (-S11 + S22)/2` by the backscattering
   theorem `S21 = -S12`. This is the corrected Eq. (28) of Moteki and Adachi,
   Opt. Express 32, 36500 (2024), given in the erratum to that paper. The
-  printed equation has `1/√2` in place of `1/2`. Until 2026-11-19 this code
+  printed equation has `1/√2` in place of `1/2`. Up to v0.7.9 this code
   followed the printed equation, and its `S_bk` was `√2` times the present
   one. block-DDA_Py uses the corrected form from v0.8.2.
 """
