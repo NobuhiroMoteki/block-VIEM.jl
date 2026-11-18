@@ -441,7 +441,15 @@ Per-orientation CAS-v2 forward and backward scattering observables, in the
 - `S_fw_mean::ComplexF64`  — PCAS observable, `(S_fw_theta + S_fw_phi)/2`
 - `S_bk_theta::ComplexF64` — backward scattering amplitude, θ-channel
 - `S_bk_phi::ComplexF64`   — backward scattering amplitude, φ-channel
-- `S_bk::ComplexF64`       — OCBS observable, `(-S_bk_theta + S_bk_phi)/√2`
+- `S_bk::ComplexF64`       — OCBS observable `S_bak` of CAS-v2,
+  `(-S_bk_theta + S_bk_phi)/2`. With the amplitude-matrix elements at the
+  backward direction, `S_bk_theta = S11 + i S12` and
+  `S_bk_phi = S22 - i S21`, so `S_bk = (-S11 + S22)/2` by the backscattering
+  theorem `S21 = -S12`. This is the corrected Eq. (28) of Moteki and Adachi,
+  Opt. Express 32, 36500 (2024), given in the erratum to that paper. The
+  printed equation has `1/√2` in place of `1/2`. Up to v0.7.9 this code
+  followed the printed equation, and its `S_bk` was `√2` times the present
+  one. block-DDA_Py uses the corrected form from v0.8.2.
 """
 struct CASv2Result
     S_fw_theta::ComplexF64
@@ -503,7 +511,12 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
     # Backward (OCBS)
     S_bk_theta = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
     S_bk_phi   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
-    S_bk       = (-S_bk_theta + S_bk_phi) / sqrt2
+    # Corrected Eq. (28) of Moteki and Adachi (2024), erratum: the quarter-wave
+    # plate in the return path has its axes at 45° to the linear polarizations,
+    # so each backscattered component reaches the output polarization with the
+    # amplitude factor 1/√2. Together with the factor 1/√2 of the circularly
+    # polarized incident wave this gives 1/2.
+    S_bk       = (-S_bk_theta + S_bk_phi) / 2
 
     return CASv2Result(S_fw_theta, S_fw_phi, S_fw_mean,
                        S_bk_theta, S_bk_phi, S_bk)
@@ -580,7 +593,8 @@ end
                               padding::Integer = 4,
                               tol::Float64 = 1e-5,
                               maxiter::Integer = 100,
-                              verbose::Bool = false)
+                              verbose::Bool = false,
+                              precond::Symbol = :none)
         -> Vector{CASv2Result}
 
 Solve the VIEM system for many particle orientations and return the
@@ -621,6 +635,19 @@ Mixing the two forms, or supplying neither complete set, raises an
 - `:dense`        — assemble `Z` and LU-factorize once, then reuse
                     across orientations. Only for small problems (`N ≲ 10³`).
 
+# Preconditioning (AIM methods only)
+
+`precond` selects an optional preconditioner:
+- `:none`       — the system `Z D = B` is solved as it is (**default**).
+- `:mass_right` — right preconditioning with the mass matrix `M`: the
+                  solver runs on `Z M⁻¹` and `D = M⁻¹ Y`. `M⁻¹` is applied
+                  with a sparse Cholesky factor. The convergence criterion
+                  is unchanged, `‖B − Z D‖_F / ‖B‖_F < tol`. Measured for
+                  isotropic particles (2026-11-17, `benchmarks/shifted/`):
+                  the block-GMRES iteration count drops to 0.23–0.59 of
+                  the unpreconditioned one. The solution agrees with
+                  `:none` to the solver tolerance, not bit for bit.
+
 `euler_angles` is an iterable of `(alpha, beta, gamma)` tuples in the
 intrinsic ZYZ convention, matching `scipy.spatial.transform.Rotation`
 and block-DDA_Py.
@@ -657,7 +684,12 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    return_D::Bool = false,
                                    return_solve_info::Bool = false,
                                    projection::Union{AIMProjection,Nothing} = nothing,
-                                   mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing)
+                                   mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing,
+                                   precond::Symbol = :none)
+    (precond === :none || precond === :mass_right) || throw(ArgumentError(
+        "unknown precond: $precond (expected :none or :mass_right)"))
+    (precond !== :none && method === :dense) && throw(ArgumentError(
+        "precond = :$precond applies to the AIM block Krylov methods, not to :dense"))
     k0_c, eps_p_c, eps_bg_c = _resolve_physical_inputs(wl_0, m_m, m_p,
                                                        k0, eps_p, eps_bg)
     # `k0_c` is the wavenumber in the background medium, matching
@@ -713,11 +745,20 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                 duffy_rule = duffy_rule,
                                 projection = projection,
                                 mass = mass)
-        A = _AIMLinOp(op, N)
         sub = method === :aim_bicgstab ? :bicgstab : :gmres
-        res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
-                           verbose = verbose)
-        D_block = res.X
+        if precond === :none
+            A = _AIMLinOp(op, N)
+            res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
+                               verbose = verbose)
+            D_block = res.X
+        else
+            # Right preconditioning with the mass matrix: (Z M⁻¹) Y = B,
+            # D = M⁻¹ Y. The monitored residual is still ‖B − Z D‖_F/‖B‖_F.
+            minv = _MassCholesky(op.mass)
+            res = _block_solve(_AIMRightPrecOp(op, minv), B, sub;
+                               tol = tol, maxiter = maxiter, verbose = verbose)
+            D_block = _mass_solve(minv, res.X)
+        end
         solve_info = (iterations       = res.iterations,
                       residual_norm    = res.residual_norm,
                       converged        = res.converged,

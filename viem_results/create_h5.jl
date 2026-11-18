@@ -26,6 +26,7 @@
 #         ├─ C_ext_mie         (...)                                           Float64
 #         ├─ S_fw_PCAS_mie     (...)                                           ComplexF64
 #         └─ S_bk_OCBS_mie     (...)                                           ComplexF64
+#     └─ /cost                per-slot cost and solver diagnostics (required by run_viem.jl)
 #
 # Usage:
 #     julia --project=. viem_results/create_h5.jl
@@ -61,6 +62,9 @@ N_gamma_ori = 12
 
 # Output file
 filename = joinpath(@__DIR__, "pcas_ocbs_simulated_data.hdf5")
+
+# Length of /target/cost/residual_history. Must equal MAXITER of run_viem.jl.
+MAXITER_HISTORY = 200
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  (no edits needed below)
@@ -116,8 +120,9 @@ h5open(filename, "w") do f
     attrs(sd)["units"]        = "r_ve:[um], euler_angles:[rad], C:[um^2], S:[um]"
     attrs(sd)["S_definition"] = ("S(0)_theta = S11(0)+1j*S12(0), " *
                                  "S(0)_phi = S22(0)-1j*S21(0), " *
-                                 "S(180) = (S11+S22+1j*S12-1j*S21)(180)/sqrt(2), " *
-                                 "per Mishchenko 2000")
+                                 "S(180) = (-S11+S22-1j*S12-1j*S21)(180)/2, " *
+                                 "per Mishchenko 2000; S(180) is the corrected Eq. (28) " *
+                                 "of Moteki and Adachi 2024 (erratum)")
 
     # Helper: create a dataset with a definition attribute
     function ds(parent, name, shape, dtype, definition)
@@ -148,6 +153,46 @@ h5open(filename, "w") do f
        "Mie S(0) of volume-equivalent sphere [um]")
     ds(sd, "S_bk_OCBS_mie",   shape_cond, ComplexF64,
        "Mie S(180) of volume-equivalent sphere [um]")
+
+    # ── /target/cost/ ────────────────────────────────────────────────────
+    # Per-slot cost and solver diagnostics. run_viem.jl requires this group.
+    # Same datasets as viem_results/paper/_common.jl::create_paper_h5.
+    cost = create_group(grp, "cost")
+    attrs(cost)["description"] = "per-slot cost and solver diagnostics"
+    attrs(cost)["units"]       =
+        "t_*:[s], peak_rss_bytes:[B], mean_edge_length:[um], solver_err:[1]"
+    ds(cost, "t_build_s",        shape_cond, Float64,
+       "wall time: tet mesh + SWG basis build [s]")
+    ds(cost, "t_setup_s",        shape_cond, Float64,
+       "wall time: AIM grid + projection + mass-matrix assembly [s]")
+    ds(cost, "t_solve_s",        shape_cond, Float64,
+       "wall time: block-Krylov iterative solve (no mesh/setup) [s]")
+    ds(cost, "t_total_s",        shape_cond, Float64,
+       "end-to-end wall time (build + setup + solve + observables) [s]")
+    ds(cost, "peak_rss_bytes",   shape_cond, Int64,
+       "peak resident set size observed during this slot [bytes]")
+    ds(cost, "n_tet",            shape_cond, Int64,
+       "number of tetrahedra in the VIEM mesh " *
+       "(corresponds to block-DDA_Py's n_cuboid)")
+    ds(cost, "n_dof",            shape_cond, Int64,
+       "number of SWG basis functions (unknowns) " *
+       "(corresponds to block-DDA_Py's n_occ)")
+    ds(cost, "mean_edge_length", shape_cond, Float64,
+       "tet-mesh mean edge length h̄ [um] " *
+       "(corresponds to block-DDA_Py's lattice_lf)")
+    ds(cost, "iters",            shape_cond, Int64,
+       "block-Krylov outer iteration count")
+    ds(cost, "converged",        shape_cond, Int8,
+       "1 if block-Krylov reached tol, else 0")
+    ds(cost, "solver_err",       shape_cond, Float64,
+       "final relative residual ‖B − A·X‖_F / ‖B‖_F")
+    shape_hist = (shape_cond..., MAXITER_HISTORY)
+    d_hist = create_dataset(cost, "residual_history", Float64, shape_hist)
+    attrs(d_hist)["definition"] =
+        "per-iteration relative residual ‖B − A·X‖_F / ‖B‖_F, " *
+        "NaN-padded to length $MAXITER_HISTORY.  entry [..., k] is " *
+        "the residual after iteration k (1-indexed); NaN if k > iter_fin."
+    write(d_hist, fill(NaN, shape_hist))
 end
 
 println("Created $filename")

@@ -160,8 +160,9 @@ function create_paper_h5(filename::AbstractString;
         attrs(sd)["units"]        = "r_ve:[um], euler_angles:[rad], C:[um^2], S:[um]"
         attrs(sd)["S_definition"] = "S(0)_theta = S11(0)+1j*S12(0), " *
                                     "S(0)_phi = S22(0)-1j*S21(0), " *
-                                    "S(180) = (S11+S22+1j*S12-1j*S21)(180)/sqrt(2), " *
-                                    "per Mishchenko 2000"
+                                    "S(180) = (-S11+S22-1j*S12-1j*S21)(180)/2, " *
+                                    "per Mishchenko 2000; S(180) is the corrected Eq. (28) " *
+                                    "of Moteki and Adachi 2024 (erratum)"
 
         function ds(parent, name, shape, dtype, definition)
             d = create_dataset(parent, name, dtype, shape)

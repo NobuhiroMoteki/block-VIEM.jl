@@ -44,12 +44,23 @@
 #                                   (bit-identical axis to the two-band file), or
 #     --ri-axis lo,hi               explicit endpoints, N_RI equidistant points.
 # Without --output, such a run writes ..._liquid_wl512.h5, never the production name.
+#
+# SHIFTED REAL-INDEX AXIS (2026-11-18): `--shifted-ri` solves all N_RI indices of a
+# (band, D_ve, AR) row with ONE shifted block-GMRES process
+# (`solve_cas_v2_orientations_shifted`): the AIM operator is built once per row instead of
+# once per index, and the indices share one block Krylov space. The mesh, the AIM grid and
+# the convergence criterion are those of the default mode, so the amplitudes agree with it
+# to the solver tolerance. Isotropic index only (also with --triaxial, which changes the
+# shape and not the index); not with --form-biref, --biaxial or --degenerate-ri. The file
+# records the mode in the root attribute `shifted_ri`. The default mode is unchanged.
+# `--tol` sets the solver tolerance (default 1e-5, the value used so far).
 
 using Printf, Dates
 using Serialization: serialize, deserialize
 using BlockVIEM
 using BlockVIEM: build_swg_basis, n_basis, n_tets, read_msh, mean_edge_length,
-                 solve_cas_v2_orientations, aim_grid, build_aim_projection,
+                 solve_cas_v2_orientations, solve_cas_v2_orientations_shifted,
+                 aim_grid, build_aim_projection,
                  assemble_mass_matrix, duffy_reference_rule,
                  expand_alpha_from_alpha0,
                  SpheroidSweepGrids, SpheroidSweepData, write_spheroid_sweep_h5
@@ -124,6 +135,11 @@ const ANISO = FORM_BIREF || FORM_BIAX
 const FILLS = ANISO ? parse.(Float64, split(_arg("--fills", "0.4,0.5,0.6"), ",")) : Float64[]
 const PSI_GRID = SPIN ? collect(range(0.0, pi / 2, length = parse(Int, _arg("--n-psi", "3")))) : Float64[]
 const LOG_AR_MIN = parse(Float64, _arg("--log-ar-min", "NaN"))   # NaN = symmetric -LOG_AR_MAX
+# One shifted block-GMRES process for the real-index axis of each row (see the header).
+const SHIFTED_RI = "--shifted-ri" in ARGS
+SHIFTED_RI && ANISO && error("--shifted-ri needs an isotropic index: with --form-biref or --biaxial " *
+                             "the index is a tensor and the refractive-index change is not a scalar shift")
+SHIFTED_RI && DEGENERATE_RI && error("--shifted-ri and --degenerate-ri are alternatives (one index is solved per row)")
 
 # ── species constants (provisional; see the JSON in the PCAS tree) ───────────
 # (wl_um, m_m, Re(m_p) at that wl, Im(m_p) at that wl)
@@ -270,7 +286,7 @@ const N_PW        = 10       # mesh cells per wavelength inside the particle
 const LC_GEOM     = 0.30     # ... but never coarser than this x the smallest semi-axis
 const PITCH_RATIO = 0.5
 const PADDING     = 4
-const TOL         = 1e-5
+const TOL         = parse(Float64, _arg("--tol", "1e-5"))
 const MAXITER     = 600
 const DUFFY_ORDER = 5
 
@@ -314,8 +330,11 @@ const NO_RESUME = "--no-resume" in ARGS
 # Settings that invalidate a checkpoint if they change. Grids are compared by
 # value, not by count: a rerun with the same N but a different range must not
 # silently inherit amplitudes computed on the old grid.
-_ckpt_key() = (SPECIES, DEGENERATE_RI, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
+_ckpt_key_base() = (SPECIES, DEGENERATE_RI, D_VE_GRID, RI_REAL_GRID, LOG_AR_GRID, COS_THETA_O_HALF,
                PHI_O_GRID, N_PW, LC_GEOM, LC_FACTOR, TOL, DUFFY_ORDER, COND, FORM_BIREF, FORM_BIAX, PSI_GRID, FILLS, TRIAXIAL, R2)
+# The solver mode joins the key only when it is on, so checkpoints of the default mode stay
+# valid. A checkpoint is never resumed in the other mode.
+_ckpt_key() = SHIFTED_RI ? (_ckpt_key_base()..., :shifted_ri) : _ckpt_key_base()
 
 function _load_ckpt()
     (NO_RESUME || !isfile(CKPT_FILE)) && return nothing
@@ -417,7 +436,43 @@ function sweep_one_wavelength!(st::SweepState, w::Int, wl_0, m_m, re_axis, im_fi
             # rotation, so it stays valid for a biaxial particle.
             eul = SPIN ? [(0.0, acos(u), psi) for psi in PSI_GRID for u in COS_THETA_O_HALF] :
                               [(0.0, acos(u), 0.0) for u in COS_THETA_O_HALF]
-            for j in solve_idx
+            if SHIFTED_RI
+                # All indices of the row in one Arnoldi process. The block is the same
+                # orientation block as below; the operator is built once for the row.
+                m_row = ComplexF64[complex(re_used[j], im_fixed) for j in solve_idx]
+                t = @elapsed res_all, info = solve_cas_v2_orientations_shifted(
+                    basis, eul;
+                    wl_0 = wl_0, m_m = m_m, m_p_list = m_row,
+                    tol = TOL, maxiter = MAXITER,
+                    duffy_rule = duffy_reference_rule(DUFFY_ORDER),
+                    pitch = pitch, padding = PADDING, projection = proj, mass = mass)
+                for (jj, j) in enumerate(solve_idx)
+                    st.converged[w][i, j, k] = info.converged[jj]
+                    for m in 1:length(COS_THETA_O_HALF)
+                        if SPIN
+                            for (pidx, _) in enumerate(PSI_GRID)
+                                r = (pidx - 1) * length(COS_THETA_O_HALF) + m
+                                Sth, Sph = expand_alpha_from_alpha0(
+                                    res_all[jj, r].S_fw_theta, res_all[jj, r].S_fw_phi, PHI_O_GRID)
+                                st.S_theta[w][i, j, k, m, :, pidx] .= Sth
+                                st.S_phi[w][i, j, k, m, :, pidx]   .= Sph
+                            end
+                        else
+                            Sth, Sph = expand_alpha_from_alpha0(
+                                res_all[jj, m].S_fw_theta, res_all[jj, m].S_fw_phi, PHI_O_GRID)
+                            st.S_theta[w][i, j, k, m, :] .= Sth
+                            st.S_phi[w][i, j, k, m, :]   .= Sph
+                        end
+                    end
+                end
+                @printf("| shifted %.0fs (op %.0fs, solve %.0fs, post %.0fs) %s it%s ",
+                        t, info.timing.operator, info.timing.krylov, info.timing.post,
+                        join(["n=" * @sprintf("%.3f", re_used[j]) * ":" * string(info.iterations[jj])
+                              for (jj, j) in enumerate(solve_idx)], " "),
+                        all(info.converged) ? "" : " NOTCONV")
+                flush(stdout)
+            end
+            for j in (SHIFTED_RI ? Int[] : solve_idx)
                 m_vec = tensor_of(j)
                 t = @elapsed res, _, info = solve_cas_v2_orientations(
                     basis, eul;
@@ -501,6 +556,7 @@ if FORM_BIREF
 end
 @printf("  theta %d (one block)   phi %d (analytic)\n",
         length(COS_THETA_O_HALF), length(PHI_O_GRID))
+SHIFTED_RI && @printf("  SHIFTED real-index axis: %d indices per row in one block-GMRES process\n", N_RI)
 @printf("  cells: %d geometries x %d indices x %d wavelengths\n",
         N_DVE * N_AR, N_RI, length(COND))
 @printf("  checkpoint: %s\n", DRY_RUN ? "(dry run)" : CKPT_FILE)
@@ -569,6 +625,15 @@ if !DRY_RUN
                 Dict{String,Any}(),
             # band selection / index overrides / axis rule (2026-10-14): written ONLY when used,
             # so a default invocation writes exactly the attributes it wrote before
+            # solver mode of the real-index axis: written ONLY in the shifted mode, so the
+            # attributes and the config hash of a default invocation are unchanged
+            SHIFTED_RI ?
+                Dict{String,Any}(
+                    "shifted_ri" => 1,
+                    "shifted_ri_note" => "all Re(m_p) of a (band, D_ve, AR) row solved with one shifted " *
+                                         "block GMRES (right M^-1 preconditioning); mesh, AIM grid and " *
+                                         "convergence criterion as in the default mode") :
+                Dict{String,Any}(),
             (DEFAULT_BANDS && !any(_overridden(c[1]) for c in COND) && isempty(RI_AXIS_BANDS) && isempty(RI_AXIS_EXPLICIT)) ?
                 Dict{String,Any}() :
                 Dict{String,Any}(

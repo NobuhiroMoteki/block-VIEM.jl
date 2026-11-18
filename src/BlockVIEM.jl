@@ -105,7 +105,7 @@ export basis_moments, divergence_moments, multi_indices, n_moments
 export build_green_toeplitz, precompute_green_fft, fft_convolve, fft_convolve!
 export assemble_mass_matrix, near_pairs, near_pairs_by_distance
 export aim_far_mvp, aim_radiation_element, assemble_precorrection
-export AIMOperator, build_aim_operator, aim_mvp
+export AIMOperator, build_aim_operator, aim_mvp, aim_K0_mvp
 
 # Phase 2 (cont.): full singular pair Z_mn evaluator  — basic scalar API done
 # Phase 4: Solver
@@ -116,16 +116,18 @@ include("solver.jl")
 export project_plane_wave, SolveResult
 export solve_direct, solve_iterative, solve_iterative_block
 export BlockSolveResult, block_bicgstab, block_gmres
+export ShiftedBlockSolveResult, block_gmres_shifted
 
 # Phase 5: PostProcess (CAS-v2 observables)
 include("postprocess.jl")
+include("shifted_sweep.jl")
 include("spheroid_sweep_io.jl")
 
 # Public API (Phase 5)
 export far_field_amplitude, ScatteringResult, compute_scattering
 export SphericalQuadRule, spherical_product_rule, compute_csca_farfield
 export CASOrientation, cas_orientation, CASv2Result, compute_cas_observables
-export solve_cas_v2_orientations
+export solve_cas_v2_orientations, solve_cas_v2_orientations_shifted
 export SpheroidSweepGrids, SpheroidSweepData
 export write_spheroid_sweep_h5, read_spheroid_sweep_h5
 export expand_alpha_from_alpha0

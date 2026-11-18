@@ -1,0 +1,108 @@
+Phase 3 acceptance: benchmarks/cas_v2/ironoxide_sweep_h5.jl, supermicro-647, 2026-11-18
+Settings: --species hematite --n-dve 2 --n-ri 3 --n-ar 2 --dve-min 0.05 --dve-max 0.10 --log-ar-max 0.3 --no-resume
+Compared with benchmarks/shifted/p3_compare_h5.jl. Differences are relative to the largest |S| of the wavelength group.
+
+1. Default mode: driver and src of e74a75f (A) against this branch (B), default tolerance. Limit 0.
+  wl_0p637/S_fw_phi_im    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p637/S_fw_phi_re    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p637/S_fw_theta_im  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p637/S_fw_theta_re  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p637/converged      identical
+  wl_0p773/S_fw_phi_im    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p773/S_fw_phi_re    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p773/S_fw_theta_im  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p773/S_fw_theta_re  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p773/converged      identical
+attributes that differ (run attributes created_utc, git_sha, git_dirty excluded): 0
+largest relative difference: 0.000e+00 (limit 0.0e+00)
+PASS
+
+2. --tol 1e-8: default mode (A) against --shifted-ri (B). Limit 1e-5.
+  attr /shifted_ri only in B
+  attr /shifted_ri_note only in B
+  attr provenance/config_hash differs: "2bc3ec0d6f70ff4709808f55cf1188959155a0823a5dfaf86452593c1be44a90" | "40858b1576d11901b521ee5ecbf2535fb540607b39f45eff8f02ca80bc05a1bc"
+  wl_0p637/S_fw_phi_im    max |A-B| = 4.800e-12   relative to max|S| = 1.968e-10
+  wl_0p637/S_fw_phi_re    max |A-B| = 5.104e-12   relative to max|S| = 2.093e-10
+  wl_0p637/S_fw_theta_im  max |A-B| = 4.800e-12   relative to max|S| = 1.968e-10
+  wl_0p637/S_fw_theta_re  max |A-B| = 5.104e-12   relative to max|S| = 2.093e-10
+  wl_0p637/converged      identical
+  wl_0p773/S_fw_phi_im    max |A-B| = 4.300e-12   relative to max|S| = 2.800e-10
+  wl_0p773/S_fw_phi_re    max |A-B| = 5.938e-12   relative to max|S| = 3.867e-10
+  wl_0p773/S_fw_theta_im  max |A-B| = 4.300e-12   relative to max|S| = 2.800e-10
+  wl_0p773/S_fw_theta_re  max |A-B| = 5.938e-12   relative to max|S| = 3.867e-10
+  wl_0p773/converged      identical
+attributes that differ (run attributes created_utc, git_sha, git_dirty excluded): 3
+largest relative difference: 3.867e-10 (limit 1.0e-05)
+PASS
+
+3. --triaxial 1.5 --n-psi 2 --tol 1e-8: default mode (A) against --shifted-ri (B). Limit 1e-5.
+  attr /shifted_ri only in B
+  attr /shifted_ri_note only in B
+  attr provenance/config_hash differs: "52d815fd188490a61ea0eb1010729ffafbf68fa15b3d6ddb773985c784d098d3" | "65d1fe582db2f09cf1e615ab6c26d736fc9f0373df5bdc84584ca1e7ce8e08ed"
+  wl_0p637/S_fw_phi_im    max |A-B| = 7.108e-12   relative to max|S| = 2.848e-10
+  wl_0p637/S_fw_phi_re    max |A-B| = 6.080e-12   relative to max|S| = 2.436e-10
+  wl_0p637/S_fw_theta_im  max |A-B| = 7.108e-12   relative to max|S| = 2.848e-10
+  wl_0p637/S_fw_theta_re  max |A-B| = 6.080e-12   relative to max|S| = 2.436e-10
+  wl_0p637/converged      identical
+  wl_0p773/S_fw_phi_im    max |A-B| = 3.201e-12   relative to max|S| = 2.048e-10
+  wl_0p773/S_fw_phi_re    max |A-B| = 3.296e-12   relative to max|S| = 2.108e-10
+  wl_0p773/S_fw_theta_im  max |A-B| = 3.201e-12   relative to max|S| = 2.048e-10
+  wl_0p773/S_fw_theta_re  max |A-B| = 3.296e-12   relative to max|S| = 2.108e-10
+  wl_0p773/converged      identical
+attributes that differ (run attributes created_utc, git_sha, git_dirty excluded): 3
+largest relative difference: 2.848e-10 (limit 1.0e-05)
+PASS
+
+Row times and iterations (default mode, then --shifted-ri), --tol 1e-8:
+  [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | n=2.589 57s/36it | n=2.898 55s/37it | n=3.206 57s/38it 
+  [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | n=2.589 103s/41it | n=2.898 98s/42it | n=3.206 101s/43it 
+  [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | n=2.589 57s/36it | n=2.898 60s/37it | n=3.206 53s/38it 
+  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | n=2.589 94s/42it | n=2.898 88s/42it | n=3.206 84s/44it 
+  [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | n=2.589 52s/36it | n=2.898 50s/36it | n=3.206 52s/37it 
+  [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | n=2.589 90s/41it | n=2.898 88s/41it | n=3.206 88s/43it 
+  [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | n=2.589 49s/36it | n=2.898 49s/37it | n=3.206 50s/38it 
+  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | n=2.589 78s/41it | n=2.898 69s/42it | n=3.206 69s/43it
+  [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | shifted 53s (op 45s, solve 7s, post 0s) n=2.589:14 n=2.898:16 n=3.206:17 it 
+  [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | shifted 88s (op 79s, solve 8s, post 0s) n=2.589:14 n=2.898:16 n=3.206:18 it 
+  [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | shifted 49s (op 43s, solve 5s, post 0s) n=2.589:15 n=2.898:17 n=3.206:19 it 
+  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | shifted 92s (op 85s, solve 7s, post 0s) n=2.589:15 n=2.898:17 n=3.206:19 it 
+  [D=0.0500 AR=0.501] lc=0.00596 N_tet=1866 N=4056 | shifted 50s (op 45s, solve 5s, post 0s) n=2.589:13 n=2.898:15 n=3.206:17 it 
+  [D=0.0500 AR=1.995] lc=0.00473 N_tet=3279 N=7079 | shifted 88s (op 79s, solve 9s, post 0s) n=2.589:14 n=2.898:16 n=3.206:17 it 
+  [D=0.1000 AR=0.501] lc=0.01191 N_tet=1866 N=4056 | shifted 52s (op 45s, solve 6s, post 0s) n=2.589:14 n=2.898:16 n=3.206:18 it 
+  [D=0.1000 AR=1.995] lc=0.00946 N_tet=3220 N=6961 | shifted 84s (op 77s, solve 7s, post 0s) n=2.589:14 n=2.898:16 n=3.206:19 it
+
+Phase 3 acceptance: benchmarks/cas_v2/spheroid_sweep_h5.jl, laptop, 2026-11-18 (fixed 2 x 2 x 3 grid, two wavelengths, default tolerance 1e-5)
+
+4. Default mode: driver and src of e74a75f (A) against this branch (B). Limit 0.
+  wl_0p638/S_fw_phi_im    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p638/S_fw_phi_re    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p638/S_fw_theta_im  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p638/S_fw_theta_re  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p638/converged      identical
+  wl_0p834/S_fw_phi_im    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p834/S_fw_phi_re    max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p834/S_fw_theta_im  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p834/S_fw_theta_re  max |A-B| = 0.000e+00   relative to max|S| = 0.000e+00
+  wl_0p834/converged      identical
+attributes that differ (run attributes created_utc, git_sha, git_dirty excluded): 0
+largest relative difference: 0.000e+00 (limit 0.0e+00)
+PASS
+
+5. Default mode (A) against --shifted-ri (B), both at the driver's tolerance 1e-5. Limit 1e-3.
+  attr /shifted_ri only in B
+  attr provenance/config_hash differs: "39ca499fe7c4b7160e45d140ee0538db66d8a191a27fb7fd642a5bbee3fcdb69" | "63bca3eb4a35fc3c200dc6dd703ca825865ac51180122cd0b31b7a691261498f"
+  wl_0p638/S_fw_phi_im    max |A-B| = 1.105e-06   relative to max|S| = 1.517e-06
+  wl_0p638/S_fw_phi_re    max |A-B| = 1.019e-06   relative to max|S| = 1.400e-06
+  wl_0p638/S_fw_theta_im  max |A-B| = 1.105e-06   relative to max|S| = 1.517e-06
+  wl_0p638/S_fw_theta_re  max |A-B| = 1.019e-06   relative to max|S| = 1.400e-06
+  wl_0p638/converged      identical
+  wl_0p834/S_fw_phi_im    max |A-B| = 3.961e-07   relative to max|S| = 9.320e-07
+  wl_0p834/S_fw_phi_re    max |A-B| = 5.171e-07   relative to max|S| = 1.217e-06
+  wl_0p834/S_fw_theta_im  max |A-B| = 3.961e-07   relative to max|S| = 9.320e-07
+  wl_0p834/S_fw_theta_re  max |A-B| = 5.171e-07   relative to max|S| = 1.217e-06
+  wl_0p834/converged      identical
+attributes that differ (run attributes created_utc, git_sha, git_dirty excluded): 2
+largest relative difference: 1.517e-06 (limit 1.0e-03)
+PASS
+
+Wall time of the whole sweep on the laptop (6 threads, other jobs running): default 22.4 min, --shifted-ri 11.2 min.

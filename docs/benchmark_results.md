@@ -28,6 +28,7 @@ Per-section quick navigation:
 | [§8](#8-doublet-mesh-refinement-and-aim-memory) | Doublet ℓ_c convergence + memory | self |
 | [§9](#9-per-dof-accuracy-vs-block-dda_py) | Per-DoF accuracy vs DDA | analytical (Mie) |
 | [§10](#10-paper-production-ℓ_c-convergence-protocol) | Paper-production ℓ_c protocol | self |
+| [§11](#11-shifted-block-gmres-for-refractive-index-sweeps) | Shifted block GMRES for refractive-index sweeps | existing solver |
 
 Each subsection's first line gives the driver script; reproduction
 is `julia --project=. <script>` unless noted otherwise.
@@ -56,6 +57,15 @@ $$
 Cross-section errors are
 $|\Delta C| / C^\text{ref}$. "Phase err." is
 $\arg(S^\text{VIEM} / S^\text{ref})$.
+
+**Backward amplitude.** Since v0.8.0 (2026-11-19) `S_bk` is
+$(-S_{11} + S_{22})/2$ at the backward direction, the corrected Eq. (28)
+of Moteki and Adachi (2024). The benchmarks of §1–§10 were run with the
+printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The VIEM
+value and its reference changed by the same factor, so the relative and
+phase errors of `S_bk` reported below are unchanged. Absolute `S_bk`
+values in the stored result files of these benchmarks are $\sqrt{2}$
+times those of the present code.
 
 ---
 
@@ -107,8 +117,12 @@ $$
 $$
 S_\text{fw,mean}^\text{PCAS} = +0.03877 + 0.01397\,i,
 \qquad
-S_\text{bk}^\text{OCBS} = +0.05946 + 0.01907\,i.
+S_\text{bk}^\text{OCBS} = +0.04204 + 0.01348\,i.
 $$
+
+The value of $S_\text{bk}^\text{OCBS}$ follows the corrected definition
+(§0). With the printed equation used when this benchmark was run it was
+$+0.05946 + 0.01907\,i$.
 
 Errors below are relative to Mie evaluated at the actual mesh
 volume-equivalent radius (so residual mesh-volume bias does not
@@ -671,6 +685,172 @@ they carry no benchmark interpretation beyond the per-row
 observable values; the convergence rates are read off the paper
 figure (VIEM $\mathcal O(h^2)$ vs DDA $\mathcal O(h^{0.5})$
 contrast — see §9).
+
+---
+
+## 11. Shifted block GMRES for refractive-index sweeps
+
+Drivers: [benchmarks/shifted/run_shift_scaling.jl](../benchmarks/shifted/run_shift_scaling.jl)
+(speed-up), [benchmarks/shifted/p3_compare_h5.jl](../benchmarks/shifted/p3_compare_h5.jl)
+(sweep-driver output), `benchmarks/shifted/p0_*.jl` (feasibility).
+Raw results: `benchmarks/shifted/results/`.
+Formulation: `docs/theory_note.pdf`, Sec. 11.
+
+For a homogeneous isotropic particle,
+$\mathbf{Z}(m_p) = (\kappa/\epsilon_\text{bg})(\tau\mathbf{M} - \mathbf{K})$
+with $\tau = 1/((m_p/m_m)^2 - 1)$. With right preconditioning by
+$\mathbf{M}^{-1}$ all refractive indices are shifts of
+$\mathbf{C} = \mathbf{K}\mathbf{M}^{-1}$ and are solved in one block
+Arnoldi process (`solve_cas_v2_orientations_shifted`, `--shifted-ri` in
+the sweep drivers).
+
+### 11.1 Factorisation of the impedance matrix
+
+Unit sphere test mesh (333 tetrahedra, 765 unknowns, 198 half-SWG
+boundary functions), $k_0 = 2$,
+$\epsilon_p \in \{2.25 + 0.03i,\ 9 + i,\ -12.1 + 1.22i\}$,
+$\epsilon_\text{bg} \in \{1,\ 1.7689\}$. $\mathbf{K}$ is recovered
+from each $\mathbf{Z}$ and compared in relative Frobenius norm.
+
+| Operator | Largest difference of $\mathbf{K}$ between two $\epsilon_p$ |
+| --- | --- |
+| Dense $\mathbf{Z}$ (with and without symmetrisation) | 6.4e-15 |
+| AIM operator, applied to a random block | 3.7e-15 |
+
+### 11.2 Right preconditioning with the mass matrix
+
+Block-GMRES iterations to tol = 1e-5, $\lambda_0 = 0.638$ μm, particle
+in vacuum, default mesh rule. The oblate spheroid has $b/c = 3$.
+
+| $m_p$ | Shape | $a_\text{eq}$ (μm) | $L$ | $\mathbf{Z}$ | $\mathbf{Z}\mathbf{M}^{-1}$ |
+| --- | --- | --- | --- | --- | --- |
+| 1.5 + 0.01i | sphere | 0.1 | 5 | 24 | 7 |
+| 1.5 + 0.01i | sphere | 0.2 | 5 | 27 | 11 |
+| 1.5 + 0.01i | oblate | 0.1 | 5 | 30 | 7 |
+| 1.5 + 0.01i | oblate | 0.2 | 5 | 31 | 10 |
+| 2.0 | sphere | 0.1 | 5 | 24 | 11 |
+| 2.0 | sphere | 0.2 | 5 | 34 | 20 |
+| 2.0 | oblate | 0.1 | 5 | 40 | 15 |
+| 2.0 | oblate | 0.2 | 5 | 44 | 20 |
+| 2.9 + 0.1i | sphere | 0.1 | 5 | 36 | 21 |
+| 2.9 + 0.1i | oblate | 0.1 | 5 | 41 | 22 |
+| 0.17525 + 3.4830i | sphere | 0.1 | 1 | > 200 (residual 6.3e-4) | 176 |
+| 0.17525 + 3.4830i | sphere | 0.1 | 64 | 105 | 47 |
+
+Cost of $\mathbf{M}^{-1}$ (sphere, $a_\text{eq} = 0.4$ μm, 8 cores of a
+Xeon E5-2620 v4, block of $L = 13$ columns):
+
+| $N$ | Cholesky factorisation (s) | Factor (GB) | Cholesky solve (s) | Jacobi-CG to 1e-13 (s) | Block product with $\mathbf{K}$ (s) |
+| --- | --- | --- | --- | --- | --- |
+| 10,966 | 0.03 | 0.01 | 0.020 | 0.052 | 0.32 |
+| 98,958 | 0.89 | 0.21 | 0.30 | 0.97 | 8.2 |
+| 398,808 | 12.1 | 1.81 | 1.72 | 6.6 | 8.9 |
+
+### 11.3 Measured speed-up
+
+Oblate spheroid, $b/c = 2$, in vacuum at $\lambda_0 = 0.638$ μm, mesh
+$\ell_c = \min(\lambda_0/(10\,|m_p|_\max),\ 0.3c)$, tol = 1e-5,
+8 threads on one processor of `supermicro-647` (2 × Xeon E5-2620 v4),
+2026-11-18. Iron oxide: $N_m$ equispaced indices from $2.7 + 0.1i$ to
+$3.1 + 0.1i$. Dielectric: from 1.35 to 1.70.
+
+- **B**: one `solve_cas_v2_orientations` (`:aim_gmres`) per index. Mesh,
+  AIM projection and mass matrix shared. Operator rebuilt per index.
+  This is the default mode of `ironoxide_sweep_h5.jl`.
+- **C**: one `solve_cas_v2_orientations_shifted` for all indices
+  (`--shifted-ri`).
+
+$n^Z$ and $n$ are the ranges of the iteration counts of B and C.
+$T_B$ and $T_C$ are total wall times including the shared set-up and
+the observables. The last column is the largest difference of the
+forward amplitudes of B and C, relative to the larger amplitude.
+
+| Family | $D_{ve}$ (μm) | $N$ | $L$ | $N_m$ | $n^Z$ | $n$ | $\sum n^Z / \max n$ | $T_B$ (s) | $T_C$ (s) | $T_B / T_C$ | B vs C |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| iron oxide | 0.35 | 25680 | 5 | 1 | 61 | 44 | 1.4 | 145 | 139 | 1.0 | 3.2e-06 |
+| | | | | 3 | 46–61 | 32–44 | 3.6 | 422 | 141 | 3.0 | 3.2e-06 |
+| | | | | 10 | 46–61 | 32–44 | 12.1 | 1400 | 141 | 9.9 | 3.2e-06 |
+| | | | | 30 | — | 32–44 | — | — | 142 | — | — |
+| iron oxide | 0.35 | 25680 | 13 | 1 | 47 | 33 | 1.4 | 159 | 151 | 1.1 | 1.8e-06 |
+| | | | | 3 | 39–47 | 26–33 | 3.9 | 461 | 154 | 3.0 | 1.8e-06 |
+| | | | | 10 | 39–47 | 26–33 | 12.8 | 1534 | 154 | 10.0 | 2.0e-06 |
+| | | | | 30 | 39–47 | 26–33 | 38.5 | 4605 | 158 | 29.1 | 2.1e-06 |
+| iron oxide | 0.35 | 25680 | 64 | 1 | 37 | 25 | 1.5 | 217 | 191 | 1.1 | 7.1e-07 |
+| | | | | 3 | 32–37 | 20–25 | 4.1 | 622 | 192 | 3.2 | 7.1e-07 |
+| | | | | 10 | 32–37 | 20–25 | 13.6 | 2055 | 197 | 10.4 | 7.1e-07 |
+| | | | | 30 | — | 20–25 | — | — | 211 | — | — |
+| iron oxide | 0.60 | 124049 | 13 | 1 | 90 | 68 | 1.3 | 1072 | 991 | 1.1 | 4.2e-06 |
+| | | | | 3 | 64–90 | 47–68 | 3.4 | 3029 | 992 | 3.1 | 4.2e-06 |
+| | | | | 10 | — | 47–68 | — | — | 996 | — | — |
+| | | | | 30 | — | 47–68 | — | — | 1014 | — | — |
+| dielectric | 0.60 | 21903 | 13 | 1 | 31 | 16 | 1.9 | 133 | 126 | 1.1 | 1.7e-06 |
+| | | | | 3 | 28–31 | 10–16 | 5.5 | 394 | 126 | 3.1 | 1.7e-06 |
+| | | | | 10 | 28–31 | 10–16 | 18.3 | 1294 | 126 | 10.3 | 1.7e-06 |
+| | | | | 30 | 28–31 | 10–16 | 54.8 | 3895 | 130 | 30.0 | 1.7e-06 |
+
+A dash marks a combination for which method B was not run.
+
+Breakdown of $T_C$ at $N_m = 30$ (seconds) and peak RSS of the process:
+
+| Family | $D_{ve}$ (μm) | $N$ | $L$ | Shared set-up | Operator | Cholesky | Krylov | Residual check | Observables | Total | Observables (%) | Peak RSS (GB) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| iron oxide | 0.35 | 25680 | 5 | 2.6 | 124.2 | 0.10 | 12.5 | 0.2 | 1.2 | 142.3 | 0.9 | 4.0 |
+| iron oxide | 0.35 | 25680 | 13 | 2.6 | 130.1 | 0.08 | 20.3 | 0.5 | 2.4 | 158.4 | 1.5 | 4.5 |
+| iron oxide | 0.35 | 25680 | 64 | 2.6 | 124.5 | 0.12 | 63.7 | 2.1 | 7.3 | 210.9 | 3.4 | 4.9 |
+| iron oxide | 0.60 | 124049 | 13 | 7.3 | 709.2 | 0.92 | 269.1 | 3.1 | 8.7 | 1014.1 | 0.9 | 9.2 |
+| dielectric | 0.60 | 21903 | 13 | 2.6 | 114.5 | 0.07 | 8.5 | 0.5 | 2.1 | 130.0 | 1.6 | 4.3 |
+
+Findings:
+
+- $T_C$ grows by 10 % ($L = 64$) or by 5 % or less (other cases) between
+  $N_m = 1$ and $N_m = 30$. The gain over B is close to $N_m$.
+- The operator build is 59–88 % of $T_C$. It is the term that B pays
+  $N_m$ times.
+- The observables take 3.4 % of $T_C$ or less at $N_m = 30$. Projecting
+  the far-field functionals onto the Krylov basis, as block-DDA_Py
+  does, is not needed at these sizes.
+- Method P (B with `precond = :mass_right`, run for $N_m = 3$) has the
+  same iteration counts as C for every index. Its forward amplitudes
+  differ from those of C by at most 1.3e-14. It is 1.02–1.13 times
+  faster than B.
+- For iron oxide at $D_{ve} = 0.60$ μm, 30 separate preconditioned
+  solves would need 1723 block iterations instead of 68. At the measured
+  3.9 s per iteration this is about 6800 s, against 269 s for the shared
+  process.
+- The recomputed residual of the slowest index was below tol in all runs.
+
+### 11.4 Sweep drivers with `--shifted-ri`
+
+Record: [benchmarks/shifted/results/p3_driver_check.txt](../benchmarks/shifted/results/p3_driver_check.txt).
+Differences are relative to the largest $|S|$ of the wavelength group.
+
+| Driver | Comparison | Largest difference |
+| --- | --- | --- |
+| `ironoxide_sweep_h5.jl` | default mode, before (e74a75f) vs after | 0 (numbers, attributes and config hash) |
+| `ironoxide_sweep_h5.jl` | default vs `--shifted-ri`, `--tol 1e-8` | 3.9e-10 |
+| `ironoxide_sweep_h5.jl` | same with `--triaxial 1.5 --n-psi 2` | 2.8e-10 |
+| `spheroid_sweep_h5.jl` | default mode, before (e74a75f) vs after | 0 (numbers, attributes and config hash) |
+| `spheroid_sweep_h5.jl` | default vs `--shifted-ri`, tol 1e-5 | 1.5e-06 |
+| `viem_results/run_viem.jl` | default mode, before (8dfceee) vs after | 0 (all datasets of `/target/simulated_data`) |
+| `viem_results/run_viem.jl` | default vs `--shifted-ri`, tol 1e-8 | 7.8e-10 |
+| `viem_results/run_viem.jl` | default vs `--shifted-ri`, tol 1e-5 | 1.5e-06 |
+
+Iron-oxide settings: hematite, 2 sizes (0.05 and 0.10 μm), 2 aspect
+ratios, 3 real indices, 2 wavelengths, $N$ = 4056–7079. One row of 3
+indices took 150–300 s in the default mode and 50–90 s with
+`--shifted-ri` (4 threads, `supermicro-647`).
+
+`run_viem.jl` settings
+([run_viem_shifted_check.txt](../benchmarks/shifted/results/run_viem_shifted_check.txt)):
+2 wavelengths, refractive indices 1.5, 1.6, 1.7 + 0.02i and one
+anisotropic entry (1.5, 1.5, 1.6), one spheroid ($L = 3$ solved) and one
+triaxial ellipsoid ($L = 12$). The differences are relative to the
+largest magnitude of each dataset and cover `C_abs`, `C_ext` and the
+three amplitudes. The three isotropic entries of a slot are solved in
+one batch and the anisotropic entry by the existing solver. The sum of
+`t_total_s` over the 16 conditions was 1787 s in the default mode and
+769 s with `--shifted-ri` (tol 1e-5, laptop, 4 threads, other runs in
+parallel).
 
 ---
 

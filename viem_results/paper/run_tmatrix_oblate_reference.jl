@@ -31,7 +31,7 @@
 #       S_fw_φ = S22(0) − i S21(0)
 #     OCBS backward observable (docs/theory_note.tex Eq. eq:S-bk):
 #       S_bk_θ = S11(π) + i S12(π);  S_bk_φ = S22(π) − i S21(π)
-#       S_bk = (−S_bk_θ + S_bk_φ) / sqrt(2)
+#       S_bk = (−S_bk_θ + S_bk_φ) / 2
 #            = (−S11 + S22 − i S12 − i S21)(π) / sqrt(2)
 #     (BH83 → MI02 → CAS-v2; Mishchenko 2000)
 #   * Polarization-state-independent observables:
@@ -104,8 +104,12 @@ end
 #  OCBS backward observable (docs/theory_note.tex Eq. eq:S-bk):
 #       S_bk_θ = S₁₁(π) + i S₁₂(π)
 #       S_bk_φ = S₂₂(π) − i S₂₁(π)
-#       S_bk   = (−S_bk_θ + S_bk_φ) / sqrt(2)
-#              = (−S₁₁ + S₂₂ − i S₁₂ − i S₂₁)(π) / sqrt(2)
+#       S_bk   = (−S_bk_θ + S_bk_φ) / 2
+#              = (−S₁₁ + S₂₂ − i S₁₂ − i S₂₁)(π) / 2
+#  NOTE 2026-11-19: the factor is 1/2, the corrected Eq. (28) of Moteki and
+#  Adachi (2024) given in its erratum. Until this date the script used
+#  1/sqrt(2), the factor of the printed equation, and the stored
+#  tmm_oblate_*.hdf5 files hold S_bk values sqrt(2) times the present ones.
 #  NOTE 2026-04-29: previous version used the *forward-mean* combination
 #  (S₁₁+S₂₂+i S₁₂−i S₂₁)/√2 evaluated at the backward angle, which is the
 #  LCP→LCP back-channel — NOT the OCBS observable defined in theory_note.
@@ -133,7 +137,7 @@ function cas_v2_observables(S_fwd::AbstractMatrix, S_bwd::AbstractMatrix)
     S21_bk = -S_bwd[2,1]; S22_bk = -S_bwd[2,2]
     S_bk_theta = S11_bk + 1im * S12_bk
     S_bk_phi   = S22_bk - 1im * S21_bk
-    S_bk       = (-S_bk_theta + S_bk_phi) / sqrt(2)
+    S_bk       = (-S_bk_theta + S_bk_phi) / 2
 
     return S_fw_theta, S_fw_phi, S_bk
 end
@@ -271,7 +275,7 @@ function main()
         attrs(g)["units"]           = "C:[um^2], S:[um], beta:[rad], a_eq:[um]"
         attrs(g)["S_definition"]    = ("S_fw_θ = S11(0)+i·S12(0), " *
                                        "S_fw_φ = S22(0)−i·S21(0), " *
-                                       "S_bk = (−S_bk_θ+S_bk_φ)/sqrt(2) " *
+                                       "S_bk = (−S_bk_θ+S_bk_φ)/2 " *
                                        "where S_bk_θ = S11(π)+i·S12(π), S_bk_φ = S22(π)−i·S21(π) " *
                                        "(OCBS, docs/theory_note.tex Eq. eq:S-bk); " *
                                        "amplitude_matrix(...) S = ((S11,S12),(S21,S22)) basis (θ̂,φ̂).")

@@ -14,7 +14,9 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-04-24 (corresponds to block-VIEM.jl v0.7.7)}
+\date{Last updated: 2026-11-19 (Sec.~\ref{sec:shifted-gmres} added and
+Sec.~\ref{sec:S-bk} corrected in block-VIEM.jl v0.8.0; the other
+sections correspond to v0.7.7)}
 
 \begin{document}
 \maketitle
@@ -99,7 +101,10 @@ implemented in \texttt{block-VIEM.jl}, covering:
   \item the HDF5 output format for spheroid parameter sweeps, bit
         compatible with the \texttt{block-DDA\_Py} schema consumed by
         \texttt{build\_spheroid\_lut.py}
-        (Sec.~\ref{sec:spheroid-sweep-io}).
+        (Sec.~\ref{sec:spheroid-sweep-io}),
+  \item the shifted block GMRES that solves a sweep of the particle
+        refractive index with one Krylov process
+        (Sec.~\ref{sec:shifted-gmres}).
 \end{enumerate}
 
 \paragraph{Notation and conventions.}
@@ -1217,13 +1222,47 @@ instrument~\cite{Moteki2024} is the linear combination
 \begin{equation}
   S_{\text{bk}}^{\text{OCBS}}
     = \frac{-\,S_{\text{bk},\theta}^{\text{OCBS}}
-            + S_{\text{bk},\phi}^{\text{OCBS}}}{\sqrt{2}}.
+            + S_{\text{bk},\phi}^{\text{OCBS}}}{2}.
   \label{eq:S-bk}
 \end{equation}
-As shown in~\cite{Moteki2024}, combining the two channels with this
-sign pattern cancels the off-diagonal Mishchenko elements
-$S_{12}(\pi)+S_{21}(\pi)=0$ and produces a single, orientation-stable
-scalar observable.
+In terms of the amplitude-matrix elements at the backward direction the
+two channels are
+$S_{\text{bk},\theta}^{\text{OCBS}} = S_{11}(\pi) + i\,S_{12}(\pi)$ and
+$S_{\text{bk},\phi}^{\text{OCBS}} = S_{22}(\pi) - i\,S_{21}(\pi)$.
+The backscattering theorem $S_{21}(\pi) = -S_{12}(\pi)$ cancels the
+off-diagonal elements in \eqref{eq:S-bk}, so that
+\begin{equation}
+  S_{\text{bk}}^{\text{OCBS}}
+    = \frac{1}{2}\,\bigl[-S_{11}(\pi) + S_{22}(\pi)\bigr].
+  \label{eq:S-bk-amplitude-matrix}
+\end{equation}
+This is the backward amplitude $S_{\text{bak}}$ of the CAS-v2 protocol in
+the corrected form of Eq.~(28) of Ref.~\cite{Moteki2024}, which is given
+in the erratum to that paper~\cite{Moteki2024Erratum}.
+
+The factor $1/2$ has the following origin.
+The quarter-wave plate in the return path has its axes at \ang{45} to
+the linear polarisations.
+Each of the two backscattered components therefore reaches the output
+polarisation with the amplitude factor $1/\sqrt{2}$.
+Together with the factor $1/\sqrt{2}$ of the circularly polarised
+incident wave this gives $1/2$.
+The printed Eq.~(28) of Ref.~\cite{Moteki2024} adds the two components
+at full amplitude and has $1/\sqrt{2}$ instead.
+For a sphere $S_{12} = S_{21} = 0$ and $S_{22}(\pi) = -S_{11}(\pi)$,
+so \eqref{eq:S-bk-amplitude-matrix} reduces to
+$S_{\text{bk}}^{\text{OCBS}} = S_{22}(\pi)$.
+In the Rayleigh limit $S_{\text{bk}}^{\text{OCBS}}$ equals the forward
+amplitude.
+
+Versions of block-VIEM.jl up to 0.7.9 used the printed equation.
+Their $S_{\text{bk}}^{\text{OCBS}}$, including the Mie, MSTM and
+T-matrix reference values, is $\sqrt{2}$ times the present one.
+The phase is the same, and so is the ratio of a VIEM value to its
+reference value.
+The stored files under \texttt{viem\_results/paper/} were produced with
+the printed equation and are kept as produced.
+block-DDA\_Py follows the corrected equation from v0.8.2.
 
 %======================================================================
 \section{Validation}
@@ -1671,6 +1710,604 @@ $\sim 5\times 10^{-10}$, confirming that the block iteration preserves
 orientation symmetry to the solver tolerance.
 
 %======================================================================
+\section{Shifted Block GMRES for Refractive-Index Sweeps}
+\label{sec:shifted-gmres}
+%======================================================================
+
+A lookup table of scattering observables requires the solution of
+\eqref{eq:block-system} for many values of the particle refractive
+index $m_p$ at a fixed shape, size and wavelength.
+For a homogeneous isotropic particle these systems are shifts of one
+operator.
+This section describes how block-VIEM.jl solves all of them with a
+single block Arnoldi process.
+The method combines the shifted-Krylov idea that
+Ref.~\cite{Argentin2026} applied to the discrete dipole approximation
+with the multi-orientation block GMRES of Ref.~\cite{Moteki2026}.
+The solver is \texttt{block\_gmres\_shifted}
+(\texttt{src/block\_krylov.jl}).
+The sweep function is \texttt{solve\_cas\_v2\_orientations\_shifted}
+(\texttt{src/shifted\_sweep.jl}).
+Both are available from v0.8.0.
+
+%----------------------------------------------------------------------
+\subsection{Shift structure of the impedance matrix}
+\label{sec:shift-structure}
+%----------------------------------------------------------------------
+
+For a homogeneous isotropic particle the impedance matrix is
+\eqref{eq:Z-decomposition},
+$\mathbf{Z} = \epsilon_p^{-1}\mathbf{M}
+ - (\kappa/\epsilon_{\text{bg}})\,\mathbf{K}$.
+The mass matrix $\mathbf{M}$ depends on the mesh only.
+The radiation matrix $\mathbf{K}$ contains the Green's function at the
+background wavenumber $k_0$ and no material constant of the particle.
+This holds for the bulk term $K^{A}$ and for the surface terms
+$K^{B}$, $K^{C}$ and $K^{D}$ of Sec.~\ref{sec:weakening}, because each of
+them carries $\kappa$ as an overall factor.
+Define the shift
+\begin{equation}
+  \tau = \frac{\epsilon_{\text{bg}}}{\epsilon_p - \epsilon_{\text{bg}}}
+       = \frac{1}{m_r^{2} - 1},
+  \qquad m_r = \frac{m_p}{m_m}.
+  \label{eq:shift-tau}
+\end{equation}
+Since $\epsilon_p^{-1} = \kappa\tau/\epsilon_{\text{bg}}$, the
+impedance matrix factors as
+\begin{equation}
+  \mathbf{Z}(m_p)
+    = \frac{\kappa}{\epsilon_{\text{bg}}}
+      \bigl(\tau\,\mathbf{M} - \mathbf{K}\bigr).
+  \label{eq:shift-structure}
+\end{equation}
+The right-hand side $\mathbf{B}$ of \eqref{eq:block-system} is the
+projection of the incident plane waves and does not depend on $m_p$.
+A change of refractive index therefore changes only the scalar $\tau$
+in front of $\mathbf{M}$ and the scalar factor of the solution.
+In the discrete dipole approximation the corresponding shift multiplies
+the identity matrix~\cite{Argentin2026}.
+Here it multiplies the mass matrix, so one more step is needed to
+reach the standard form.
+
+The factorisation \eqref{eq:shift-structure} was checked numerically on
+a coarse sphere mesh with half-SWG boundary functions (765 unknowns).
+The matrix $\mathbf{K}$ was recovered from $\mathbf{Z}$ assembled for
+$\epsilon_p = 2.25 + 0.03i$, $9 + i$ and $-12.1 + 1.22i$.
+The three results agree to \num{6.4e-15} in relative Frobenius norm for
+the dense matrix and to \num{3.7e-15} for the AIM operator.
+
+%----------------------------------------------------------------------
+\subsection{Right preconditioning with the mass matrix}
+\label{sec:shift-precond}
+%----------------------------------------------------------------------
+
+Let $\mathbf{Y} = (\kappa/\epsilon_{\text{bg}})\,\mathbf{M}\mathbf{X}$.
+With \eqref{eq:shift-structure} the system
+$\mathbf{Z}\mathbf{X} = \mathbf{B}$ becomes
+\begin{equation}
+  \bigl(\tau\,\mathbf{I} - \mathbf{C}\bigr)\mathbf{Y} = \mathbf{B},
+  \qquad
+  \mathbf{C} = \mathbf{K}\mathbf{M}^{-1},
+  \qquad
+  \mathbf{X} = \frac{\epsilon_{\text{bg}}}{\kappa}\,
+               \mathbf{M}^{-1}\mathbf{Y}.
+  \label{eq:shifted-system}
+\end{equation}
+The operator $\mathbf{C}$ is the same for all refractive indices.
+The residuals of the two systems are equal,
+\begin{equation}
+  \mathbf{B} - \mathbf{Z}\mathbf{X}
+    = \mathbf{B} - \bigl(\tau\,\mathbf{I} - \mathbf{C}\bigr)\mathbf{Y}.
+  \label{eq:shift-residual}
+\end{equation}
+GMRES applied to \eqref{eq:shifted-system} therefore minimises the
+residual of the original system, and the convergence criterion
+$\norm{\mathbf{B} - \mathbf{Z}\mathbf{X}}_F / \norm{\mathbf{B}}_F
+ < \text{tol}$ of Ref.~\cite{Moteki2026} is kept.
+The alternative $\mathbf{M}^{-1}\mathbf{K}$ (left preconditioning)
+minimises the residual multiplied by $\mathbf{M}^{-1}$ instead.
+In the tests of Table~\ref{tab:shift-precond} the two variants needed
+the same number of iterations to within two.
+
+The mass matrix is real, sparse, symmetric and positive definite.
+Its sparse Cholesky factor is computed once per mesh.
+Each application of $\mathbf{M}^{-1}$ to a complex block solves for the
+real and imaginary parts separately.
+For $N = \num{398808}$ unknowns the factorisation took
+\SI{12}{\second} and the factor occupies \SI{1.8}{\giga\byte}.
+One application to $L = 13$ columns took \SI{1.7}{\second}, against
+\SI{8.9}{\second} for one block product with $\mathbf{K}$ (8 cores of
+an Intel Xeon E5-2620~v4).
+A Jacobi-preconditioned conjugate-gradient solve to a relative residual
+of $10^{-13}$ needed about 50 iterations and was 2.5 to 4 times slower.
+
+The preconditioning also reduces the number of iterations of a single
+solve.
+Table~\ref{tab:shift-precond} compares block GMRES on $\mathbf{Z}$ with
+block GMRES on $\mathbf{Z}\mathbf{M}^{-1}$.
+The count drops to between 0.23 and 0.59 of the unpreconditioned one.
+For the gold sphere with one orientation the unpreconditioned solver
+did not reach the tolerance within 200 iterations.
+This preconditioner is available for ordinary solves as the option
+\texttt{precond = :mass\_right} of
+\texttt{solve\_cas\_v2\_orientations}.
+The default of that function is unchanged.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Block-GMRES iterations to
+           $\text{tol} = 10^{-5}$ without and with right
+           preconditioning by the mass matrix
+           ($\lambda_0 = \SI{0.638}{\micro\meter}$, particle in
+           vacuum, default mesh rule).
+           The oblate spheroid has $b/c = 3$.
+           $a_{\text{eq}}$ is the volume-equivalent radius.}
+  \label{tab:shift-precond}
+  \vspace{0.6ex}
+  \begin{tabular}{llrrrr}
+    \toprule
+    $m_p$ & shape & $a_{\text{eq}}$ (\si{\micro\meter}) & $L$
+      & $\mathbf{Z}$ & $\mathbf{Z}\mathbf{M}^{-1}$ \\
+    \midrule
+    $1.5 + 0.01i$ & sphere & 0.1 & 5 & 24 & 7 \\
+    $1.5 + 0.01i$ & sphere & 0.2 & 5 & 27 & 11 \\
+    $1.5 + 0.01i$ & oblate & 0.1 & 5 & 30 & 7 \\
+    $1.5 + 0.01i$ & oblate & 0.2 & 5 & 31 & 10 \\
+    $2.0$         & sphere & 0.1 & 5 & 24 & 11 \\
+    $2.0$         & sphere & 0.2 & 5 & 34 & 20 \\
+    $2.0$         & oblate & 0.1 & 5 & 40 & 15 \\
+    $2.0$         & oblate & 0.2 & 5 & 44 & 20 \\
+    $2.9 + 0.1i$  & sphere & 0.1 & 5 & 36 & 21 \\
+    $2.9 + 0.1i$  & oblate & 0.1 & 5 & 41 & 22 \\
+    $0.17525 + 3.4830i$ & sphere & 0.1 & 1  & $>200$ & 176 \\
+    $0.17525 + 3.4830i$ & sphere & 0.1 & 64 & 105 & 47 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%----------------------------------------------------------------------
+\subsection{Block Arnoldi process and the iterate of each shift}
+\label{sec:shift-arnoldi}
+%----------------------------------------------------------------------
+
+Let $\mathbf{B} = \mathbf{V}_1\boldsymbol{\Lambda}$ be the thin QR
+factorisation of the right-hand side.
+The block Arnoldi process on $\mathbf{C}$ gives, after $k$ steps,
+\begin{equation}
+  \mathbf{C}\,\mathcal{V}_k = \mathcal{V}_{k+1}\,\underline{\mathbf{H}}_k,
+  \qquad
+  \mathcal{V}_k = [\mathbf{V}_1|\cdots|\mathbf{V}_k],
+  \label{eq:shift-arnoldi}
+\end{equation}
+with the $(k+1)L \times kL$ block Hessenberg matrix
+$\underline{\mathbf{H}}_k$.
+The block Krylov space of $\tau\,\mathbf{I} - \mathbf{C}$ from
+$\mathbf{B}$ does not depend on $\tau$, and
+\begin{equation}
+  \bigl(\tau\,\mathbf{I} - \mathbf{C}\bigr)\mathcal{V}_k
+    = \mathcal{V}_{k+1}
+      \bigl(\tau\,\underline{\mathbf{I}}_k - \underline{\mathbf{H}}_k\bigr),
+  \label{eq:shift-invariance}
+\end{equation}
+where $\underline{\mathbf{I}}_k$ is the $kL \times kL$ identity matrix
+with $L$ zero rows appended.
+One basis therefore serves all shifts.
+The GMRES iterate of shift $\tau_s$ is
+$\mathbf{Y}_s = \mathcal{V}_k\,\mathbf{y}_s$ with
+\begin{equation}
+  \mathbf{y}_s
+    = \operatorname*{arg\,min}_{\mathbf{y}}
+      \bigl\|\mathbf{E}_1\boldsymbol{\Lambda}
+        - \bigl(\tau_s\,\underline{\mathbf{I}}_k
+                - \underline{\mathbf{H}}_k\bigr)\mathbf{y}\bigr\|_F .
+  \label{eq:shift-lsq}
+\end{equation}
+Each block iteration costs one block product with $\mathbf{C}$,
+whatever the number of shifts $N_m$.
+
+The small problems \eqref{eq:shift-lsq} are handled by an incremental
+block-Givens QR factorisation, one per shift, as in
+\texttt{block\_gmres}.
+A new block column of $\tau_s\,\underline{\mathbf{I}}_k
+- \underline{\mathbf{H}}_k$ is first transformed by the stored
+$2L \times 2L$ rotations of that shift.
+A QR factorisation of its last $2L \times L$ block gives the next
+rotation.
+The Frobenius norm of the last block of the transformed right-hand
+side is the residual norm of the shift.
+A shift is frozen at the first iteration where its relative residual
+is below the tolerance.
+The process stops when all shifts are frozen or when the iteration cap
+is reached.
+Shifts that have not converged by then are reported as such, with
+their minimum-residual iterate.
+
+The triangular factor of a shift is not stored during the iteration.
+It is rebuilt from the shared Hessenberg columns and the rotations of
+the shift when the shift is frozen.
+The memory per shift is then $k$ rotations of $4L^{2}$ complex numbers
+each, instead of a triangular matrix of order $kL$.
+The basis takes $16\,N L (k+1)$ bytes as in the unshifted solver.
+
+%----------------------------------------------------------------------
+\subsection{Radiation operator from the AIM operator}
+\label{sec:shift-k0}
+%----------------------------------------------------------------------
+
+The AIM operator of Sec.~\ref{sec:aim} is built once, for the
+refractive index of largest $\abs{\kappa}$ in the list.
+Its far-field part and its near-field precorrection both store
+$\kappa\,\mathbf{K}$.
+The function \texttt{aim\_K0\_mvp} applies these two parts and divides
+by $\kappa$,
+\begin{equation}
+  \mathbf{K}\mathbf{X}
+    = \frac{1}{\kappa_{\text{ref}}}
+      \bigl[\mathbf{K}_{\text{AIM}}(\mathbf{X})
+            + \mathbf{K}_{\text{near}}\mathbf{X}\bigr].
+  \label{eq:shift-k0}
+\end{equation}
+No subtraction of the mass term is involved, so there is no loss of
+digits.
+The operator build is the dominant set-up cost of the VIEM
+(Sec.~\ref{sec:shift-cost}), and it is done once per mesh instead of
+once per refractive index.
+
+%----------------------------------------------------------------------
+\subsection{Solutions and observables}
+\label{sec:shift-observables}
+%----------------------------------------------------------------------
+
+After the Arnoldi process the solutions are formed one refractive index
+at a time,
+$\mathbf{X}_s = (\epsilon_{\text{bg}}/\kappa_s)\,
+ \mathbf{M}^{-1}\mathcal{V}_{k_s}\mathbf{y}_s$,
+and passed to the existing observable routines of
+Sec.~\ref{sec:observables} with $\epsilon_p = \epsilon_{p,s}$.
+The definitions of the observables are untouched, and only one
+solution block is held in memory at a time.
+As a guard against loss of orthogonality in a long Arnoldi process the
+residual $\norm{\mathbf{B} - \mathbf{Z}_s\mathbf{X}_s}_F /
+\norm{\mathbf{B}}_F$ can be recomputed from $\mathbf{M}$ and
+$\mathbf{K}$ after the solve.
+By default this is done for the refractive index with the most
+iterations, at the cost of one block product.
+
+%----------------------------------------------------------------------
+\subsection{Scope}
+\label{sec:shift-scope}
+%----------------------------------------------------------------------
+
+\begin{itemize}
+  \item The particle must be homogeneous and isotropic.
+        For an anisotropic permittivity (Sec.~\ref{sec:anisotropic}) the
+        contrast differs between the Cartesian components and the
+        change of refractive index is not a scalar shift.
+        The sweep function rejects such input.
+  \item All refractive indices share one mesh and one AIM grid.
+        The mesh must resolve the largest $\abs{m_p}$ of the list.
+  \item The number of block iterations is set by the slowest
+        refractive index of the list.
+        Indices of similar contrast should be solved together.
+        Convergence is slow when $\tau$ lies close to the real interval
+        $[-1, 0]$, which is the case for metals
+        ($\tau \approx -0.076 - 0.007i$ for gold at
+        \SI{638}{\nano\meter}).
+  \item The solver is unrestarted GMRES.
+        Block BiCGSTAB has no shifted counterpart here.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Cost}
+\label{sec:shift-cost}
+%----------------------------------------------------------------------
+
+Consider $N_m$ refractive indices on one mesh with $L$ orientations.
+Let $T_{\text{sh}}$ be the time of the mesh generation, the AIM
+projection and the mass matrix, $t_{\text{op}}$ the time to build the
+AIM operator (Green's function FFT and near-field precorrection),
+$t_{\text{mvp}}$ the time of one block product and $t_{\text{post}}$
+the time to evaluate the observables of one refractive index.
+One solve per refractive index costs
+\begin{equation}
+  T_{\text{B}}
+    = T_{\text{sh}}
+      + \sum_{s=1}^{N_m}
+        \bigl(t_{\text{op}} + n_s^{\mathbf{Z}}\,t_{\text{mvp}}
+              + t_{\text{post}}\bigr),
+  \label{eq:shift-cost-B}
+\end{equation}
+where $n_s^{\mathbf{Z}}$ is the number of block-GMRES iterations on
+$\mathbf{Z}_s$.
+The shifted sweep costs
+\begin{equation}
+  T_{\text{C}}
+    = T_{\text{sh}} + t_{\text{op}} + t_{\text{chol}}
+      + \max_s n_s\,\bigl(t_{\text{mvp}} + t_{\mathbf{M}^{-1}}\bigr)
+      + N_m\,\bigl(t_{\mathbf{M}^{-1}} + t_{\text{post}}\bigr)
+      + t_{\text{small}},
+  \label{eq:shift-cost-C}
+\end{equation}
+where $n_s$ is the number of iterations of shift $s$ on
+$\mathbf{C}$, $t_{\text{chol}}$ the Cholesky factorisation time,
+$t_{\mathbf{M}^{-1}}$ the time of one block solve with the factor and
+$t_{\text{small}}$ the time spent on orthogonalisation and on the
+small problems \eqref{eq:shift-lsq}.
+
+Three effects contribute to $T_{\text{B}}/T_{\text{C}}$.
+The operator is built once instead of $N_m$ times.
+In our measurements at $L = 13$ this build costs as much as 70 to 280
+block products, so
+it is the largest term of \eqref{eq:shift-cost-B} for small and
+medium meshes.
+The preconditioning lowers the iteration count of every refractive
+index (Table~\ref{tab:shift-precond}).
+The shifts share one Krylov space, so the products are paid for the
+slowest shift only.
+
+%----------------------------------------------------------------------
+\subsection{Use in the parameter sweeps}
+\label{sec:shift-sweeps}
+%----------------------------------------------------------------------
+
+\begin{sloppypar}
+The sweep drivers
+\nolinkurl{benchmarks/cas_v2/ironoxide_sweep_h5.jl} and
+\nolinkurl{benchmarks/cas_v2/spheroid_sweep_h5.jl} accept the option
+\texttt{--shifted-ri}.
+All refractive indices of a (wavelength, $D_{ve}$, aspect ratio) row
+are then solved by one call of
+\texttt{solve\_cas\_v2\_orientations\_shifted}.
+Both drivers already share the mesh across the refractive-index axis
+in their default mode.
+The option therefore changes neither the mesh nor the AIM grid nor the
+convergence criterion, and the stored amplitudes agree with the default
+mode to the solver tolerance.
+This differs from block-DDA\_Py, where the shifted mode replaces the
+per-index lattice by a common one and the values change at the level
+of the discretisation error.
+The option is allowed for the triaxial shape mode, which keeps the
+index isotropic.
+It is rejected for the anisotropic index modes.
+A file written with the option carries the root attribute
+\texttt{shifted\_ri}, which also enters the configuration hash.
+The output of the default mode is unchanged.
+\end{sloppypar}
+
+\begin{sloppypar}
+The general sweep driver \nolinkurl{viem_results/run_viem.jl} accepts
+the same option.
+All isotropic entries of the refractive-index list of a (shape,
+wavelength) slot are solved together on the per-shape mesh of the
+default mode.
+Anisotropic entries are solved one at a time as before.
+In the cost group of the output file the time fields of the entries
+solved together hold the time of the batch divided by the number of
+entries, and the iteration count, the convergence flag and the residual
+are those of the individual refractive index.
+This corresponds to \texttt{run\_dda.py --shifted-ri} of block-DDA\_Py.
+\end{sloppypar}
+
+%----------------------------------------------------------------------
+\subsection{Verification}
+\label{sec:shift-verification}
+%----------------------------------------------------------------------
+
+The tests are in \texttt{test/test\_shifted\_krylov.jl} and
+\texttt{test/test\_shifted\_sweep.jl}.
+\begin{itemize}
+  \item \emph{Solver.}
+        For a random dense $\mathbf{C}$ ($N = 200$, $L = 4$, five
+        shifts) every solution agrees with a direct solve to better
+        than $10^{-10}$.
+        For one shift the iteration count and the residual history
+        equal those of \texttt{block\_gmres} applied to
+        $\tau\,\mathbf{I} - \mathbf{C}$.
+  \item \emph{Formulation against dense direct solves.}
+        On the coarse sphere mesh the matrix $\mathbf{K}$ is taken from
+        one dense $\mathbf{Z}$ and the shifted solver is run for
+        $m_p = 1.5 + 0.01i$, $1.75$, $2.0$ and $2.5 + 0.2i$.
+        The solutions agree with LU solves of separately assembled
+        matrices to better than $10^{-7}$ and the CAS-v2 amplitudes to
+        better than $10^{-6}$ at $\text{tol} = 10^{-10}$.
+  \item \emph{Sweep function against the existing AIM path.}
+        With the same AIM grid and $\text{tol} = 10^{-8}$ the amplitudes
+        of the shifted sweep agree with those of one
+        \texttt{:aim\_gmres} solve per refractive index to better than
+        $10^{-6}$.
+        The errors against Mie theory are the same for both.
+  \item \emph{Residual.}
+        The recomputed residual
+        $\norm{\mathbf{B} - \mathbf{Z}_s\mathbf{X}_s}_F /
+        \norm{\mathbf{B}}_F$ is below the tolerance for every
+        refractive index and equals the residual reported by the solver.
+  \item \emph{Sweep drivers.}
+        For a small iron-oxide sweep at $\text{tol} = 10^{-8}$ the
+        output of \texttt{--shifted-ri} agrees with that of the default
+        mode to \num{3.9e-10} relative to the largest amplitude of the
+        wavelength group (\num{2.8e-10} with the triaxial shape).
+        The default mode writes the same numbers, attributes and
+        configuration hash as before the change.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Measured speed-up}
+\label{sec:shift-benchmark}
+%----------------------------------------------------------------------
+
+\begin{sloppypar}
+The script \nolinkurl{benchmarks/shifted/run_shift_scaling.jl} times
+three ways of solving a refractive-index sweep on one mesh.
+Method~B calls the existing block GMRES once per refractive index.
+The mesh, the AIM projection and the mass matrix are shared and the
+AIM operator is rebuilt for every index.
+This is the default mode of the iron-oxide sweep driver.
+Method~P is method~B with right preconditioning by the mass matrix.
+Method~C is the shifted block GMRES, which is the mode
+\texttt{--shifted-ri}.
+All three solve the same linear systems on the same mesh and AIM grid.
+\end{sloppypar}
+
+The test particle is an oblate spheroid with $b/c = 2$ in vacuum at
+$\lambda_0 = \SI{0.638}{\micro\meter}$.
+The mesh follows the production rule
+$\ell_c = \min\bigl(\lambda_0/(10\,\abs{m_p}_{\max}),\,0.3\,c\bigr)$
+with $c$ the short semi-axis.
+Two families of refractive indices are used: $N_m$ equispaced values
+from $2.7 + 0.1i$ to $3.1 + 0.1i$ (iron oxide) and from $1.35$ to
+$1.70$ (dielectric, the range of the block-DDA\_Py benchmark).
+For $N_m = 1$ the single index is the upper end.
+The orientations have $\alpha = \gamma = 0$ and $\cos\beta$ equispaced
+on $[0, 1]$.
+The tolerance is $10^{-5}$.
+Each run used 8 threads on one processor of a machine with two Intel
+Xeon E5-2620~v4.
+Table~\ref{tab:shift-benchmark} lists the results.
+The times $T_{\text{B}}$ and $T_{\text{C}}$ are the totals of
+\eqref{eq:shift-cost-B} and \eqref{eq:shift-cost-C}, including the
+shared set-up and the evaluation of the observables.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Measured speed-up of the shifted block GMRES (method~C)
+           over one block-GMRES solve per refractive index (method~B).
+           $N$ is the number of unknowns.
+           $n_s^{\mathbf{Z}}$ and $n_s$ are the ranges of the iteration
+           counts of methods B and C over the $N_m$ indices.
+           A dash marks a combination for which method~B was not run.}
+  \label{tab:shift-benchmark}
+  \vspace{0.6ex}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lrrrrccrrrr}
+    \toprule
+    family & $D_{ve}$ (\si{\micro\meter}) & $N$ & $L$ & $N_m$
+      & $n_s^{\mathbf{Z}}$ & $n_s$
+      & $\sum_s n_s^{\mathbf{Z}} / \max_s n_s$
+      & $T_{\text{B}}$ (\si{\second}) & $T_{\text{C}}$ (\si{\second})
+      & $T_{\text{B}} / T_{\text{C}}$ \\
+    \midrule
+    iron oxide & 0.35 & \num{25680} & 5 & 1 & 61 & 44 & 1.4 & 145 & 139 & 1.0 \\
+     & & & & 3 & 46--61 & 32--44 & 3.6 & 422 & 141 & 3.0 \\
+     & & & & 10 & 46--61 & 32--44 & 12.1 & 1400 & 141 & 9.9 \\
+     & & & & 30 & -- & 32--44 & -- & -- & 142 & -- \\
+    \addlinespace
+    iron oxide & 0.35 & \num{25680} & 13 & 1 & 47 & 33 & 1.4 & 159 & 151 & 1.1 \\
+     & & & & 3 & 39--47 & 26--33 & 3.9 & 461 & 154 & 3.0 \\
+     & & & & 10 & 39--47 & 26--33 & 12.8 & 1534 & 154 & 10.0 \\
+     & & & & 30 & 39--47 & 26--33 & 38.5 & 4605 & 158 & 29.1 \\
+    \addlinespace
+    iron oxide & 0.35 & \num{25680} & 64 & 1 & 37 & 25 & 1.5 & 217 & 191 & 1.1 \\
+     & & & & 3 & 32--37 & 20--25 & 4.1 & 622 & 192 & 3.2 \\
+     & & & & 10 & 32--37 & 20--25 & 13.6 & 2055 & 197 & 10.4 \\
+     & & & & 30 & -- & 20--25 & -- & -- & 211 & -- \\
+    \addlinespace
+    iron oxide & 0.60 & \num{124049} & 13 & 1 & 90 & 68 & 1.3 & 1072 & 991 & 1.1 \\
+     & & & & 3 & 64--90 & 47--68 & 3.4 & 3029 & 992 & 3.1 \\
+     & & & & 10 & -- & 47--68 & -- & -- & 996 & -- \\
+     & & & & 30 & -- & 47--68 & -- & -- & 1014 & -- \\
+    \addlinespace
+    dielectric & 0.60 & \num{21903} & 13 & 1 & 31 & 16 & 1.9 & 133 & 126 & 1.1 \\
+     & & & & 3 & 28--31 & 10--16 & 5.5 & 394 & 126 & 3.1 \\
+     & & & & 10 & 28--31 & 10--16 & 18.3 & 1294 & 126 & 10.3 \\
+     & & & & 30 & 28--31 & 10--16 & 54.8 & 3895 & 130 & 30.0 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The total time of the shifted sweep hardly depends on $N_m$.
+Between $N_m = 1$ and $N_m = 30$ it grows by \SI{10}{\percent} for
+$L = 64$ and by \SI{5}{\percent} or less in the other four cases.
+The gain over method~B is therefore close to $N_m$: 3.0 to 3.2 for
+$N_m = 3$, 9.9 to 10.4 for $N_m = 10$ and 29 to 30 for $N_m = 30$.
+
+Table~\ref{tab:shift-breakdown} splits $T_{\text{C}}$ at $N_m = 30$.
+The operator build takes between \SI{59}{\percent} and
+\SI{88}{\percent} of the total.
+The Krylov process takes most of the rest.
+The evaluation of the observables for 30 refractive indices takes
+\SI{3.4}{\percent} of the total at $L = 64$ and less elsewhere.
+The time of the Krylov process grows by about \SI{4}{\percent} or
+less between $N_m = 1$ and $N_m = 30$, so the small problems
+\eqref{eq:shift-lsq} are a minor cost.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Breakdown of the time of the shifted sweep at $N_m = 30$ (in
+           seconds) and peak resident memory of the process.
+           ``Shared'' is the mesh, the AIM projection and the mass
+           matrix.
+           ``Check'' is the recomputation of the residual of the
+           slowest index.
+           ``Obs.'' is the evaluation of the observables.}
+  \label{tab:shift-breakdown}
+  \vspace{0.6ex}
+  \small
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{lrrrrrrrrrr}
+    \toprule
+    family & $D_{ve}$ (\si{\micro\meter}) & $N$ & $L$
+      & shared & operator & Cholesky & Krylov & check & obs.
+      & RSS (\si{\giga\byte}) \\
+    \midrule
+    iron oxide & 0.35 & \num{25680}  & 5  & 2.6 & 124.2 & 0.10 & 12.5  & 0.2 & 1.2 & 4.0 \\
+    iron oxide & 0.35 & \num{25680}  & 13 & 2.6 & 130.1 & 0.08 & 20.3  & 0.5 & 2.4 & 4.5 \\
+    iron oxide & 0.35 & \num{25680}  & 64 & 2.6 & 124.5 & 0.12 & 63.7  & 2.1 & 7.3 & 4.9 \\
+    iron oxide & 0.60 & \num{124049} & 13 & 7.3 & 709.2 & 0.92 & 269.1 & 3.1 & 8.7 & 9.2 \\
+    dielectric & 0.60 & \num{21903}  & 13 & 2.6 & 114.5 & 0.07 & 8.5   & 0.5 & 2.1 & 4.3 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Method~P separates the three effects of Sec.~\ref{sec:shift-cost}.
+It was run for $N_m = 3$.
+Its iteration counts equal those of method~C for every refractive
+index, and the forward amplitudes of the two methods differ by at most
+\num{1.3e-14} in relative terms.
+The preconditioner alone shortens the sweep by a factor of 1.02 to
+1.13 over method~B, because the operator build still dominates.
+Building the operator once gives the rest of the factor of three.
+The shared Krylov space matters as $N_m$ grows.
+For the larger iron-oxide particle the Krylov process takes
+\SI{269}{\second} for 30 refractive indices.
+Thirty separate preconditioned solves would need $\sum_s n_s = 1723$
+block iterations instead of $\max_s n_s = 68$.
+At the measured \SI{3.9}{\second} per iteration this is about
+\SI{6800}{\second}.
+
+The forward amplitudes of methods B and C differ by at most
+\num{4.2e-6} relative to the larger of the two amplitudes.
+This is the level of the solver tolerance $10^{-5}$: the two methods
+stop at different points below the same tolerance.
+The recomputed residual of the slowest index was below the tolerance in
+all runs.
+
+%----------------------------------------------------------------------
+\subsection{Comparison with block-DDA\_Py}
+\label{sec:shift-vs-dda}
+%----------------------------------------------------------------------
+
+The same method is implemented in block-DDA\_Py (v0.8.0 to v0.8.3).
+The two codes differ in three points.
+\begin{itemize}
+  \item In the DDA the shift multiplies the identity matrix and no
+        preconditioner is needed.
+        In the VIEM it multiplies the mass matrix, and a sparse
+        Cholesky solve is added to every block product.
+  \item In the DDA the set-up per refractive index is cheap, and the
+        gain comes from the shared Krylov space.
+        The measured gain of the DDA sweep over its default mode is
+        7.7 to 9.0 for $N_m = 15$ and 15 to 18 for $N_m = 30$.
+        In the VIEM the near-field precorrection dominates the set-up,
+        and building it once gives a gain close to $N_m$.
+  \item In the DDA the shifted mode replaces the per-index lattice by a
+        common one, so the stored values change at the level of the
+        discretisation error.
+        In the VIEM sweep drivers the mesh was already common, and the
+        stored values change at the level of the solver tolerance only.
+\end{itemize}
+
+%======================================================================
 \section{Particle shape models and cross-validation}
 \label{sec:gre}
 
@@ -1850,6 +2487,12 @@ in \texttt{docs/benchmark\_results.md} \S 6.
   \textit{Opt.\ Express} \textbf{32}(21), 36500--36522 (2024).
   \url{https://doi.org/10.1364/OE.533776}.
 
+\bibitem{Moteki2024Erratum}
+  N.~Moteki and K.~Adachi,
+  ``Measuring the polarized complex forward-scattering amplitudes of
+  single particles in unbounded fluid flow: CAS-v2 protocol: erratum,''
+  \textit{Opt.\ Express} (submitted, 2026).
+
 \bibitem{KrylovJl}
   A.~Montoison and D.~Orban,
   ``Krylov.jl: A Julia basket of hand-picked Krylov methods,''
@@ -1866,6 +2509,20 @@ in \texttt{docs/benchmark\_results.md} \S 6.
   V.~Simoncini and D.~B.~Szyld,
   ``Flexible inner-outer Krylov subspace methods'' / ``Block GMRES,''
   \textit{Numer.\ Linear Algebra Appl.} \textbf{2}(6), 539--560 (1996).
+
+\bibitem{Argentin2026}
+  C.~Argentin, K.~G.~Inzhevatkin, and M.~A.~Yurkin,
+  ``Efficient refractive-index sweeps in the discrete dipole approximation
+  using shifted Krylov methods,''
+  arXiv:2611.15909 (2026).
+
+\bibitem{Moteki2026}
+  N.~Moteki,
+  ``Block-Krylov discrete-dipole and volume-integral-equation solvers for
+  multi-orientation light scattering across the dielectric--metal contrast
+  range,''
+  \textit{J.\ Quant.\ Spectrosc.\ Radiat.\ Transfer} \textbf{362},
+  110046 (2026).
 
 \bibitem{JohnsonChristy1972}
   P.~B.~Johnson and R.~W.~Christy,

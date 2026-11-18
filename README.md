@@ -47,8 +47,9 @@ so downstream analysis pipelines work with either without modification.
    examples.
 6. **CAS-v2 observables.** Computes the polarized complex forward-scattering
    amplitudes `S(0)_theta`, `S(0)_phi` (PCAS) and the complex
-   backward-scattering amplitude `S(180)` (OCBS), plus `C_ext`, `C_abs`,
-   `C_sca`.
+   backward-scattering amplitude `S(180)` = (−*S*<sub>11</sub> + *S*<sub>22</sub>)/2
+   (OCBS, corrected definition from v0.8.0, see Conventions), plus `C_ext`,
+   `C_abs`, `C_sca`.
 7. **Production sweep with resume.** `run_viem.jl` performs multi-dimensional
    parameter sweeps (wavelength x refractive index x shape x orientation),
    writes results to HDF5 in the block-DDA_Py-compatible schema, and
@@ -56,6 +57,12 @@ so downstream analysis pipelines work with either without modification.
    continues (matching block-DDA_Py).
 8. **Mie reference.** Each sweep condition is compared to the Mie solution
    for the volume-equivalent sphere with axis-averaged refractive index.
+9. **Refractive-index sweep with one Krylov process (v0.8.0).** For a
+   homogeneous isotropic particle all refractive indices on one mesh are
+   solved by a single shifted block-GMRES process. The AIM operator is
+   built once per mesh. Measured gain over one solve per index: about 3,
+   10 and 29–30 for 3, 10 and 30 indices. Available in the sweep drivers
+   as `--shifted-ri`.
 
 ### Validation
 
@@ -194,6 +201,54 @@ The `return_D=true` keyword causes `solve_cas_v2_orientations` to return
 D-field expansion coefficients for computing cross sections or other
 post-processing.
 
+### Refractive-index sweep with one Krylov process (v0.8.0)
+
+For a homogeneous isotropic particle the systems of different refractive
+indices on one mesh are shifts of one operator,
+`Z(m_p) = (kappa/eps_bg) (tau M - K)` with `tau = 1/((m_p/m_m)^2 - 1)`.
+`solve_cas_v2_orientations_shifted` solves all of them, for all
+orientations, with a single shifted block-GMRES process:
+
+```julia
+m_p_list = [2.7 + 0.1im, 2.9 + 0.1im, 3.1 + 0.1im]
+results, info = solve_cas_v2_orientations_shifted(
+    basis, euler_list;
+    wl_0 = 0.638, m_m = 1.0, m_p_list = m_p_list,
+    tol = 1e-5, maxiter = 200,
+)
+# results[s, i]: CASv2Result of m_p_list[s] and euler_list[i]
+# info.iterations, info.converged, info.residual_norm: one entry per refractive index
+```
+
+- The AIM operator is built once per mesh instead of once per refractive
+  index. The block Krylov space is shared, so the number of block
+  products is that of the slowest index. Measured gain over one solve
+  per index on the same mesh: 3.0–3.2 for 3 indices, 9.9–10.4 for 10
+  and 29–30 for 30 (25,680 to 124,049 unknowns,
+  [docs/benchmark_results.md §11](docs/benchmark_results.md#11-shifted-block-gmres-for-refractive-index-sweeps)).
+- The convergence criterion is the one of `solve_cas_v2_orientations`,
+  `‖B − Z D‖_F / ‖B‖_F < tol`, for every refractive index. The results
+  agree with independent solves on the same mesh to the solver tolerance.
+- The mesh is shared. Build it for the largest `|m_p|` of the list.
+- Refractive indices of similar contrast should be solved together,
+  because the slowest one sets the iteration count.
+- Isotropic indices only. A 3-component `m_p` raises an `ArgumentError`.
+
+The sweep drivers `benchmarks/cas_v2/ironoxide_sweep_h5.jl`,
+`benchmarks/cas_v2/spheroid_sweep_h5.jl` and `viem_results/run_viem.jl`
+use this path with `--shifted-ri`. Their default mode is unchanged. The solver itself is
+exposed as `block_gmres_shifted(C, B, taus; tol, maxiter)` for any
+operator `C` supporting `C * X::AbstractMatrix`. The formulation is in
+`docs/theory_note.pdf` (Sec. 11, "Shifted Block GMRES for
+Refractive-Index Sweeps").
+
+**Mass-matrix preconditioning for ordinary solves.**
+`solve_cas_v2_orientations(...; precond = :mass_right)` runs the block
+solver on `Z M⁻¹` (sparse Cholesky of the mass matrix). The convergence
+criterion is unchanged. In the tests of the theory note the block-GMRES
+iteration count dropped to 0.23–0.59 of the unpreconditioned one. The
+default is `precond = :none`.
+
 ### Parallel execution
 
 Launch Julia with `-t N` (or set `JULIA_NUM_THREADS=N`) and all of
@@ -296,6 +351,15 @@ julia --project=. viem_results/check_h5.jl
 - Computes Mie reference (volume-equivalent sphere) for each condition
 - Accepts an optional filename argument:
   `julia --project=. viem_results/run_viem.jl path/to/file.hdf5`
+- **`--shifted-ri`** (v0.8.0): solves all isotropic entries of
+  `m_p_xyz_list` of a (shape, wavelength) slot with one shifted
+  block-GMRES process, as `run_dda.py --shifted-ri` of block-DDA_Py does.
+  The mesh is the per-shape mesh of the default mode, so the results
+  agree with the default mode to the solver tolerance. Anisotropic
+  entries are solved one at a time. In `/target/cost/` the time fields of
+  the entries solved together hold the batch time divided by the number
+  of entries. A file keeps the mode it was started with (attribute
+  `shifted_ri` of `/target`).
 
 The HDF5 layout (`/target/simulated_data/...`) with datasets
 `S_fw_PCAS_theta`, `S_fw_PCAS_phi`, `S_bk_OCBS`, `C_ext`, `C_abs`,
@@ -451,6 +515,17 @@ julia --project=. benchmarks/cas_v2/doublet_mstm/compare.jl
   (and therefore `Im(ε_p) > 0`). The `(wl_0, m_m, m_p)` physical
   input API matches block-DDA_Py exactly — the same values can be
   passed to both codes.
+- **Backward amplitude:** `S_bk` (`S_bk_OCBS` in the HDF5 files, *S*<sub>bak</sub>
+  of CAS-v2) is `(−S11 + S22)/2` at the backward direction. This is the
+  corrected Eq. (28) of Moteki and Adachi (2024), given in the erratum to
+  that paper, and the definition of block-DDA_Py from v0.8.2. Up to
+  v0.7.9 block-VIEM.jl followed the printed equation, which has `1/√2`
+  in place of `1/2`. Values of `S_bk` from v0.7.9 or earlier are `√2`
+  times the present ones, with the same phase. This includes the VIEM, Mie,
+  MSTM and T-matrix values in the files under `viem_results/paper/`, which
+  are kept as produced. Multiply their backward amplitudes by `1/√2` to
+  compare with the present code. The forward amplitudes and the cross
+  sections are not affected.
 - **Euler angles:** ZYZ intrinsic, same as
   `scipy.spatial.transform.Rotation` and block-DDA_Py.
   `R(α,β,γ) = Rz(α)·Ry(β)·Rz(γ)` maps particle-frame to lab-frame;
