@@ -137,6 +137,35 @@ function LinearAlgebra.mul!(Y::AbstractMatrix, A::_AIMLinOp, X::AbstractMatrix)
 end
 
 # ---------------------------------------------------------------------------
+# Mass-matrix right preconditioning
+# ---------------------------------------------------------------------------
+
+# Sparse Cholesky factor of the mass matrix (real, sparse, SPD). `F` is the
+# CHOLMOD factor type.
+struct _MassCholesky{F}
+    fac::F
+end
+_MassCholesky(M::SparseMatrixCSC{Float64,Int}) =
+    _MassCholesky(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(M)))
+
+# M^{-1} X for a complex block X of shape (N, L). The factor is real, so the
+# real and imaginary parts are solved separately.
+function _mass_solve(Mi::_MassCholesky, X::AbstractMatrix{<:Complex})
+    Xr = (Mi.fac \ Matrix{Float64}(real(X)))::Matrix{Float64}
+    Xi = (Mi.fac \ Matrix{Float64}(imag(X)))::Matrix{Float64}
+    return complex.(Xr, Xi)
+end
+
+# Z M^{-1}: solve (Z M^{-1}) Y = B, then X = M^{-1} Y. Since
+# B − Z X = B − (Z M^{-1}) Y, a Krylov solver applied to this operator
+# monitors the residual of the original system.
+struct _AIMRightPrecOp{F}
+    op::AIMOperator
+    minv::_MassCholesky{F}
+end
+Base.:*(A::_AIMRightPrecOp, X::AbstractMatrix) = aim_mvp(A.op, _mass_solve(A.minv, X))
+
+# ---------------------------------------------------------------------------
 # Block multi-RHS iterative solve (Phase 5.5)
 # ---------------------------------------------------------------------------
 

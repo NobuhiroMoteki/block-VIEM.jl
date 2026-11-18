@@ -580,7 +580,8 @@ end
                               padding::Integer = 4,
                               tol::Float64 = 1e-5,
                               maxiter::Integer = 100,
-                              verbose::Bool = false)
+                              verbose::Bool = false,
+                              precond::Symbol = :none)
         -> Vector{CASv2Result}
 
 Solve the VIEM system for many particle orientations and return the
@@ -621,6 +622,19 @@ Mixing the two forms, or supplying neither complete set, raises an
 - `:dense`        — assemble `Z` and LU-factorize once, then reuse
                     across orientations. Only for small problems (`N ≲ 10³`).
 
+# Preconditioning (AIM methods only)
+
+`precond` selects an optional preconditioner:
+- `:none`       — the system `Z D = B` is solved as it is (**default**).
+- `:mass_right` — right preconditioning with the mass matrix `M`: the
+                  solver runs on `Z M⁻¹` and `D = M⁻¹ Y`. `M⁻¹` is applied
+                  with a sparse Cholesky factor. The convergence criterion
+                  is unchanged, `‖B − Z D‖_F / ‖B‖_F < tol`. Measured for
+                  isotropic particles (2026-11-17, `benchmarks/shifted/`):
+                  the block-GMRES iteration count drops to 0.23–0.59 of
+                  the unpreconditioned one. The solution agrees with
+                  `:none` to the solver tolerance, not bit for bit.
+
 `euler_angles` is an iterable of `(alpha, beta, gamma)` tuples in the
 intrinsic ZYZ convention, matching `scipy.spatial.transform.Rotation`
 and block-DDA_Py.
@@ -657,7 +671,12 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    return_D::Bool = false,
                                    return_solve_info::Bool = false,
                                    projection::Union{AIMProjection,Nothing} = nothing,
-                                   mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing)
+                                   mass::Union{SparseMatrixCSC{Float64,Int},Nothing} = nothing,
+                                   precond::Symbol = :none)
+    (precond === :none || precond === :mass_right) || throw(ArgumentError(
+        "unknown precond: $precond (expected :none or :mass_right)"))
+    (precond !== :none && method === :dense) && throw(ArgumentError(
+        "precond = :$precond applies to the AIM block Krylov methods, not to :dense"))
     k0_c, eps_p_c, eps_bg_c = _resolve_physical_inputs(wl_0, m_m, m_p,
                                                        k0, eps_p, eps_bg)
     # `k0_c` is the wavenumber in the background medium, matching
@@ -713,11 +732,20 @@ function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                 duffy_rule = duffy_rule,
                                 projection = projection,
                                 mass = mass)
-        A = _AIMLinOp(op, N)
         sub = method === :aim_bicgstab ? :bicgstab : :gmres
-        res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
-                           verbose = verbose)
-        D_block = res.X
+        if precond === :none
+            A = _AIMLinOp(op, N)
+            res = _block_solve(A, B, sub; tol = tol, maxiter = maxiter,
+                               verbose = verbose)
+            D_block = res.X
+        else
+            # Right preconditioning with the mass matrix: (Z M⁻¹) Y = B,
+            # D = M⁻¹ Y. The monitored residual is still ‖B − Z D‖_F/‖B‖_F.
+            minv = _MassCholesky(op.mass)
+            res = _block_solve(_AIMRightPrecOp(op, minv), B, sub;
+                               tol = tol, maxiter = maxiter, verbose = verbose)
+            D_block = _mass_solve(minv, res.X)
+        end
         solve_info = (iterations       = res.iterations,
                       residual_norm    = res.residual_norm,
                       converged        = res.converged,
