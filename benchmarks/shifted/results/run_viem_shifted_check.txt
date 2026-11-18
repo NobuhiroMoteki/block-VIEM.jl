@@ -1,0 +1,77 @@
+Acceptance of viem_results/run_viem.jl --shifted-ri, laptop (4 threads per run, runs in parallel), 2026-11-19
+Template: create_h5.jl with wl_m_m_pairs = [0.638 1.0; 0.834 1.0],
+  m_p_xyz_list = 1.5, 1.6, (1.5, 1.5, 1.6) anisotropic, 1.7+0.02i; r_v_base = 0.1 um; bc_ratio = 2;
+  ab_ratio = 1.0 (spheroid mode, L_solve = 3) and 1.5 (general mode, L = 12); N_alpha, N_beta, N_gamma = 2, 3, 2.
+Compared with benchmarks/shifted/compare_run_viem_h5.jl (all datasets of /target/simulated_data).
+
+1. Default mode: run_viem.jl and src of 8dfceee (A) against this version (B). Limit 0.
+  C_abs            max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (192 values, 0 NaN)
+  C_abs_mie        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  C_ext            max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (192 values, 0 NaN)
+  C_ext_mie        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  Euler_angles     max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (576 values, 0 NaN)
+  S_bk_OCBS        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (192 values, 0 NaN)
+  S_bk_OCBS_mie    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  S_fw_PCAS_mie    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  S_fw_PCAS_phi    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (192 values, 0 NaN)
+  S_fw_PCAS_theta  max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (192 values, 0 NaN)
+  r_ve             max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (2 values, 0 NaN)
+A (default mode): iters [28, 28, 28, 27, 28, 28, 28, 27, 28, 28, 28, 27, 28, 28, 28, 27]
+   converged Int8[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+   t_solve_s [56.0, 73.2, 50.5, 79.1, 59.5, 78.7, 75.7, 78.5, 148.2, 133.3, 153.1, 144.1, 154.3, 151.2, 158.1, 153.0]
+   sum of t_total_s = 1752.7 s
+B (default mode): iters [28, 28, 28, 27, 28, 28, 28, 27, 28, 28, 28, 27, 28, 28, 28, 27]
+   converged Int8[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+   t_solve_s [59.4, 80.4, 57.5, 78.8, 65.3, 80.3, 72.3, 80.0, 153.4, 141.9, 156.2, 147.0, 156.2, 154.9, 152.7, 144.6]
+   sum of t_total_s = 1787.1 s
+largest relative difference: 0.000e+00 (limit 0.0e+00)
+PASS
+
+2. SOLVER_TOL = 1e-8: default mode (A) against --shifted-ri (B). Limit 1e-5.
+  C_abs            max |A-B| = 1.468e-12   relative to max|A| = 7.844e-10   (192 values, 0 NaN)
+  C_abs_mie        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  C_ext            max |A-B| = 5.260e-12   relative to max|A| = 3.554e-10   (192 values, 0 NaN)
+  C_ext_mie        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  Euler_angles     max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (576 values, 0 NaN)
+  S_bk_OCBS        max |A-B| = 1.765e-11   relative to max|A| = 6.044e-10   (192 values, 0 NaN)
+  S_bk_OCBS_mie    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  S_fw_PCAS_mie    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  S_fw_PCAS_phi    max |A-B| = 3.529e-11   relative to max|A| = 6.481e-10   (192 values, 0 NaN)
+  S_fw_PCAS_theta  max |A-B| = 2.103e-11   relative to max|A| = 4.747e-10   (192 values, 0 NaN)
+  r_ve             max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (2 values, 0 NaN)
+A (default mode): iters [46, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 44, 45, 45, 44, 44]
+   converged Int8[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+   t_solve_s [115.7, 81.0, 77.0, 83.9, 81.0, 84.9, 80.5, 85.7, 171.0, 169.1, 174.7, 152.5, 147.6, 95.8, 161.2, 92.8]
+   sum of t_total_s = 1868.1 s
+B (shifted mode): iters [12, 11, 13, 12, 45, 45, 14, 13, 11, 11, 13, 12, 45, 45, 14, 13]
+   converged Int8[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+   t_solve_s [29.2, 27.1, 29.2, 27.1, 101.1, 82.8, 29.2, 27.1, 49.9, 52.7, 49.9, 52.7, 169.9, 176.1, 49.9, 52.7]
+   sum of t_total_s = 1018.6 s
+largest relative difference: 7.844e-10 (limit 1.0e-05)
+PASS
+
+3. SOLVER_TOL = 1e-5 (the value of the script): default mode (A) against --shifted-ri (B). Limit 1e-3.
+  C_abs            max |A-B| = 7.498e-10   relative to max|A| = 4.008e-07   (192 values, 0 NaN)
+  C_abs_mie        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  C_ext            max |A-B| = 9.884e-09   relative to max|A| = 6.678e-07   (192 values, 0 NaN)
+  C_ext_mie        max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  Euler_angles     max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (576 values, 0 NaN)
+  S_bk_OCBS        max |A-B| = 4.388e-08   relative to max|A| = 1.503e-06   (192 values, 0 NaN)
+  S_bk_OCBS_mie    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  S_fw_PCAS_mie    max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (16 values, 0 NaN)
+  S_fw_PCAS_phi    max |A-B| = 2.994e-08   relative to max|A| = 5.498e-07   (192 values, 0 NaN)
+  S_fw_PCAS_theta  max |A-B| = 5.040e-08   relative to max|A| = 1.138e-06   (192 values, 0 NaN)
+  r_ve             max |A-B| = 0.000e+00   relative to max|A| = 0.000e+00   (2 values, 0 NaN)
+A (default mode): iters [28, 28, 28, 27, 28, 28, 28, 27, 28, 28, 28, 27, 28, 28, 28, 27]
+   converged Int8[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+   t_solve_s [59.4, 80.4, 57.5, 78.8, 65.3, 80.3, 72.3, 80.0, 153.4, 141.9, 156.2, 147.0, 156.2, 154.9, 152.7, 144.6]
+   sum of t_total_s = 1787.1 s
+B (shifted mode): iters [7, 7, 8, 7, 28, 28, 9, 8, 7, 7, 8, 7, 28, 28, 9, 8]
+   converged Int8[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+   t_solve_s [31.7, 27.3, 31.7, 27.3, 106.0, 88.6, 31.7, 27.3, 47.7, 28.0, 47.7, 28.0, 90.3, 66.2, 47.7, 28.0]
+   sum of t_total_s = 768.6 s
+largest relative difference: 1.503e-06 (limit 1.0e-03)
+PASS
+
+4. A file with results of one mode is refused in the other mode (both directions checked).
+   A finished --shifted-ri file resumed with --shifted-ri: 0 computed, 16 skipped.

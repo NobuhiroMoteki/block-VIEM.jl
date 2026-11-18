@@ -13,9 +13,24 @@
 #   - Per-condition Mie reference calculation
 #
 # Usage:
-#     julia --project=. -t auto viem_results/run_viem.jl [filename]
+#     julia --project=. -t auto viem_results/run_viem.jl [filename] [--shifted-ri]
 #
 # The -t auto flag is recommended to enable multi-threaded assembly.
+#
+# Options:
+#   --shifted-ri    solve all ISOTROPIC entries of m_p_xyz_list of a
+#                   (shape, wavelength) slot with ONE shifted block-GMRES process
+#                   (`solve_cas_v2_orientations_shifted`). The AIM operator is
+#                   built once per slot instead of once per refractive index.
+#                   The mesh is the per-shape worst-case mesh of the default
+#                   mode, so the results agree with the default mode to the
+#                   solver tolerance. Anisotropic entries are solved one at a
+#                   time, as in the default mode. In /target/cost/ the fields
+#                   t_solve_s and t_total_s of the entries solved together hold
+#                   the time of the batch divided by the number of entries, and
+#                   peak_rss_bytes holds the peak of the batch. The two modes
+#                   cannot be mixed in one output file. Counterpart of
+#                   block-DDA_Py's `run_dda.py --shifted-ri` (v0.8.3).
 
 using BlockVIEM
 using BlockVIEM: Vec3, SphereAggregate, mesh_sphere_aggregate
@@ -52,7 +67,9 @@ const AIM_PADDING   = 4           # AIM grid padding (number of pitch cells)
 # setup speed-up across the inner (i_pair, i_mp) loop.  Set false to
 # restore the original per-(wl_0, m_p) mesh sizing.
 const REUSE_PROJECTION_PER_SHAPE = true
-const OUTPUT_FILE   = length(ARGS) >= 1 ? ARGS[1] :
+const SHIFTED_RI    = "--shifted-ri" in ARGS
+const _POSITIONAL   = filter(a -> !startswith(a, "--"), ARGS)
+const OUTPUT_FILE   = length(_POSITIONAL) >= 1 ? _POSITIONAL[1] :
                       joinpath(@__DIR__, "pcas_ocbs_simulated_data.hdf5")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -185,6 +202,14 @@ function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh;
     S_bk_v  = [r.S_bk       for r in cas_results]
 
     # Cross sections from D_block (farfield integration)
+    C_abs, C_ext = _cross_sections(basis, D_block, euler_list, k0, eps_p, eps_bg)
+
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v, solve_info
+end
+
+# C_abs and C_ext of every orientation from the solution block, shape (N, L).
+function _cross_sections(basis, D_block, euler_list, k0, eps_p, eps_bg)
+    num_ori = length(euler_list)
     orientations = [cas_orientation(ea...) for ea in euler_list]
     C_abs = Vector{Float64}(undef, num_ori)
     C_ext = Vector{Float64}(undef, num_ori)
@@ -197,8 +222,7 @@ function _solve_and_postprocess(basis, euler_list, wl_0, m_m, m_p_xyz, mesh;
         C_abs[i] = sr.C_abs
         C_ext[i] = sr.C_ext
     end
-
-    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v, solve_info
+    return C_abs, C_ext
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -218,12 +242,7 @@ end
 function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
                            N_alpha, N_beta, N_gamma;
                            projection = nothing, mass = nothing)
-    num_full = N_alpha * N_beta * N_gamma
-
-    # Beta-only grid for solve (α=0, γ=0)
-    cos_beta = range(1 - 1/N_beta, -1 + 1/N_beta, length=N_beta)
-    beta_vals = acos.(cos_beta)
-    euler_beta_only = [(0.0, β, 0.0) for β in beta_vals]
+    euler_beta_only = _euler_beta_only(N_beta)
 
     C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0, solve_info =
         _solve_and_postprocess(basis, euler_beta_only, wl_0, m_m, m_p_xyz, mesh;
@@ -233,7 +252,21 @@ function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
          (solve_info.converged ? "converged ✓" : "NOT converged ✗") *
          "  iters=$(solve_info.iterations)")
 
-    # Analytical α-expansion to full grid
+    C_abs, C_ext, S_fw_th, S_fw_ph, S_bk =
+        _alpha_expand(C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0, N_alpha, N_beta, N_gamma)
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, solve_info
+end
+
+# Beta-only grid for the spheroid-mode solve (α=0, γ=0)
+function _euler_beta_only(N_beta)
+    cos_beta = range(1 - 1/N_beta, -1 + 1/N_beta, length=N_beta)
+    beta_vals = acos.(cos_beta)
+    return [(0.0, β, 0.0) for β in beta_vals]
+end
+
+# Analytical α-expansion of the β-only results to the full orientation grid
+function _alpha_expand(C_abs_0, C_ext_0, S_s_0, S_p_0, S_bk_0, N_alpha, N_beta, N_gamma)
+    num_full = N_alpha * N_beta * N_gamma
     alpha_vals = collect(range(0, 2π, length=N_alpha+1)[1:end-1])
 
     C_abs   = Vector{Float64}(undef, num_full)
@@ -263,8 +296,47 @@ function run_viem_spheroid(basis, mesh, wl_0, m_m, m_p_xyz,
         end
     end
 
-    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk, solve_info
+    return C_abs, C_ext, S_fw_th, S_fw_ph, S_bk
 end
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Solve: all isotropic refractive indices of a slot in one shifted block GMRES
+# ══════════════════════════════════════════════════════════════════════════════
+# `m_rows` is a vector of length-3 refractive-index rows with equal components.
+# Returns one tuple (C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk) per row, each on
+# the full orientation grid, and the solver info of the batch.
+function run_viem_shifted(basis, mesh, wl_0, m_m, m_rows, euler_angles,
+                          spheroid_mode, N_alpha, N_beta, N_gamma;
+                          projection = nothing, mass = nothing)
+    k0 = ComplexF64(2π * m_m / wl_0)
+    eps_bg = ComplexF64(m_m)^2
+    euler_solve = spheroid_mode ? _euler_beta_only(N_beta) : euler_angles
+    pitch = AIM_PITCH_RATIO * mean_edge_length(mesh)
+
+    cas, D_list, info = solve_cas_v2_orientations_shifted(
+        basis, euler_solve;
+        wl_0 = wl_0, m_m = m_m, m_p_list = ComplexF64[row[1] for row in m_rows],
+        tol = SOLVER_TOL, maxiter = MAXITER,
+        duffy_rule = duffy_reference_rule(DUFFY_ORDER),
+        pitch = pitch, padding = AIM_PADDING,
+        projection = projection, mass = mass, return_D = true)
+
+    out = Vector{Any}(undef, length(m_rows))
+    for (s, row) in enumerate(m_rows)
+        S_fw_th = [r.S_fw_theta for r in cas[s, :]]
+        S_fw_ph = [r.S_fw_phi   for r in cas[s, :]]
+        S_bk_v  = [r.S_bk       for r in cas[s, :]]
+        C_abs, C_ext = _cross_sections(basis, D_list[s], euler_solve, k0,
+                                       _to_eps(row), eps_bg)
+        out[s] = spheroid_mode ?
+            _alpha_expand(C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v,
+                          N_alpha, N_beta, N_gamma) :
+            (C_abs, C_ext, S_fw_th, S_fw_ph, S_bk_v)
+    end
+    return out, info
+end
+
+_is_isotropic(m_p_xyz) = m_p_xyz[1] == m_p_xyz[2] == m_p_xyz[3]
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Mie reference for volume-equivalent sphere
@@ -288,6 +360,124 @@ function _to_eps(m_p_xyz)
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  --shifted-ri: one batch = the pending isotropic entries of a (shape, wl) slot
+# ══════════════════════════════════════════════════════════════════════════════
+# Solves the batch, writes the results, the Mie references and the cost
+# records, and returns the list of the m_p indices it has filled. Returns
+# `nothing` when the user interrupted the run.
+#
+# Cost convention: the entries of a batch are solved together, so t_solve_s
+# and t_total_s hold the batch time divided by the number of entries (their
+# sum over the batch is the wall time). The shape-level build and set-up times
+# go to the slot (i_pair = 1, i_mp = 1) as in the default mode.
+# peak_rss_bytes is the peak of the batch. iters, converged, solver_err and
+# residual_history are those of the individual refractive index.
+function _shifted_batch!(sd, cost, mon, i_pair, shape_idx, pending,
+                         basis, mesh, wl_0, m_m, m_p_xyz_list, r_v_base,
+                         euler_angles, spheroid_mode, N_alpha, N_beta, N_gamma,
+                         projection, mass, t_build_shape, t_setup_shape)
+    num_orientations = length(euler_angles)
+    n_b = length(pending)
+    m_rows = [ComplexF64.(m_p_xyz_list[i_mp, :]) for i_mp in pending]
+
+    println("─" ^ 64)
+    mode_tag = spheroid_mode ? ", spheroid, L_solve=$N_beta" : ""
+    _log("shifted batch: pair=$i_pair shape=$shape_idx  " *
+         "wl_0=$(Printf.@sprintf("%.4f", wl_0)) μm  m_m=$(Printf.@sprintf("%.4f", m_m))  " *
+         "$n_b refractive indices $(ComplexF64[r[1] for r in m_rows])  " *
+         "N_ori=$num_orientations$mode_tag")
+
+    RSSMonitor.reset!(mon)
+    t_batch_start = time_ns()
+    results = nothing
+    info = nothing
+    t0_solve = time_ns()
+    try
+        results, info = run_viem_shifted(basis, mesh, wl_0, m_m, m_rows, euler_angles,
+                                         spheroid_mode, N_alpha, N_beta, N_gamma;
+                                         projection = projection, mass = mass)
+    catch e
+        e isa InterruptException && return nothing
+        _log("  FAILED: $(sprint(showerror, e))")
+        _log("  filling with NaN and continuing")
+    end
+    t_solve = (time_ns() - t0_solve) / 1e9
+    if info !== nothing
+        _log("  shifted solve: $(Printf.@sprintf("%.1fs", t_solve))  " *
+             "iters=$(info.iterations)  converged=$(count(info.converged))/$n_b  " *
+             "(operator $(Printf.@sprintf("%.1fs", info.timing.operator)), " *
+             "Krylov $(Printf.@sprintf("%.1fs", info.timing.krylov)))")
+    end
+
+    euler_flat = Matrix{Float64}(undef, num_orientations, 3)
+    for i in 1:num_orientations
+        euler_flat[i, 1] = euler_angles[i][1]
+        euler_flat[i, 2] = euler_angles[i][2]
+        euler_flat[i, 3] = euler_angles[i][3]
+    end
+
+    mie = [compute_mie_reference(wl_0, m_m, r_v_base, row) for row in m_rows]
+    for (jj, i_mp) in enumerate(pending)
+        idx6 = (i_pair, i_mp, shape_idx...)
+        if results === nothing
+            C_abs      = fill(NaN, num_orientations)
+            C_ext      = fill(NaN, num_orientations)
+            S_fw_theta = fill(NaN + NaN*im, num_orientations)
+            S_fw_phi   = fill(NaN + NaN*im, num_orientations)
+            S_bk       = fill(NaN + NaN*im, num_orientations)
+        else
+            C_abs, C_ext, S_fw_theta, S_fw_phi, S_bk = results[jj]
+        end
+        C_abs_mie, C_ext_mie, S_fw_mean_mie, S_bk_mie = mie[jj]
+        sd["Euler_angles"][idx6..., :, :]    = euler_flat
+        sd["C_abs"][idx6..., :]              = C_abs
+        sd["C_ext"][idx6..., :]              = C_ext
+        sd["S_fw_PCAS_theta"][idx6..., :]    = S_fw_theta
+        sd["S_fw_PCAS_phi"][idx6..., :]      = S_fw_phi
+        sd["S_bk_OCBS"][idx6..., :]          = S_bk
+        sd["C_abs_mie"][idx6...]              = C_abs_mie
+        sd["C_ext_mie"][idx6...]              = C_ext_mie
+        sd["S_fw_PCAS_mie"][idx6...]          = S_fw_mean_mie
+        sd["S_bk_OCBS_mie"][idx6...]          = S_bk_mie
+    end
+
+    t_batch = (time_ns() - t_batch_start) / 1e9
+    peak_rss = RSSMonitor.peak_bytes(mon)
+    for (jj, i_mp) in enumerate(pending)
+        idx6 = (i_pair, i_mp, shape_idx...)
+        first_slot = i_pair == 1 && i_mp == 1
+        t_build_slot = first_slot ? t_build_shape : 0.0
+        t_setup_slot = first_slot ? t_setup_shape : 0.0
+        cost["t_build_s"][idx6...]        = t_build_slot
+        cost["t_setup_s"][idx6...]        = t_setup_slot
+        cost["t_solve_s"][idx6...]        = t_solve / n_b
+        cost["t_total_s"][idx6...]        = t_batch / n_b + t_build_slot + t_setup_slot
+        cost["peak_rss_bytes"][idx6...]   = Int64(peak_rss)
+        cost["n_tet"][idx6...]            = Int64(n_tets(mesh))
+        cost["n_dof"][idx6...]            = Int64(n_basis(basis))
+        cost["mean_edge_length"][idx6...] = mean_edge_length(mesh)
+        hist = fill(NaN, MAXITER)
+        if info === nothing
+            cost["iters"][idx6...]        = Int64(0)
+            cost["converged"][idx6...]    = Int8(0)
+            cost["solver_err"][idx6...]   = NaN
+        else
+            cost["iters"][idx6...]        = Int64(info.iterations[jj])
+            cost["converged"][idx6...]    = Int8(info.converged[jj] ? 1 : 0)
+            cost["solver_err"][idx6...]   = Float64(info.residual_norm[jj])
+            hist_n = min(info.iterations[jj], MAXITER)
+            hist[1:hist_n] .= info.residual_history[1:hist_n, jj]
+        end
+        cost["residual_history"][idx6..., :] = hist
+    end
+    _log("  batch written: $n_b conditions  " *
+         "t_total=$(Printf.@sprintf("%.1fs", t_batch))  " *
+         "peak_RSS=$(Printf.@sprintf("%.2f", peak_rss / 2^30)) GB")
+    flush(stdout)
+    return pending
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Main sweep
 # ══════════════════════════════════════════════════════════════════════════════
 function main()
@@ -296,7 +486,15 @@ function main()
 
     _log("Opening $OUTPUT_FILE")
     _log("Solver: $SOLVER_METHOD  tol=$SOLVER_TOL  maxiter=$MAXITER  " *
-         "pitch_ratio=$AIM_PITCH_RATIO  padding=$AIM_PADDING")
+         "pitch_ratio=$AIM_PITCH_RATIO  padding=$AIM_PADDING" *
+         (SHIFTED_RI ? "  [--shifted-ri]" : ""))
+    if SHIFTED_RI
+        SOLVER_METHOD === :aim_gmres || error(
+            "--shifted-ri needs SOLVER_METHOD = :aim_gmres (got :$SOLVER_METHOD)")
+        REUSE_PROJECTION_PER_SHAPE || error(
+            "--shifted-ri needs REUSE_PROJECTION_PER_SHAPE = true: the refractive " *
+            "indices of a batch share one mesh")
+    end
 
     h5open(OUTPUT_FILE, "r+") do f
         t  = f["target"]
@@ -330,6 +528,25 @@ function main()
                     "S(180) = (-S11+S22-1j*S12-1j*S21)(180)/2, per Mishchenko 2000; " *
                     "S(180) is the corrected Eq. (28) of Moteki and Adachi 2024 (erratum)")
             end
+        end
+
+        # A file keeps the mode it was started with: /target/cost/ has a
+        # different time convention in the two modes (see the header).
+        file_shifted = haskey(attributes(t), "shifted_ri") &&
+                       read_attribute(t, "shifted_ri") != 0
+        if SHIFTED_RI != file_shifted &&
+           any(x -> imag(x) != 0.0, read(sd["S_fw_PCAS_mie"]))
+            error("$OUTPUT_FILE holds results of the " *
+                  (file_shifted ? "shifted" : "default") * " mode and cannot be resumed " *
+                  (SHIFTED_RI ? "with" : "without") * " --shifted-ri. Use a new output file.")
+        end
+        if SHIFTED_RI && !file_shifted
+            attrs(t)["shifted_ri"] = Int8(1)
+            attrs(t)["shifted_ri_note"] =
+                "isotropic entries of m_p_xyz_list of a (shape, wavelength) slot solved " *
+                "with one shifted block GMRES on the per-shape mesh; in /target/cost/ " *
+                "t_solve_s and t_total_s hold the batch time divided by the number of " *
+                "entries solved together, peak_rss_bytes the peak of the batch"
         end
 
         # Peak-RSS sampler (daemon task); reset before each slot so the
@@ -438,12 +655,37 @@ function main()
                 sd["r_ve"][shape_idx...] = shape_r_ve
             end
 
+            batch_done = Int[]      # m_p indices filled by the shifted batch of i_pair
             for i_pair in 1:N_pairs, i_mp in 1:N_m_p
                 wl_0    = wl_m_m_pairs[i_pair, 1]
                 m_m     = wl_m_m_pairs[i_pair, 2]
                 m_p_xyz = ComplexF64.(m_p_xyz_list[i_mp, :])
 
                 idx6 = (i_pair, i_mp, i_rv, i_bc, i_ab, i_bt)
+
+                # ── --shifted-ri: the isotropic entries of this wavelength ──
+                # are solved together when the loop enters the wavelength.
+                if SHIFTED_RI && i_mp == 1
+                    empty!(batch_done)
+                    pending = [j for j in 1:N_m_p
+                               if _is_isotropic(m_p_xyz_list[j, :]) &&
+                                  imag(sd["S_fw_PCAS_mie"][i_pair, j, shape_idx...]) == 0.0]
+                    if !isempty(pending)
+                        filled = _shifted_batch!(
+                            sd, cost, mon, i_pair, shape_idx, pending,
+                            shape_basis, shape_mesh, wl_0, m_m, m_p_xyz_list, r_v_base,
+                            euler_angles, spheroid_mode, N_alpha, N_beta, N_gamma,
+                            shape_projection, shape_mass, t_build_shape, t_setup_shape)
+                        if filled === nothing
+                            _log("Interrupted — file closed cleanly.")
+                            RSSMonitor.stop!(mon)
+                            return
+                        end
+                        append!(batch_done, filled)
+                        n_done += length(filled)
+                    end
+                end
+                (SHIFTED_RI && i_mp in batch_done) && continue
 
                 # ── Resume: skip if already computed ─────────────────────
                 existing_mie = sd["S_fw_PCAS_mie"][idx6...]
