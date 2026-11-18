@@ -14,8 +14,9 @@
 Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
-\date{Last updated: 2026-11-19 (Sec.~\ref{sec:shifted-gmres} added after
-block-VIEM.jl v0.7.9; the other sections correspond to v0.7.7)}
+\date{Last updated: 2026-11-19 (Sec.~\ref{sec:shifted-gmres} added and
+Sec.~\ref{sec:S-bk} corrected after block-VIEM.jl v0.7.9; the other
+sections correspond to v0.7.7)}
 
 \begin{document}
 \maketitle
@@ -1221,13 +1222,48 @@ instrument~\cite{Moteki2024} is the linear combination
 \begin{equation}
   S_{\text{bk}}^{\text{OCBS}}
     = \frac{-\,S_{\text{bk},\theta}^{\text{OCBS}}
-            + S_{\text{bk},\phi}^{\text{OCBS}}}{\sqrt{2}}.
+            + S_{\text{bk},\phi}^{\text{OCBS}}}{2}.
   \label{eq:S-bk}
 \end{equation}
-As shown in~\cite{Moteki2024}, combining the two channels with this
-sign pattern cancels the off-diagonal Mishchenko elements
-$S_{12}(\pi)+S_{21}(\pi)=0$ and produces a single, orientation-stable
-scalar observable.
+In terms of the amplitude-matrix elements at the backward direction the
+two channels are
+$S_{\text{bk},\theta}^{\text{OCBS}} = S_{11}(\pi) + i\,S_{12}(\pi)$ and
+$S_{\text{bk},\phi}^{\text{OCBS}} = S_{22}(\pi) - i\,S_{21}(\pi)$.
+The backscattering theorem $S_{21}(\pi) = -S_{12}(\pi)$ cancels the
+off-diagonal elements in \eqref{eq:S-bk}, so that
+\begin{equation}
+  S_{\text{bk}}^{\text{OCBS}}
+    = \frac{1}{2}\,\bigl[-S_{11}(\pi) + S_{22}(\pi)\bigr].
+  \label{eq:S-bk-amplitude-matrix}
+\end{equation}
+This is the backward amplitude $S_{\text{bak}}$ of the CAS-v2 protocol in
+the corrected form of Eq.~(28) of Ref.~\cite{Moteki2024}, which is given
+in the erratum to that paper~\cite{Moteki2024Erratum}.
+
+The factor $1/2$ has the following origin.
+The quarter-wave plate in the return path has its axes at \ang{45} to
+the linear polarisations.
+Each of the two backscattered components therefore reaches the output
+polarisation with the amplitude factor $1/\sqrt{2}$.
+Together with the factor $1/\sqrt{2}$ of the circularly polarised
+incident wave this gives $1/2$.
+The printed Eq.~(28) of Ref.~\cite{Moteki2024} adds the two components
+at full amplitude and has $1/\sqrt{2}$ instead.
+For a sphere $S_{12} = S_{21} = 0$ and $S_{22}(\pi) = -S_{11}(\pi)$,
+so \eqref{eq:S-bk-amplitude-matrix} reduces to
+$S_{\text{bk}}^{\text{OCBS}} = S_{22}(\pi)$.
+In the Rayleigh limit $S_{\text{bk}}^{\text{OCBS}}$ equals the forward
+amplitude.
+
+Until 2026-11-19 block-VIEM.jl used the printed equation.
+The values of $S_{\text{bk}}^{\text{OCBS}}$ computed before that date,
+including the Mie, MSTM and T-matrix reference values, are $\sqrt{2}$
+times the present ones.
+The phase is the same, and so is the ratio of a VIEM value to its
+reference value.
+The stored files under \texttt{viem\_results/paper/} were produced with
+the printed equation and are kept as produced.
+block-DDA\_Py follows the corrected equation from v0.8.2.
 
 %======================================================================
 \section{Validation}
@@ -2436,6 +2472,12 @@ in \texttt{docs/benchmark\_results.md} \S 6.
   single particles in unbounded fluid flow: CAS-v2 protocol,''
   \textit{Opt.\ Express} \textbf{32}(21), 36500--36522 (2024).
   \url{https://doi.org/10.1364/OE.533776}.
+
+\bibitem{Moteki2024Erratum}
+  N.~Moteki and K.~Adachi,
+  ``Measuring the polarized complex forward-scattering amplitudes of
+  single particles in unbounded fluid flow: CAS-v2 protocol: erratum,''
+  \textit{Opt.\ Express} (submitted, 2026).
 
 \bibitem{KrylovJl}
   A.~Montoison and D.~Orban,

@@ -499,6 +499,17 @@ julia --project=. benchmarks/cas_v2/doublet_mstm/compare.jl
   (and therefore `Im(ε_p) > 0`). The `(wl_0, m_m, m_p)` physical
   input API matches block-DDA_Py exactly — the same values can be
   passed to both codes.
+- **Backward amplitude:** `S_bk` (`S_bk_OCBS` in the HDF5 files, *S*<sub>bak</sub>
+  of CAS-v2) is `(−S11 + S22)/2` at the backward direction. This is the
+  corrected Eq. (28) of Moteki and Adachi (2024), given in the erratum to
+  that paper, and the definition of block-DDA_Py from v0.8.2. Until
+  2026-11-19 block-VIEM.jl followed the printed equation, which has `1/√2`
+  in place of `1/2`. Values of `S_bk` computed before that date are `√2`
+  times the present ones, with the same phase. This includes the VIEM, Mie,
+  MSTM and T-matrix values in the files under `viem_results/paper/`, which
+  are kept as produced. Multiply their backward amplitudes by `1/√2` to
+  compare with the present code. The forward amplitudes and the cross
+  sections are not affected.
 - **Euler angles:** ZYZ intrinsic, same as
   `scipy.spatial.transform.Rotation` and block-DDA_Py.
   `R(α,β,γ) = Rz(α)·Ry(β)·Rz(γ)` maps particle-frame to lab-frame;

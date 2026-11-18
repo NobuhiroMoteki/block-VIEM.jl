@@ -22,6 +22,7 @@ using BlockVIEM
     include("test_postprocess.jl")
     include("test_mie_validation.jl")
     include("test_cas_v2.jl")
+    include("test_backward_amplitude.jl")
     include("test_block_krylov.jl")
     include("test_shifted_krylov.jl")
     include("test_shifted_sweep.jl")

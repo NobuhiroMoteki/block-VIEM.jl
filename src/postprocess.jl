@@ -441,7 +441,15 @@ Per-orientation CAS-v2 forward and backward scattering observables, in the
 - `S_fw_mean::ComplexF64`  — PCAS observable, `(S_fw_theta + S_fw_phi)/2`
 - `S_bk_theta::ComplexF64` — backward scattering amplitude, θ-channel
 - `S_bk_phi::ComplexF64`   — backward scattering amplitude, φ-channel
-- `S_bk::ComplexF64`       — OCBS observable, `(-S_bk_theta + S_bk_phi)/√2`
+- `S_bk::ComplexF64`       — OCBS observable `S_bak` of CAS-v2,
+  `(-S_bk_theta + S_bk_phi)/2`. With the amplitude-matrix elements at the
+  backward direction, `S_bk_theta = S11 + i S12` and
+  `S_bk_phi = S22 - i S21`, so `S_bk = (-S11 + S22)/2` by the backscattering
+  theorem `S21 = -S12`. This is the corrected Eq. (28) of Moteki and Adachi,
+  Opt. Express 32, 36500 (2024), given in the erratum to that paper. The
+  printed equation has `1/√2` in place of `1/2`. Until 2026-11-19 this code
+  followed the printed equation, and its `S_bk` was `√2` times the present
+  one. block-DDA_Py uses the corrected form from v0.8.2.
 """
 struct CASv2Result
     S_fw_theta::ComplexF64
@@ -503,7 +511,12 @@ function compute_cas_observables(basis::AbstractDivBasis, D_coeffs::AbstractVect
     # Backward (OCBS)
     S_bk_theta = inv_4pi * sqrt2 * _project_far_field(F_bk, orientation.theta_sca_bk)
     S_bk_phi   = inv_4pi * (-im) * sqrt2 * _project_far_field(F_bk, orientation.phi_sca_bk)
-    S_bk       = (-S_bk_theta + S_bk_phi) / sqrt2
+    # Corrected Eq. (28) of Moteki and Adachi (2024), erratum: the quarter-wave
+    # plate in the return path has its axes at 45° to the linear polarizations,
+    # so each backscattered component reaches the output polarization with the
+    # amplitude factor 1/√2. Together with the factor 1/√2 of the circularly
+    # polarized incident wave this gives 1/2.
+    S_bk       = (-S_bk_theta + S_bk_phi) / 2
 
     return CASv2Result(S_fw_theta, S_fw_phi, S_fw_mean,
                        S_bk_theta, S_bk_phi, S_bk)

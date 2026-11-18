@@ -213,7 +213,7 @@ v0.7.4 以前は serial bottleneck があったが O(kL²) Givens QR への書�
 | `C_abs` | Float64 | 同上 | μm² | 吸収断面積 |
 | `S_fw_PCAS_theta` | ComplexF64 | 同上 | μm | 前方散乱振幅 θ 成分 = `S11(0) + i·S12(0)` |
 | `S_fw_PCAS_phi` | ComplexF64 | 同上 | μm | 前方散乱振幅 φ 成分 = `S22(0) − i·S21(0)` |
-| `S_bk_OCBS` | ComplexF64 | 同上 | μm | 後方散乱振幅 = `(S11+S22+i·S12−i·S21)(180°)/√2` |
+| `S_bk_OCBS` | ComplexF64 | 同上 | μm | 後方散乱振幅 = `(−S11+S22−i·S12−i·S21)(180°)/√2` (theory_note.tex §S-bk; `(−S_bk_θ + S_bk_φ)/√2` with `S_bk_θ = S11+i·S12`, `S_bk_φ = S22−i·S21` at θ=π)。**注記 (2026-11-19)**: これは `viem_results/paper/` の論文用データを生成した時点の定義 (Moteki and Adachi 2024 の印刷版 Eq. (28)) で、保存済みファイルはこの定義のまま残してある。2026-11-19 以降のコードは erratum の修正式 `(−S11+S22)(180°)/2` に従い、値は保存済みデータの 1/√2 倍になる (位相、VIEM/参照値の比は同じ)。block-DDA_Py は v0.8.2 から修正式。 |
 | `Euler_angles` | Float64 | (...,100,3) | rad | (α, β, γ) per orientation |
 | `r_ve` | Float64 | (N_rv,1,1,1) | μm | 離散化メッシュ体積から計算した実効体積等価半径 |
 
@@ -227,6 +227,11 @@ v0.7.4 以前は serial bottleneck があったが O(kL²) Givens QR への書�
 
 doublet 形状でも書き込まれるが、Rayleigh 領域以外では参考値（厳密解は MSTM、§11 参照）。
 
+`S_bk_OCBS_mie` と、MSTM・T-matrix 参照ファイル (`mstm_*.hdf5`, `tmm_*.hdf5`) の `S_bk` も、保存済みのものは
+印刷版 Eq. (28) の `1/√2` で計算されている (上の注記と同じ)。新しく生成するファイルは修正式で書かれ、
+`S_definition` 属性が `.../2` になるので、属性で新旧を区別できる。新旧の `S_bk` を比べるときは保存済みの値に
+1/√2 を掛ける。`run_viem.jl` は、旧定義の結果が入ったファイルへの追記 (中断再開) を拒否する。
+
 ### 8.3 規格化光学断面積（解析時に算出）
 
 論文 Figure では `Q_X = C_X / (π · a_eq²)` を使用。`a_eq` は HDF5 の `r_v_base_list` を使う
@@ -237,7 +242,9 @@ doublet 形状でも書き込まれるが、Rayleigh 領域以外では参考値
 `/target` group attrs:
 - `light_source`: 形状ファイル毎にハードコード（例: "(paper) λ=0.638 μm, n=2.0+0.0i, sphere"）
 - `polarization_state`: "left-handed circular: E0_theta=1/sqrt(2), E0_phi=1j/sqrt(2)"
-- `S_definition`: BH83 → MI02 → CAS-v2 変換式（Mishchenko 2000 準拠）
+- `S_definition`: BH83 → MI02 → CAS-v2 変換式（Mishchenko 2000 準拠）。後方は 2026-11-19 以降
+  `S(180) = (-S11+S22-1j*S12-1j*S21)(180)/2`（Moteki and Adachi 2024 erratum の修正式）。
+  それ以前に作られたファイルは `.../sqrt(2)` と書かれている
 
 block-DDA_Py の create_h5py.ipynb と byte 互換。
 

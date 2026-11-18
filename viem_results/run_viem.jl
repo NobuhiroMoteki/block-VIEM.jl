@@ -309,6 +309,29 @@ function main()
             "viem_results/paper/<shape>_<material>.jl (v0.7.3+).")
         cost = t["cost"]
 
+        # S_bk_OCBS is (-S11+S22)(180°)/2 since 2026-11-19 (corrected Eq. (28)
+        # of Moteki and Adachi 2024, erratum). A file created before that
+        # declares the 1/sqrt(2) form in S_definition. If it already holds
+        # results, filling the rest with this code would mix the two
+        # definitions in one file, so the run is refused. An empty file is
+        # relabelled and filled with the present definition.
+        if haskey(attributes(sd), "S_definition")
+            s_def = String(read_attribute(sd, "S_definition"))
+            if occursin("/sqrt(2)", s_def)
+                any(x -> imag(x) != 0.0, read(sd["S_fw_PCAS_mie"])) && error(
+                    "$OUTPUT_FILE holds S_bk_OCBS values of the 1/sqrt(2) definition " *
+                    "(S_definition = \"$s_def\"). The present code writes " *
+                    "(-S11+S22)(180°)/2, which is 1/sqrt(2) times those values. " *
+                    "Keep this file as it is and run the remaining conditions in a " *
+                    "new file made by create_h5.jl or create_paper_h5.")
+                delete_attribute(sd, "S_definition")
+                attrs(sd)["S_definition"] = replace(s_def,
+                    r"S\(180\) = .*$" =>
+                    "S(180) = (-S11+S22-1j*S12-1j*S21)(180)/2, per Mishchenko 2000; " *
+                    "S(180) is the corrected Eq. (28) of Moteki and Adachi 2024 (erratum)")
+            end
+        end
+
         # Peak-RSS sampler (daemon task); reset before each slot so the
         # recorded peak reflects just that slot's allocations.
         mon = RSSMonitor.Monitor(0.2)

@@ -194,6 +194,9 @@ function write_convergence_h5(path, shape, material, m_p_xyz, p, results, mie)
         attrs(g)["gre_beta"]   = p.beta
         attrs(g)["n_lc_points"]= n
         attrs(g)["units"]      = "C:[um^2], S:[um], lc:[um], t:[s]"
+        attrs(g)["S_bk_definition"] = "(-S11+S22-1j*S12-1j*S21)(180)/2, corrected Eq. (28) of " *
+                                      "Moteki and Adachi 2024 (erratum); files without this " *
+                                      "attribute hold the 1/sqrt(2) form"
         attrs(g)["orientation"]= "ZYZ Euler (0,0,0): incidence +z, e0_inc +x"
 
         write_dataset(g, "m_p_xyz", ComplexF64.(m_p_xyz))

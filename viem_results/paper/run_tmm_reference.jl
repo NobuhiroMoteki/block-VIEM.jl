@@ -31,8 +31,10 @@
 #                  = F_TM_fw[2,2] + i·F_TM_fw[2,1]
 #       S_bk_theta = S_M11(π) + i·S_M12(π) = F_bk[1,1] + i·F_bk[1,2]
 #       S_bk_phi   = S_M22(π) - i·S_M21(π) = F_bk[2,2] - i·F_bk[2,1]
-#       S_bk       = (-S_bk_theta + S_bk_phi) / √2
-#                  = (-F_bk[1,1] + F_bk[2,2] - i·F_bk[1,2] - i·F_bk[2,1]) / √2
+#       S_bk       = (-S_bk_theta + S_bk_phi) / 2
+#                  = (-F_bk[1,1] + F_bk[2,2] - i·F_bk[1,2] - i·F_bk[2,1]) / 2
+#     (corrected Eq. (28) of Moteki and Adachi 2024, erratum; 1/√2 until
+#      2026-11-19, see docs/paper_simulation_conditions_viem.md)
 #     (per docs/theory_note.tex Eq. eq:S-bk-ocbs and bl_dda/scatterer.py)
 #   * Per-orientation cross sections:
 #       C_ext = (4π/k) · Im(S_fw_mean)                 (optical theorem)
@@ -81,8 +83,8 @@ function tm_to_cas_v2_backward(F_bk::AbstractMatrix{<:Complex})
     # Theory-note Eq.(eq:S-bk-ocbs):
     #   S_bk_theta = S_M11(π) + i·S_M12(π) = F_bk[1,1] + i·F_bk[1,2]
     #   S_bk_phi   = S_M22(π) - i·S_M21(π) = F_bk[2,2] - i·F_bk[2,1]
-    #   S_bk       = (-S_bk_theta + S_bk_phi) / √2
-    return (-F_bk[1, 1] + F_bk[2, 2] - im * F_bk[1, 2] - im * F_bk[2, 1]) / sqrt(2)
+    #   S_bk       = (-S_bk_theta + S_bk_phi) / 2
+    return (-F_bk[1, 1] + F_bk[2, 2] - im * F_bk[1, 2] - im * F_bk[2, 1]) / 2
 end
 
 # ──────────────────────────────────────────────────────────────────────
@@ -271,7 +273,8 @@ function main()
         attrs(g)["S_definition"]    = ("S(0)_theta = (S2-iS3)/(-ik), " *
                                        "S(0)_phi   = (S1+iS4)/(-ik), " *
                                        "S_fw_mean  = (S(0)_theta + S(0)_phi)/2, " *
-                                       "S_bk = (S11+S22+i*S12-i*S21)(180°)/sqrt(2)")
+                                       "S_bk = (-S11+S22-i*S12-i*S21)(180°)/2 " *
+                                       "(corrected Eq. (28) of Moteki and Adachi 2024, erratum)")
         attrs(g)["geometry"]        = ("oblate spheroid, semi-axes a:b:c = $(bc_ratio):$(bc_ratio):1 " *
                                        "(a=b>c), symmetry axis = +z, " *
                                        "β = angle between incidence (+z lab) and c-axis")

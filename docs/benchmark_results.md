@@ -58,6 +58,15 @@ Cross-section errors are
 $|\Delta C| / C^\text{ref}$. "Phase err." is
 $\arg(S^\text{VIEM} / S^\text{ref})$.
 
+**Backward amplitude.** Since 2026-11-19 `S_bk` is
+$(-S_{11} + S_{22})/2$ at the backward direction, the corrected Eq. (28)
+of Moteki and Adachi (2024). The benchmarks of §1–§10 were run with the
+printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The VIEM
+value and its reference changed by the same factor, so the relative and
+phase errors of `S_bk` reported below are unchanged. Absolute `S_bk`
+values in the stored result files of these benchmarks are $\sqrt{2}$
+times those of the present code.
+
 ---
 
 ## 1. Mie sphere, dielectric
@@ -108,8 +117,12 @@ $$
 $$
 S_\text{fw,mean}^\text{PCAS} = +0.03877 + 0.01397\,i,
 \qquad
-S_\text{bk}^\text{OCBS} = +0.05946 + 0.01907\,i.
+S_\text{bk}^\text{OCBS} = +0.04204 + 0.01348\,i.
 $$
+
+The value of $S_\text{bk}^\text{OCBS}$ follows the corrected definition
+(§0). With the printed equation used when this benchmark was run it was
+$+0.05946 + 0.01907\,i$.
 
 Errors below are relative to Mie evaluated at the actual mesh
 volume-equivalent radius (so residual mesh-volume bias does not

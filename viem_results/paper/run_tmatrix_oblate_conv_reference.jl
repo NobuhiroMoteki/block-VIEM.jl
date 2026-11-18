@@ -61,7 +61,8 @@ end
 
 function cas_v2_observables(S_fwd::AbstractMatrix, S_bwd::AbstractMatrix)
     # PCAS forward channels and OCBS backward (docs/theory_note.tex Eq. eq:S-bk):
-    #   S_bk = (−S_bk_θ + S_bk_φ) / √2,
+    #   S_bk = (−S_bk_θ + S_bk_φ) / 2   (corrected Eq. (28) of Moteki and
+    #   Adachi 2024, erratum; 1/√2 until 2026-11-19),
     #   S_bk_θ = S11(π) + i S12(π);  S_bk_φ = S22(π) − i S21(π).
     # Backward basis-convention bridge: TransitionMatrices.jl returns the
     # scattering matrix in the standard spherical basis at (θ_s, φ_s). At
@@ -79,7 +80,7 @@ function cas_v2_observables(S_fwd::AbstractMatrix, S_bwd::AbstractMatrix)
     S21_bk = -S_bwd[2,1]; S22_bk = -S_bwd[2,2]
     S_bk_theta = S11_bk + 1im * S12_bk
     S_bk_phi   = S22_bk - 1im * S21_bk
-    S_bk       = (-S_bk_theta + S_bk_phi) / sqrt(2)
+    S_bk       = (-S_bk_theta + S_bk_phi) / 2
 
     return S_fw_theta, S_fw_phi, S_bk
 end
