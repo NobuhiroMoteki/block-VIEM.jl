@@ -4,7 +4,8 @@
 
 本リポジトリはソルバの実装・検証を完了している。**新規モジュールを設計する段階ではない**；論文掲載用の本番計算を `src/` の既存実装で実行するフェーズ。
 
-- 検証状況 (2026-11-19, v0.8.1): 14,749 / 14,749 テスト全パス on Julia 1.12.5（v0.8.0 の 14,720 件 + 異方性 AIM 29 件）。
+- 検証状況 (2026-11-19, v0.8.2): 14,780 / 14,780 テスト全パス on Julia 1.12.5（v0.8.1 の 14,749 件 + 集合体メッシュ 31 件）。
+- 検証状況 (2026-11-19, v0.8.1): 14,749 / 14,749 テスト全パス（v0.8.0 の 14,720 件 + 異方性 AIM 29 件）。
 - 検証状況 (2026-11-19, v0.8.0): 14,720 / 14,720 テスト全パス（v0.7.9 までの 14,439 件 + shift スイープ 238 件 + `S_bk` 43 件）。
 - 検証状況 (2026-04-21): 14,422 / 14,422 テスト全パス on Julia 1.12.5。Mie 球面 (低/高屈折率・Au)、CAS-v2 2 球 doublet (vs MSTM)、AIM vs 直接法、block-DDA_Py 出力互換の各検証で回帰なし。
 - 実装モジュール (src/):
@@ -50,7 +51,7 @@
 
 ### 形状パラメータの換算
 
-- **2 球 doublet の半径換算**: 体積等価半径 `a_eq` から monomer 半径 `R = a_eq / 2^(1/3) ≈ 0.7937 · a_eq`、軸方向 gap `g = 0.1 · R` (README Benchmark 節と同比)。a_eq = 0.05, 0.1, 0.2, 0.4 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm。メッシュは `mesh_sphere_aggregate(...; overlap_factor = 0)` で作る（§12 参照。既定の `overlap_factor = 0.02` では gap が `0.0595 R` になる）。
+- **2 球 doublet の半径換算**: 体積等価半径 `a_eq` から monomer 半径 `R = a_eq / 2^(1/3) ≈ 0.7937 · a_eq`、軸方向 gap `g = 0.1 · R` (README Benchmark 節と同比)。a_eq = 0.05, 0.1, 0.2, 0.4 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm。メッシュは `mesh_sphere_aggregate(...; overlap_factor = 0)` で作り、中心間距離は `2.1 R`（§12 参照）。
 - **扁平回転楕円体**: 3 半軸 `(a, b, c)`, `a = b`, `b/c = 3` → `c = (a_eq³ / (b/c)²)^(1/3) = a_eq / 9^(1/3)`, `a = b = 3c`。
 - **GRE**: `GREParams(a_eq, 1.0, 1.0, 0.2)` でそのまま構築（位置引数の順は `r_v_base, bc_ratio, ab_ratio, beta`。キーワード形式は無い）。
 
@@ -166,12 +167,16 @@ HDF5 スイープを起動する前に必ず:
 - 新しく作る HDF5 の `S_definition` 属性は `.../2`。`run_viem.jl` は旧定義の結果が入ったファイルへの追記を拒否する
 - 回帰ガード: [test/test_backward_amplitude.jl](test/test_backward_amplitude.jl) は常時グリーン
 
-## 12. v0.8.1 の修正（2026-11-19）
+## 12. v0.8.1 / v0.8.2 の修正（2026-11-19）
 
-- **doublet の gap**: `run_viem.jl`, `run_rhs_scaling.jl`, `estimate_cost.jl` は `mesh_sphere_aggregate(...; overlap_factor = 0)` で doublet を作る。gap は文書と MSTM 参照どおり `0.1 R`。v0.8.0 までは既定の `overlap_factor = 0.02` のままで、メッシュ上の gap は `0.0595 R` だった
-  - `viem_results/paper/doublet_*.hdf5` は `0.0595 R` で計算されている（記録された `n_tet` が一致）。`mstm_doublet_*.hdf5` は `0.1 R`。保存済みファイルは書き換えない
-  - 現行の `run_viem.jl` は doublet ファイルの `/target` に属性 `doublet_gap_over_R = 0.1` を書き、この属性が無く結果が入っているファイルへの追記を拒否する
-  - 離れた単量体の集合体では必ず `overlap_factor = 0` を渡す（`mesh_sphere_aggregate` の docstring の警告を参照）
+- **doublet の形状**: 中心間距離 `2.1 R`、gap `0.1 R`（文書と MSTM 参照どおり）
+  - v0.8.2: `mesh_sphere_aggregate` は、離れた部分からなる集合体を部分ごとに体積合わせする（`_rescale_to_monomer_volumes!`）。各球を自分の中心のまわりで公称体積に合わせるので、中心間距離はメッシュの粗さにも `overlap_factor` にも依らない。つながった集合体は従来どおり原点まわりの一様スケール
+  - 経緯: v0.8.0 までの `run_viem.jl` は既定の `overlap_factor = 0.02` と全体の一様スケールで、中心間距離が `2.06–2.08 R`（表面間の gap `0.0595 R`）だった。v0.8.1 は `overlap_factor = 0` にしたが一様スケールのままで `2.10–2.13 R`。v0.8.2 で `2.100 R`
+  - `viem_results/paper/doublet_*.hdf5` は v0.8.2 で作り直した（2026-11-19、supermicro-647）。`S_bk` は修正式、`/target` に属性 `doublet_gap_over_R = 0.1`。v0.7.8 の本番ファイルは git 履歴（`416cece`）にある。cost の値は他の論文用ファイルと計算機が違う
+  - MSTM との差（β 5 点の最大）: Au の `C_ext` が 13 % / 5 % / 5 % → 1.5 % / 2.0 % / 1.5 %、n15 の `S_bk`（a_eq 0.1, 0.2 μm）が 4.7 % / 16 % → 0.3 % / 4.7 %。誘電体の小粒径の `S_fw` は 0.2–0.9 % → 0.4–1.7 %（旧メッシュの中心間距離が粗いメッシュでたまたま 2.1 R に近かった）
+  - Au の doublet は 3 サイズとも 200 反復で未収束（残差 8e-5〜5.7e-4）。v0.7.8 の本番でも同じ
+  - `run_viem.jl` は、属性 `doublet_gap_over_R` が無く結果が入っている doublet ファイルへの追記を拒否する
+  - README の doublet ベンチマーク（`benchmarks/cas_v2/doublet_mstm/`、docs/benchmark_results.md §7–§8）の数値は v0.8.1 以前のメッシャーのもの。未再実行
 - **異方性の AIM 経路**: 質量項は `Σ_α (1/ε_α) M_α`（`AIMOperator.mass_weighted`、`assemble_weighted_mass_matrix`）。v0.8.0 までの AIM 経路は `1/ε_α` の平均を使っており、異方性粒子の観測量が 5–25 % ずれていた。`:dense` は以前から正しい。等方の結果は変わらない
   - v0.8.0 以前に `:aim_gmres` で作った異方性の結果（`ironoxide_sweep_h5.jl --form-biref` / `--biaxial` の表、`form_birefringence_probe.jl`、`biaxial_probe.jl`）は作り直しが要る
   - 回帰ガード: [test/test_anisotropic.jl](test/test_anisotropic.jl) の AIM 対 密行列の比較

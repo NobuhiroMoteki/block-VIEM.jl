@@ -5,7 +5,7 @@ sweeps.  Mirrors `block-DDA_Py/docs/paper_simulation_conditions_dda.md` for
 direct shape × material × N_DOF comparison between the two solvers.
 
 - **Repository**: `~/Julia/block-VIEM.jl`
-- **Code version**: 論文用データは v0.7.8 で生成（2026-04-28、commit `416cece`）。本文書の記述は v0.8.1（2026-11-19）まで反映
+- **Code version**: 論文用データは v0.7.8 で生成（2026-04-28、commit `416cece`）。本文書の記述は v0.8.2（2026-11-19）まで反映
 - **Authoring date**: 2026-04-24（最終更新 2026-11-19）
 - **Sister project**: [block-DDA_Py](file:///home/moteki/Python/block-DDA_Py) (paper-symmetric)
 
@@ -71,7 +71,8 @@ n20 (非吸収) で N_DOF が ~4× 縮小し両ソルバとも安定収束見込
 - **2 球クラスター (doublet)**: 等半径 2 球
   - monomer 半径: `R = a_eq / 2^(1/3) ≈ 0.7937 a_eq`
   - 軸方向 surface-to-surface gap: `g = 0.1 R`
-  - **注記 (2026-11-19)**: v0.8.0 までの `run_viem.jl` は `mesh_sphere_aggregate` を既定の `overlap_factor = 0.02` で呼んでいた。半径を 1.02 倍してから体積を戻すため、メッシュ上の gap は `0.0595 R` だった。`viem_results/paper/doublet_*.hdf5` はこの gap で計算されており（記録された `n_tet` が一致）、そのまま残してある。MSTM 参照 `mstm_doublet_*.hdf5` は `0.1 R`。現行コードは `overlap_factor = 0` で `0.1 R` を作り、`/target` に属性 `doublet_gap_over_R = 0.1` を書く。VIEM 同士で 2 つの gap を比べると、前方散乱振幅で 0.5–2 %、`S_bk` で 3–28 % の差（a_eq = 0.1, 0.2 μm、n15・n20）
+  - 中心間距離は `2.1 R`。v0.8.2 から `mesh_sphere_aggregate` が各球を自分の中心のまわりで公称体積に合わせるので、メッシュの粗さに依らない
+  - **注記 (2026-11-19)**: それ以前はメッシュ全体を一様にスケールしていた。v0.8.0 までの `run_viem.jl` は既定の `overlap_factor = 0.02` も使っており、中心間距離は `2.06–2.08 R`（多面体の表面間の gap は `0.0595 R`）。v0.8.1 では `2.10–2.13 R`。`viem_results/paper/doublet_*.hdf5` は v0.8.2 で作り直した（2026-11-19、supermicro-647、`S_bk` は修正式、`/target` に属性 `doublet_gap_over_R = 0.1`）。v0.7.8 の本番ファイルは git 履歴（`416cece`）にある。作り直したファイルの cost は他の論文用ファイルと計算機が違うので、所要時間は横並びで比べられない。MSTM 参照 `mstm_doublet_*.hdf5` は `0.1 R` で、`S_bk` は旧定義のまま（比較時は 1/√2 を掛ける）
   - **doublet 軸 = 粒子 z 軸**（spheroid mode の α-展開公式が適用可能になる前提条件）
   - a_eq = 0.05, 0.10, 0.20, 0.40 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm
 
@@ -103,6 +104,9 @@ apply_scale!(mesh, s)
 # 結果: total_volume(mesh) == (4π/3)·r_v_base³ to machine precision
 #       r_ve == r_v_base
 ```
+
+離れた単量体からなる集合体（doublet など）は、v0.8.2 からつながった部分ごとにスケールする。各部分をその単量体の公称体積に合わせ、
+単量体の中心（複数なら `r³` 重みの平均）を固定するので、中心間距離は変わらない。全体の体積は従来どおり公称値に一致する。
 
 理由:
 
@@ -433,7 +437,8 @@ DDA 側との対称項目（要同期）:
 | **v0.7.7** | `60a824a` | **volume-preserving rescale** (apply_scale!) を gre_mesh / mesh_sphere_aggregate に追加。`V_mesh = (4π/3)·r_v_base³` 厳密化で DDA `Target.__init__` と対称、Rayleigh 領域の C_ext/C_abs/\|S_fw\| systematic bias 除去 |
 | v0.7.8 | `a5f8c69` | 論文用スイープと診断を完了。保存済みデータ（`416cece`）はこの版で生成 |
 | **v0.8.0** | `e50a182` | shifted block GMRES による屈折率スイープ（`--shifted-ri`）、`precond = :mass_right`、`S_bk` を erratum の `(−S11+S22)/2` に訂正 |
-| **v0.8.1** | (本コミット) | `run_viem.jl` の doublet の gap を `0.0595 R` → `0.1 R` に修正。AIM 経路の異方性質量項を成分ごとの重みに修正（v0.8.0 以前の異方性の AIM 結果は 5–25 % ずれる。`:dense` は正しい） |
+| v0.8.1 | `853bf28` | `run_viem.jl` の doublet の gap を `0.0595 R` → `0.1 R` に修正。AIM 経路の異方性質量項を成分ごとの重みに修正（v0.8.0 以前の異方性の AIM 結果は 5–25 % ずれる。`:dense` は正しい） |
+| **v0.8.2** | (本コミット) | `mesh_sphere_aggregate`: 離れた単量体は部分ごとに体積合わせ（中心間距離を保つ）。論文用 doublet 3 ファイルをこの版で作り直し |
 
 ---
 
