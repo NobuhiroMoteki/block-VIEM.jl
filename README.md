@@ -70,7 +70,8 @@ block-VIEM.jl is validated against four independent references:
 the **Mie series** (sphere, dielectric and plasmonic Au), an
 analytical **α-symmetry identity** (oblate spheroid), the
 multi-sphere T-matrix package **MSTMforCAS.jl** (touching doublet,
-dielectric and plasmonic Au), and **block-DDA_Py** (spheroid, GRE
+dielectric and plasmonic Au; the numbers of this benchmark are withheld
+until it has been re-run with v0.8.2), and **block-DDA_Py** (spheroid, GRE
 β > 0, anisotropic ε_p). Sub-1 % accuracy on all five CAS-v2
 observables is reached at modest mesh sizes for the Mie reference;
 agreement against the independent codes is at the few-percent
@@ -509,12 +510,13 @@ on a touching doublet of equal spheres (radius 0.030 μm, gap
 0.003 μm, λ₀ = 0.638 μm) at three orientations and two materials
 (polystyrene-like dielectric and Johnson & Christy 1972 gold).
 Numerically exact MSTM reference at VSWF truncation $N = 15$.
-For the dielectric doublet $|S_\text{fw,mean}|$ matches MSTM to
-~ 1.6 %; for the plasmonic Au doublet the error grows from 1.3 % at
-β = 0 to 4.0 % at β = π/2 with strong polarisation anisotropy
-(Im $S_{\text{fw},\theta}$ reaching 10.5 % at β = π/2). Mesh
-refinement to $\ell_c = R/8$ confirms the theoretical SWG
-convergence rate $p \approx 2$ on every observable.
+
+**Results withheld (2026-11-19).** The numbers of this benchmark were
+computed before v0.8.2, with the previous doublet mesher (centre
+distance about 1 % too large at $\ell_c = R/5$) and the previous
+definition of the backward amplitude. They are not shown until the
+benchmark has been re-run. The earlier results are in the git history
+(commit `d1482fa`).
 
 **Note on MSTMforCAS truncation order.** The MSTMforCAS
 auto-truncation returns $N_\text{trunc} = 3$ at $x \approx 0.3$,
@@ -524,9 +526,8 @@ between $N = 3$ and the converged reference).  We therefore force
 $N_\text{trunc} = 15$ in `run_mstm.jl` for both materials, reaching
 rtol $\le 10^{-6}$ — see `check_trunc_convergence.jl`.
 
-Full numerical conditions, per-orientation Re/Im-resolved tables,
-the $\ell_c$-refinement convergence-rate fit, and the Phase A
-AIM-memory scaling are documented in
+The numerical conditions and the Phase A AIM-memory scaling are
+documented in
 **[docs/benchmark_results.md §7–§8](docs/benchmark_results.md#7-two-sphere-doublet-vs-mstm)**.
 
 ```bash
