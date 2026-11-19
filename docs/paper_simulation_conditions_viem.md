@@ -5,8 +5,8 @@ sweeps.  Mirrors `block-DDA_Py/docs/paper_simulation_conditions_dda.md` for
 direct shape × material × N_DOF comparison between the two solvers.
 
 - **Repository**: `~/Julia/block-VIEM.jl`
-- **Code version**: v0.7.6 (commit on `main`, tag pending)
-- **Authoring date**: 2026-04-24
+- **Code version**: 論文用データは v0.7.8 で生成（2026-04-28、commit `416cece`）。本文書の記述は v0.8.1（2026-11-19）まで反映
+- **Authoring date**: 2026-04-24（最終更新 2026-11-19）
 - **Sister project**: [block-DDA_Py](file:///home/moteki/Python/block-DDA_Py) (paper-symmetric)
 
 ---
@@ -20,7 +20,7 @@ direct shape × material × N_DOF comparison between the two solvers.
 | Package manifest | `Manifest.toml` tracked, `Pkg.update()` / `Pkg.resolve()`禁止 |
 | Threading | `julia --project=. -t auto` (matches `Sys.CPU_THREADS`) |
 | BLAS threads | default (12 on this machine; do **not** force `BLAS.set_num_threads(1)`) |
-| Test status | 14,422 / 14,422 passing |
+| Test status | v0.7.8: 14,422 / 14,422 passing。v0.8.0: 14,720 / 14,720 passing |
 
 ---
 
@@ -30,7 +30,7 @@ direct shape × material × N_DOF comparison between the two solvers.
 |---|---|---|
 | Vacuum wavelength λ₀ | **0.638 μm** | hardcoded in [viem_results/paper/_common.jl::WL_PAPER](../viem_results/paper/_common.jl) |
 | Background medium m_m | **1.0** (vacuum) | `M_M_PAPER` |
-| Time convention | `exp(+jωt)` (BH83 / block-DDA_Py compatible) | outgoing wave is `exp(-jk₀R)/(4πR)` |
+| Time convention | `exp(−iωt)` (BH83 / block-DDA_Py compatible) | outgoing wave is `exp(+ik₀R)/(4πR)` |
 
 ---
 
@@ -71,6 +71,7 @@ n20 (非吸収) で N_DOF が ~4× 縮小し両ソルバとも安定収束見込
 - **2 球クラスター (doublet)**: 等半径 2 球
   - monomer 半径: `R = a_eq / 2^(1/3) ≈ 0.7937 a_eq`
   - 軸方向 surface-to-surface gap: `g = 0.1 R`
+  - **注記 (2026-11-19)**: v0.8.0 までの `run_viem.jl` は `mesh_sphere_aggregate` を既定の `overlap_factor = 0.02` で呼んでいた。半径を 1.02 倍してから体積を戻すため、メッシュ上の gap は `0.0595 R` だった。`viem_results/paper/doublet_*.hdf5` はこの gap で計算されており（記録された `n_tet` が一致）、そのまま残してある。MSTM 参照 `mstm_doublet_*.hdf5` は `0.1 R`。現行コードは `overlap_factor = 0` で `0.1 R` を作り、`/target` に属性 `doublet_gap_over_R = 0.1` を書く。VIEM 同士で 2 つの gap を比べると、前方散乱振幅で 0.5–2 %、`S_bk` で 3–28 % の差（a_eq = 0.1, 0.2 μm、n15・n20）
   - **doublet 軸 = 粒子 z 軸**（spheroid mode の α-展開公式が適用可能になる前提条件）
   - a_eq = 0.05, 0.10, 0.20, 0.40 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm
 
@@ -88,7 +89,7 @@ lc = min( λ₀ / (|m_p|_max · N_pw),    # 波長制約 (N_pw = 10)
           0.3 · c_min / 3 )            # GRE β > 0 時の相関長制約
 ```
 
-- `|m_p|` は ComplexF64 のモジュラス最大（Au は `|0.18+3.48i|≈3.49`）
+- `|m_p|` は ComplexF64 のモジュラス最大（Au は `|0.17525+3.4830i|≈3.49`）
 - 本番計算は既定 `N_pw = 10`, `N_per_radius = 3`
 - `aggregate_mesh.jl::adaptive_lc_aggregate` は doublet 用、c_min = 各 monomer 半径
 
@@ -239,7 +240,7 @@ doublet 形状でも書き込まれるが、Rayleigh 領域以外では参考値
 
 ### 8.4 偏光・入射状態
 
-`/target` group attrs:
+`/target` group attrs（`S_definition` だけは `/target/simulated_data` の属性）:
 - `light_source`: 形状ファイル毎にハードコード（例: "(paper) λ=0.638 μm, n=2.0+0.0i, sphere"）
 - `polarization_state`: "left-handed circular: E0_theta=1/sqrt(2), E0_phi=1j/sqrt(2)"
 - `S_definition`: BH83 → MI02 → CAS-v2 変換式（Mishchenko 2000 準拠）。後方は 2026-11-19 以降
@@ -268,7 +269,7 @@ block-DDA_Py の create_h5py.ipynb と byte 互換。
 | `residual_history` | Float64 | shape_cond × MAXITER_HISTORY (=200, v0.7.6+) | per-iter 残差、`NaN` パディング (v0.7.5+) |
 
 `shape_cond = (N_pairs, N_m_p, N_rv, N_bc, N_ab, N_bt)`。
-DDA 側 `/target/cost/` と 8 fields (時間 + peak RSS + iters + converged + solver_err + residual_history) は **bit-for-bit 一致**。残り 3 つは VIEM 名称、DDA との 1:1 物理的対応。
+DDA 側 `/target/cost/` と 8 fields (時間 4 つ + peak RSS + iters + converged + solver_err) および residual_history は **bit-for-bit 一致**。残り 3 つは VIEM 名称、DDA との 1:1 物理的対応。
 
 ### 9.1 RSS sampler
 
@@ -284,13 +285,14 @@ DDA 側 `/target/cost/` と 8 fields (時間 + peak RSS + iters + converged + so
 `run_viem.jl` の `_log(msg)` は HH:MM:SS タイムスタンプ付きで stdout に出力:
 
 ```
-[09:35:01]   mesh+projection+mass cached (1.2s)
+[09:35:00] shape=(1, 1, 1, 1)  mesh: 1383 tets, 3092 DOFs, r_ve=0.05000, pitch=0.0081 (1.9s)
+[09:35:01]   projection + mass cached (1.2s)
 [09:35:21]     [spheroid, L=5]: converged ✓  iters=23
 [09:35:22]   solve: 18.5s  iters=23  converged=true
-[09:35:22]   C_ext(mean)=2.1e-01  Mie C_ext=2.0e-01  [3 done, 0 skipped / 4 total]  t_total=20.1s  peak_RSS=2.3 GB
+[09:35:22]   C_ext(mean)=2.1000e-01  Mie C_ext=2.0000e-01  [3 done, 0 skipped / 4 total]  t_total=20.1s  peak_RSS=2.30 GB
 ```
 
-stdout は orchestrator が `/tmp/auto_kickoff.log` に redirect する想定。flush は per-slot
+stdout は起動スクリプト `viem_results/paper/_run_all_production.sh` が `viem_results/paper/_run_all_production.log` に redirect する。flush は per-slot
 完了時のみ実行されるため、長時間 slot の中間進捗は見えない（HDF5 lock や `ps` で外部観測）。
 
 ---
@@ -299,7 +301,7 @@ stdout は orchestrator が `/tmp/auto_kickoff.log` に redirect する想定。
 
 ### 11.1 1 スイープファイル = 1 (shape × material) の生成
 
-[viem_results/paper/](../viem_results/paper/) 配下に 12 個（v0.7.6 では 11 active + 1 legacy n317 reference）:
+[viem_results/paper/](../viem_results/paper/) 配下に 12 個（4 形状 × 3 物質、すべて現行。n317 用のジェネレータはない）:
 
 ```
 sphere_n15.jl   sphere_n20.jl   sphere_Au.jl
@@ -338,8 +340,9 @@ julia --project=. -t auto viem_results/paper/run_lc_convergence.jl <shape> <mate
 ```
 
 出力: `viem_results/paper/convergence_{shape}_{material}.hdf5`、
-`/target/lc_convergence/` 直下に lc_factor / lc / N_tet / N_DOF / Q_* / S_* /
-**residual_history (v0.7.5+)** などを記録。
+`/target/lc_convergence/` 直下に `lc_factor` / `lc`（実メッシュの平均辺長）/ `n_tet` / `n_dof` / Q_* / S_* /
+**residual_history (v0.7.5+)** などを記録。本番ファイルの `/target/simulated_data` とは別のレイアウトで、
+Mie 参照は `/target/reference/` に入る。
 
 ### 11.5 RHS-scaling 診断 (block-Krylov の L 依存性)
 
@@ -359,7 +362,7 @@ julia --project=/home/moteki/Julia/MSTMforCAS.jl \
 # → viem_results/paper/mstm_doublet_n20.hdf5
 ```
 
-`truncation_order = 15` 固定（[README.md §475-482](../README.md) 参照、Au 含む両材料で完全収束）。
+`truncation_order = 15` 固定（[README.md](../README.md) の doublet ベンチマーク節を参照、Au 含む両材料で完全収束）。
 スキーマは `/target/{a_eq_um, R_monomer_um, gap_um, beta_rad, observables/{Q_*, S_fw_*, S_bk}, diagnostics/}` の
 (a_eq, β) 2D グリッド（α/γ は VIEM の解析展開と物理的に一致するため不要）。
 
@@ -382,14 +385,19 @@ julia --project=/home/moteki/Julia/MSTMforCAS.jl \
 ```
 viem_results/paper/
 ├── _common.jl                               # schema helper, material constants
-├── {shape}_{material}.jl                    # 11 active sweep generators (v0.7.6)
+├── {shape}_{material}.jl                    # 12 sweep generators (4 shapes × 3 materials)
 ├── {shape}_{material}.hdf5                  # production results
-├── pilot_sphere_n20.jl                      # smoke-test wrapper (a_eq=0.1 only)
+├── pilot_sphere_n20.jl, pilot_doublet.jl    # smoke-test wrappers
 ├── convergence_{shape}_{material}.hdf5      # lc convergence study output
 ├── mstm_doublet_{material}.hdf5             # MSTM exact reference (doublet only)
+├── tmm_oblate_{material}.hdf5               # T-matrix exact reference (oblate)
+├── tmm_oblate_conv_{material}.hdf5          # T-matrix reference for the lc study
 ├── run_lc_convergence.jl                    # lc convergence runner
 ├── run_rhs_scaling.jl                       # RHS-scaling diagnostic runner
-└── run_mstm_reference.jl                    # MSTM driver (runs in MSTMforCAS env)
+├── run_mstm_reference.jl                    # MSTM driver (runs in MSTMforCAS env)
+├── run_tmm_reference.jl, run_tmatrix_oblate_reference.jl,
+│   run_tmatrix_oblate_conv_reference.jl     # T-matrix drivers (run in tmm_env)
+└── _run_all_*.sh                            # launch scripts
 ```
 
 ---
@@ -403,7 +411,7 @@ DDA 側との対称項目（要同期）:
 | 材料定数 | `_common.jl::N_LOW/N_20/N_HIGH/N_AU` | `_common.py::N_LOW/N_20/N_HIGH/N_AU` |
 | 形状パラメータ (`R = a_eq/2^(1/3)`, gap=0.1R) | `run_viem.jl::_doublet_along_z` | `shape_model/two_sphere_cluster.py` |
 | HDF5 schema (`/target/cost/` etc.) | `_common.jl::create_paper_h5` | `_common.py::create_paper_h5` |
-| RNG seed (12345) | `_common.jl`, `run_rhs_scaling.jl` | 同上 |
+| RNG seed (12345) | `run_viem.jl`, `run_lc_convergence.jl`, `run_rhs_scaling.jl`, `estimate_cost.jl` の `RNG_SEED` | 同上 |
 | MAXITER (=200, v0.7.6) | `run_*.jl::MAXITER` | `scripts/run_*.py::MAXITER` |
 | residual_history (length 200, NaN-pad) | `BlockSolveResult.residual_history` | `bl_*_mvp_fft` returns + per-slot HDF5 |
 | RHS-scaling solver scope (GMRES のみ, v0.7.6) | `run_rhs_scaling.jl::METHODS` | `scripts/run_rhs_scaling.py` (要 sync, ユーザー側で対応) |
@@ -422,7 +430,10 @@ DDA 側との対称項目（要同期）:
 | v0.7.5a | `d2902fe` | "high" material n317 → n20 (2.0+0.0i) 差替 |
 | v0.7.5b | `6f6987a` | `BlockSolveResult.residual_history`, HDF5 全所に per-iter trace 追加 |
 | v0.7.6 | `d2bceaf` | MAXITER 100 → 200、RHS-scaling GMRES のみ (BiCGSTAB scope 外) |
-| **v0.7.7** | (本コミット) | **volume-preserving rescale** (apply_scale!) を gre_mesh / mesh_sphere_aggregate に追加。`V_mesh = (4π/3)·r_v_base³` 厳密化で DDA `Target.__init__` と対称、Rayleigh 領域の C_ext/C_abs/\|S_fw\| systematic bias 除去 |
+| **v0.7.7** | `60a824a` | **volume-preserving rescale** (apply_scale!) を gre_mesh / mesh_sphere_aggregate に追加。`V_mesh = (4π/3)·r_v_base³` 厳密化で DDA `Target.__init__` と対称、Rayleigh 領域の C_ext/C_abs/\|S_fw\| systematic bias 除去 |
+| v0.7.8 | `a5f8c69` | 論文用スイープと診断を完了。保存済みデータ（`416cece`）はこの版で生成 |
+| **v0.8.0** | `e50a182` | shifted block GMRES による屈折率スイープ（`--shifted-ri`）、`precond = :mass_right`、`S_bk` を erratum の `(−S11+S22)/2` に訂正 |
+| **v0.8.1** | (本コミット) | `run_viem.jl` の doublet の gap を `0.0595 R` → `0.1 R` に修正。AIM 経路の異方性質量項を成分ごとの重みに修正（v0.8.0 以前の異方性の AIM 結果は 5–25 % ずれる。`:dense` は正しい） |
 
 ---
 

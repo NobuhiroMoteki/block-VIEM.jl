@@ -147,6 +147,13 @@ results = solve_cas_v2_orientations(
 )
 ```
 
+For an anisotropic particle the mass term of the impedance matrix is
+`Σ_α (1/ε_α) M_α`. Up to v0.8.0 the AIM path (`:aim_gmres`,
+`:aim_bicgstab`) used the mean of `1/ε_α` instead, which changes the
+observables by 5–25 % for index contrasts between the axes of 0.1–0.5.
+Anisotropic results of those versions are correct only with
+`method = :dense`. The isotropic case was not affected.
+
 Alternatively, pass the raw VIEM form `(k0, eps_p, eps_bg)` where
 `k0` is the background-medium wavenumber (`2π·m_m/λ₀`, **not** the
 vacuum wavenumber) and `eps_p`, `eps_bg` are absolute permittivities.
@@ -267,8 +274,9 @@ the following run in parallel automatically:
   module load to `Threads.nthreads()`. Override with
   `BlockVIEM.set_fft_threads(n)`; for block MVPs with `L` RHSs a good
   balance is `set_fft_threads(max(1, cld(Threads.nthreads(), L)))`.
-- **Far-field radiation** and **multi-orientation RHS construction**
-  run one `Threads.@spawn` task per direction / orientation.
+- **Multi-orientation RHS construction** runs one `Threads.@spawn`
+  task per orientation. The **far-field integration** for `C_sca` runs
+  the scattering directions under `Threads.@threads`.
 
 Measured on a 20-core Intel Xeon against Sphere_1675 (N = 3041
 half-SWG DoFs), 4 threads vs. serial: `assemble_precorrection`
@@ -363,9 +371,23 @@ julia --project=. viem_results/check_h5.jl
 
 The HDF5 layout (`/target/simulated_data/...`) with datasets
 `S_fw_PCAS_theta`, `S_fw_PCAS_phi`, `S_bk_OCBS`, `C_ext`, `C_abs`,
-`Euler_angles`, and Mie reference values is byte-compatible with
-block-DDA_Py, so downstream consumers (e.g. `build_spheroid_lut.py`)
-can read either DDA or VIEM output without modification.
+`Euler_angles`, and Mie reference values is the one of block-DDA_Py's
+`run_dda.py`, so the same analysis scripts read either DDA or VIEM
+output. The spheroid look-up-table format read by
+`build_spheroid_lut.py` (root grids and one `wl_<value>/` group per
+wavelength) is a different file. It is written by
+`write_spheroid_sweep_h5`, which the drivers
+`benchmarks/cas_v2/spheroid_sweep_h5.jl` and
+`benchmarks/cas_v2/ironoxide_sweep_h5.jl` use.
+
+**Doublet geometry.** For `shape_kind = "doublet"` the runner meshes two
+spheres of radius `R = a_eq / 2^(1/3)` with a surface-to-surface gap of
+`0.1 R`. Up to v0.8.0 the mesh call inflated the spheres by 2 % and the
+meshed gap was `0.0595 R`. The files `viem_results/paper/doublet_*.hdf5`
+were produced with that smaller gap and are kept as produced, while the
+MSTM reference files `mstm_doublet_*.hdf5` are for `0.1 R`. A doublet
+file filled by the present runner carries the attribute
+`doublet_gap_over_R = 0.1` on `/target`.
 
 ## Paper-production workflow (v0.7.0)
 
@@ -543,8 +565,10 @@ julia --project=. benchmarks/cas_v2/doublet_mstm/compare.jl
   benchmarks (Mie, MSTM, block-DDA_Py) with full numerical conditions
   and per-observable error tables
 - `docs/io_spec.md` — block-DDA_Py compatible I/O specification
-- `.claude/reference/` — primary literature (SWG 1984, Volakis-Sertel,
-  Sheng-Song, Mousavi-Sukumar 2010)
+- Primary literature: Schaubert, Wilton and Glisson (1984); Volakis and
+  Sertel, *Integral Equation Methods for Electromagnetics*; Sheng and
+  Song, *Essentials of Computational Electromagnetics*; Mousavi and
+  Sukumar (2010). Full references are in `docs/theory_note.pdf`.
 
 ## Installation
 

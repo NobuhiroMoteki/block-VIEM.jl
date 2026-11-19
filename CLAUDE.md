@@ -4,7 +4,8 @@
 
 本リポジトリはソルバの実装・検証を完了している。**新規モジュールを設計する段階ではない**；論文掲載用の本番計算を `src/` の既存実装で実行するフェーズ。
 
-- 検証状況 (2026-11-19, v0.8.0): 14,720 / 14,720 テスト全パス on Julia 1.12.5（v0.7.9 までの 14,439 件 + shift スイープ 238 件 + `S_bk` 43 件）。
+- 検証状況 (2026-11-19, v0.8.1): 14,749 / 14,749 テスト全パス on Julia 1.12.5（v0.8.0 の 14,720 件 + 異方性 AIM 29 件）。
+- 検証状況 (2026-11-19, v0.8.0): 14,720 / 14,720 テスト全パス（v0.7.9 までの 14,439 件 + shift スイープ 238 件 + `S_bk` 43 件）。
 - 検証状況 (2026-04-21): 14,422 / 14,422 テスト全パス on Julia 1.12.5。Mie 球面 (低/高屈折率・Au)、CAS-v2 2 球 doublet (vs MSTM)、AIM vs 直接法、block-DDA_Py 出力互換の各検証で回帰なし。
 - 実装モジュール (src/):
   - メッシュ・基底: [gmsh_io.jl](src/gmsh_io.jl), [mesh.jl](src/mesh.jl), [swg.jl](src/swg.jl), [gre_mesh.jl](src/gre_mesh.jl), [aggregate_mesh.jl](src/aggregate_mesh.jl), [spheroid_sweep_io.jl](src/spheroid_sweep_io.jl)
@@ -16,7 +17,7 @@
   - 屈折率スイープ (v0.8.0): [shifted_sweep.jl](src/shifted_sweep.jl)（`block_gmres_shifted` は block_krylov.jl、`aim_K0_mvp` は aim_operator.jl）
 - 本番計算のエントリポイント:
   - GRE / spheroid / single sphere スイープ: [viem_results/create_h5.jl](viem_results/create_h5.jl), [viem_results/run_viem.jl](viem_results/run_viem.jl), [viem_results/check_h5.jl](viem_results/check_h5.jl)
-  - 2 球 doublet: [benchmarks/cas_v2/doublet_mstm/run_viem.jl](benchmarks/cas_v2/doublet_mstm/run_viem.jl) が generic aggregate ドライバ
+  - 2 球 doublet の本番: 同じ [viem_results/run_viem.jl](viem_results/run_viem.jl)（`shape_kind = "doublet"`、テンプレートは `viem_results/paper/doublet_*.jl`）。[benchmarks/cas_v2/doublet_mstm/run_viem.jl](benchmarks/cas_v2/doublet_mstm/run_viem.jl) は README の固定条件ベンチマーク（R = 0.030 μm）用
 
 ## 2. 論文の計算マトリクス
 
@@ -24,7 +25,7 @@
 
 | 形状 | 形状パラメータ | 配向プロトコル |
 | --- | --- | --- |
-| 単球 | 球 | 単配向 + 球面一様多配向（RHS 数スイープ 1,4,16,64） |
+| 単球 | 球 | 単配向 + 球面一様多配向（RHS 数スイープ 1, 2, 4, 8, 16, 32, 64, 128） |
 | 2 球クラスター | 等半径 doublet, **touching gap = 0.1 R** along doublet axis (README と同条件) | 単配向 + 球面一様多配向 + 代表配向 β = 0°, 30°, 60°, 90° |
 | 扁平回転楕円体 (oblate) | b/c = 3, a/b = 1 | 単配向 + 球面一様多配向 + 代表配向 |
 | GRE | a/b = b/c = 1, β_gre = 0.2 | 単配向 + 球面一様多配向 |
@@ -33,14 +34,14 @@
 | --- | --- | --- |
 | n15 (低屈折率) | 1.5 + 0.01i | 0.05, 0.1, 0.2, 0.4 |
 | n20 (paper "high", v0.7.5〜) | **2.0 + 0.0i** | 0.05, 0.1, 0.2, 0.4 |
-| n317 (legacy high, ≤ v0.7.4) | 3.17 + 0.16i | (reference 用、既存 HDF5 を残置、新規計算には使わない) |
+| n317 (legacy high, ≤ v0.7.4) | 3.17 + 0.16i | (新規計算には使わない。`*_n317.hdf5` はこのリポジトリの作業ツリーには無い、2026-11-19 確認) |
 | Au (J&C 1972) | **0.17525 + 3.4830i** (λ=0.638 μm でハードコード) | 0.05, 0.1, 0.2 (**0.5 μm は廃止** — Au の `\|m_p\|≈3.49` で波長制約 lc≈0.018 μm が支配し N_DOF 爆発、1 スロットで 24 h 超え確実のため) |
 
-**v0.7.5 での材料差替え**: paper "high" を n317 (|m_p|≈3.17) → n20 (|m_p|=2.0) に引き下げ。実測 (DDA) で `gre × n317 × r_v=0.4 × L=100` が peak RSS 215 GB / wall 195 min を消費し、block-Krylov stagnation (iter=100, err~3e-3) も頻発したため。n20 は非吸収・中屈折率で両ソルバとも安定収束の見込み。既存 `*_n317.hdf5` は reference として保持 (block-DDA_Py 側 CLAUDE.md §6 と対称)。
+**v0.7.5 での材料差替え**: paper "high" を n317 (|m_p|≈3.17) → n20 (|m_p|=2.0) に引き下げ。実測 (DDA) で `gre × n317 × r_v=0.4 × L=100` が peak RSS 215 GB / wall 195 min を消費し、block-Krylov stagnation (iter=100, err~3e-3) も頻発したため。n20 は非吸収・中屈折率で両ソルバとも安定収束の見込み。定数 `N_HIGH` と `run_lc_convergence.jl` の `n317` 引数は残してある。
 
 **v0.7.6 での MAXITER 拡張**: 全 runner (`run_viem.jl`, `run_lc_convergence.jl`, `run_rhs_scaling.jl`) と `MAXITER_HISTORY` を 100 → 200 に bump。理由: n20 化で典型 slot は ~30-50 iter で収束見込みなので 200 cap は安全マージン、Au plasmonic と RHS-scaling L=64-128 の stagnation 領域に追加余地を与えるため。v0.7.4 の `O(kL²)` block-Givens fix で per-iter コスト線形のため maxiter 倍化のオーバヘッドは限定的。
 
-**v0.7.7 での volume-preserving rescale**: `gre_mesh`, `gre_mesh_with_field`, `mesh_sphere_aggregate` がメッシュ生成後に `apply_scale!(mesh, r_v_base / r_ve)` で節点座標を等方スケールし `V_mesh = (4π/3)·r_v_base³` を**厳密**に満足させるよう変更。block-DDA_Py 側 `Target.__init__` の `d_adj` 再スケールと対称化し、Rayleigh 領域の C_ext/C_abs/|S_fw| に出る discretisation volume bias (~0.5-3%) を除去。`r_ve` が HDF5 上で `r_v_base` と機械精度で一致するため paper の 1:1 相関プロットが clean に。`mesh_sphere_aggregate` のみ `rescale_to_target_volume::Bool=true` キーワードで無効化可能 (overlap geometry test 用)。詳細は [docs/paper_simulation_conditions_viem.md §5.2](docs/paper_simulation_conditions_viem.md#L88) 参照。
+**v0.7.7 での volume-preserving rescale**: `gre_mesh`, `gre_mesh_with_field`, `mesh_sphere_aggregate` がメッシュ生成後に `apply_scale!(mesh, r_v_base / r_ve)` で節点座標を等方スケールし `V_mesh = (4π/3)·r_v_base³` を**厳密**に満足させるよう変更。block-DDA_Py 側 `Target.__init__` の `d_adj` 再スケールと対称化し、Rayleigh 領域の C_ext/C_abs/|S_fw| に出る discretisation volume bias (~0.5-3%) を除去。`r_ve` が HDF5 上で `r_v_base` と機械精度で一致するため paper の 1:1 相関プロットが clean に。`mesh_sphere_aggregate` のみ `rescale_to_target_volume::Bool=true` キーワードで無効化可能 (overlap geometry test 用)。詳細は [docs/paper_simulation_conditions_viem.md §5.2](docs/paper_simulation_conditions_viem.md) 参照。
 
 観測量:
 
@@ -49,13 +50,13 @@
 
 ### 形状パラメータの換算
 
-- **2 球 doublet の半径換算**: 体積等価半径 `a_eq` から monomer 半径 `R = a_eq / 2^(1/3) ≈ 0.7937 · a_eq`、軸方向 gap `g = 0.1 · R` (README Benchmark 節と同比)。a_eq = 0.05, 0.1, 0.2, 0.4 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm。
+- **2 球 doublet の半径換算**: 体積等価半径 `a_eq` から monomer 半径 `R = a_eq / 2^(1/3) ≈ 0.7937 · a_eq`、軸方向 gap `g = 0.1 · R` (README Benchmark 節と同比)。a_eq = 0.05, 0.1, 0.2, 0.4 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm。メッシュは `mesh_sphere_aggregate(...; overlap_factor = 0)` で作る（§12 参照。既定の `overlap_factor = 0.02` では gap が `0.0595 R` になる）。
 - **扁平回転楕円体**: 3 半軸 `(a, b, c)`, `a = b`, `b/c = 3` → `c = (a_eq³ / (b/c)²)^(1/3) = a_eq / 9^(1/3)`, `a = b = 3c`。
-- **GRE**: `GREParams(a_eq=a_eq, ab_ratio=1.0, bc_ratio=1.0, beta=0.2)` でそのまま構築。
+- **GRE**: `GREParams(a_eq, 1.0, 1.0, 0.2)` でそのまま構築（位置引数の順は `r_v_base, bc_ratio, ab_ratio, beta`。キーワード形式は無い）。
 
 ## 3. メッシュ指定プロトコル
 
-[src/gre_mesh.jl:84](src/gre_mesh.jl#L84) の `adaptive_lc` と [src/aggregate_mesh.jl:587](src/aggregate_mesh.jl#L587) の `adaptive_lc_aggregate` を使う。公式は
+[src/gre_mesh.jl](src/gre_mesh.jl) の `adaptive_lc` と [src/aggregate_mesh.jl](src/aggregate_mesh.jl) の `adaptive_lc_aggregate` を使う。公式は
 
 ```text
 lc = min( λ₀ / (|m_p|_max · N_pw),    # 波長制約, N_pw = 10 (既定)
@@ -64,32 +65,32 @@ lc = min( λ₀ / (|m_p|_max · N_pw),    # 波長制約, N_pw = 10 (既定)
 ```
 
 - `|m_p|` は anisotropy 対応のモジュラス最大（Au は `|0.17525 + 3.4830i| ≈ 3.488` → lc ≈ 0.018 μm、保守側）
-- 本番スイープは既定 `N_pw = 10`, `N_per_radius = 3`
+- 本番スイープは既定 `N_pw = 10`, `N_per_radius = 3`（GRE の `adaptive_lc` では 3 は固定値で、キーワードは `adaptive_lc_aggregate` / `mesh_sphere_aggregate` だけにある）
 - これらは `gre_mesh(...; wl_0, m_p_max, N_pw)` / `mesh_sphere_aggregate(...; wl_0, m_p_max)` の内部で自動呼び出し
 
 ## 4. lc 収束性の評価（論文 Figure 用）
 
-各 (物質 × 形状) の組み合わせについて、**a_eq = 0.1 μm を代表サイズ**として lc を 5 段階スイープして Qext, Qsca, Qabs, |S_fw_θ| の収束性を測る:
+各 (物質 × 形状) の組み合わせ（形状は sphere / oblate / gre。doublet は対象外）について、**a_eq = 0.1 μm を代表サイズ**として lc を 5 段階スイープして Qext, Qsca, Qabs, |S_fw_θ| の収束性を測る:
 
 ```text
 factor = 1.5, 1.0, 0.7, 0.5, 0.35   # adaptive_lc を 1.0 とする倍率
 lc = factor × adaptive_lc(...)
 ```
 
-- 本番大規模スイープの lc は **factor = 0.7** を採用（収束済み領域の中央値寄り）
-- 結果は `viem_results/paper/convergence_{shape}_{material}.hdf5` に保存（スキーマは本番と共通、`lc_factor` attribute 追加）
-- 論文 Figure には VIEM の O(h²) と DDA の O(h^0.5) の対比（README [:148-155](README.md#L148-L155) 参照実績）を掲載
+- 本番大規模スイープの lc は **factor = 1.0**（`adaptive_lc` そのまま。`run_viem.jl` は `lc` を渡さない）
+- 結果は `viem_results/paper/convergence_{shape}_{material}.hdf5` に保存。本番ファイルとは別のレイアウトで、`/target/lc_convergence/`（`lc_factor`, `lc`, `n_tet`, `n_dof`, 観測量、cost）と `/target/reference/`（Mie）を持つ
+- 論文 Figure には VIEM の O(h²) と DDA の O(h^0.5) の対比（[docs/benchmark_results.md §9.2](docs/benchmark_results.md) の実績）を掲載
 
 ## 5. 実行前チェックリスト（一計算 < 24 h を強制）
 
 HDF5 スイープを起動する前に必ず:
 
 1. **N_tet / N_DOF の見積**: GRE/sphere/spheroid は `adaptive_lc` と形状から、doublet は `aggregate_mesh` の実メッシュ生成で確認
-2. **メモリ見積**: [README.md:619-645](README.md#L619-L645) の phase-A 実測から `RSS ≈ 100 kB/DOF` 程度を目安とし、`N_DOF × N_RHS × 2 (complex)` を block-Krylov の Krylov 空間分として加算
-3. **Wall-time 見積**: setup 時間は N_DOF に対し実質線形、per-iteration cost は `N_DOF log N_DOF × N_RHS`。BiCGSTAB 反復数の目安は過去実績（N_RHS=1 で数十〜数百回、N_RHS 増で緩やかに増加）
+2. **メモリ見積**: [docs/benchmark_results.md §8.3](docs/benchmark_results.md) の phase-A 実測から `RSS ≈ 100 kB/DOF` 程度を目安とし、`N_DOF × N_RHS × 2 (complex)` を block-Krylov の Krylov 空間分として加算
+3. **Wall-time 見積**: setup 時間は N_DOF に対し実質線形、per-iteration cost は `N_DOF log N_DOF × N_RHS`。block GMRES の反復数の目安は過去実績（誘電体・酸化鉄で 20–90 回、Au の N_RHS=1 で 200 回超、N_RHS=64 で約 100 回）
 4. **推定 > 24 h または RSS > マシン物理メモリ → 必ずユーザーに確認**
 
-見積ツール: [viem_results/estimate_cost.jl](viem_results/estimate_cost.jl) (新規作成予定)。引数は `create_h5.jl` と同じパラメータスキーマで、各スイープ点の (N_DOF, RSS_est, t_setup_est, t_solve_est_per_orient) を表示しスイープ全体の合計も出す。
+見積ツール: [viem_results/estimate_cost.jl](viem_results/estimate_cost.jl)。引数はスイープ用 HDF5 のパスで、各スロットの (N_DOF, RSS_est, t_setup_est, t_solve_est) とスイープ全体の合計を表示し、24 h 超または空きメモリの 90 % 超のスロットに印を付ける。
 
 ## 6. HDF5 スイープ運用規約
 
@@ -99,19 +100,18 @@ HDF5 スイープを起動する前に必ず:
   - `doublet_n15.hdf5`, `doublet_n20.hdf5`, `doublet_Au.hdf5`
   - `oblate_n15.hdf5`, `oblate_n20.hdf5`, `oblate_Au.hdf5`
   - `gre_n15.hdf5`, `gre_n20.hdf5`, `gre_Au.hdf5`
-  - (legacy *_n317.hdf5 は reference データとして残置)
   - lc 収束: `convergence_{shape}_{material}.hdf5`
-- 既存 HDF5 の C_ext ≠ 0 エントリは `run_viem.jl` の再計算スキップ機能に従い中断再開可能
-- **`/target/cost/` グループで end-to-end cost を per-slot 記録（block-DDA_Py 側と対称、v0.7.3+）**。[viem_results/paper/_common.jl](viem_results/paper/_common.jl) の `create_paper_h5` が 11 dataset（`t_build_s`, `t_setup_s`, `t_solve_s`, `t_total_s`, `peak_rss_bytes`, `n_tet`, `n_dof`, `mean_edge_length`, `iters`, `converged`, `solver_err`）を shape_cond 次元で作成し、[run_viem.jl](viem_results/run_viem.jl) が per-slot で埋める。peak RSS は [viem_results/rss_monitor.jl](viem_results/rss_monitor.jl) の daemon-task サンプラ（`/proc/self/status:VmRSS` を 0.2s 間隔でポーリング、`reset!` で per-slot ベースラインを切り替え）経由で取得。DDA 側 ([~/Python/block-DDA_Py/utils/rss_monitor.py](file:///home/moteki/Python/block-DDA_Py/utils/rss_monitor.py)) と `/target/cost/` の 8 フィールド（時間・peak RSS・iters・converged・solver_err）は bit-for-bit 一致、残り 3 つは VIEM 側名称 (`n_tet`/`n_dof`/`mean_edge_length`) で DDA の (`n_cuboid`/`n_occ`/`lattice_lf`) と 1:1 対応。lc 収束 HDF5 の `lc_convergence/` サブグループ、RHS-scaling の `/target/rhs_scaling/{bicgstab,gmres}/` サブグループにも同じ 8 フィールド（時間・peak RSS・iters・converged 等）を書き込む
-- 後方互換: `/target/cost/` を持たない古い HDF5 は `run_viem.jl` 起動時にエラーで拒否。`create_paper_h5` で再生成すれば cost group が自動付与される
+- 既存 HDF5 の計算済みスロット（`S_fw_PCAS_mie` の虚部が 0 でないもの）は `run_viem.jl` がスキップするので、中断再開できる
+- **`/target/cost/` グループで end-to-end cost を per-slot 記録（block-DDA_Py 側と対称、v0.7.3+）**。[viem_results/paper/_common.jl](viem_results/paper/_common.jl) の `create_paper_h5` が 12 dataset（`t_build_s`, `t_setup_s`, `t_solve_s`, `t_total_s`, `peak_rss_bytes`, `n_tet`, `n_dof`, `mean_edge_length`, `iters`, `converged`, `solver_err`、および v0.7.5 からの `residual_history`）を shape_cond 次元で作成し、[run_viem.jl](viem_results/run_viem.jl) が per-slot で埋める。peak RSS は [viem_results/rss_monitor.jl](viem_results/rss_monitor.jl) の daemon-task サンプラ（`/proc/self/status:VmRSS` を 0.2s 間隔でポーリング、`reset!` で per-slot ベースラインを切り替え）経由で取得。DDA 側 ([~/Python/block-DDA_Py/utils/rss_monitor.py](file:///home/moteki/Python/block-DDA_Py/utils/rss_monitor.py)) と `/target/cost/` の 8 フィールド（時間・peak RSS・iters・converged・solver_err）は bit-for-bit 一致、残り 3 つは VIEM 側名称 (`n_tet`/`n_dof`/`mean_edge_length`) で DDA の (`n_cuboid`/`n_occ`/`lattice_lf`) と 1:1 対応。lc 収束 HDF5 の `lc_convergence/` サブグループにも同じ 8 フィールドを書き込む。RHS-scaling の `/target/rhs_scaling/gmres/` は `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s`, `peak_rss_bytes`, `residual_history` だけを持つ
+- 後方互換: `/target/cost/` を持たない古い HDF5 は `run_viem.jl` 起動時にエラーで拒否。`create_paper_h5` または `create_h5.jl`（v0.8.0 から cost group を書く）で再生成する
 - 多配向 block-Krylov の **反復数 と 1 配向あたり end-to-end 所要時間** は別スクリプト [viem_results/paper/run_rhs_scaling.jl](viem_results/paper/run_rhs_scaling.jl) で診断:
   - RHS 数スイープ `L = 1, 2, 4, 8, 16, 32, 64, 128`（2 のべき乗、計 8 点で iter 数のスケーリングを解像）
   - **v0.7.6 から GMRES 単独計測**: `block-GMRES` (`:aim_gmres`) のみ。論文のスコープからソルバ依存性軸を外し、shape × material × N_DOF のスケーリングに焦点を絞るため。BiCGSTAB を再度比較したい場合は `run_rhs_scaling.jl::METHODS` に `(:bicgstab, :aim_bicgstab)` を追記すれば schema 変更なしで復活可
   - 結果は `/target/rhs_scaling/gmres/` サブグループに `iters`, `converged`, `t_total_s`, `t_end2end_per_orient_s`, `peak_rss_bytes`, `residual_history` を書き込み（`L_values`, `n_dof`, `n_tet` は親グループに）
   - 各 shape slot ごとに測定（worst-case mesh 共有、固定 RNG seed の uniform-sphere 配向を nested に L=1 ⊂ L=2 ⊂ … ⊂ L=128）
-- **本番ソルバのデフォルトは v0.7.1 から `:aim_gmres`**（`solve_cas_v2_orientations` の method キーワードおよび [viem_results/run_viem.jl:37](viem_results/run_viem.jl#L37) の `SOLVER_METHOD`）。理由: GRE 本番で block solve L=100、N_DOF 数十万の条件下では BiCGSTAB の stagnation リスクが高く、論文全 44 スロットの完走を優先して monotone 収束保証のある GMRES を選択。パフォーマンス重視のケースでは明示的に `:aim_bicgstab` を指定する
+- **本番ソルバのデフォルトは v0.7.1 から `:aim_gmres`**（`solve_cas_v2_orientations` の method キーワードおよび [viem_results/run_viem.jl](viem_results/run_viem.jl) の `SOLVER_METHOD`）。理由: GRE 本番で block solve L=100、N_DOF 数十万の条件下では BiCGSTAB の stagnation リスクが高く、論文全 44 スロットの完走を優先して monotone 収束保証のある GMRES を選択。パフォーマンス重視のケースでは明示的に `:aim_bicgstab` を指定する
 - **doublet 厳密解（MSTM 参照）は別 HDF5 で管理**: [viem_results/paper/run_mstm_reference.jl](viem_results/paper/run_mstm_reference.jl) を MSTMforCAS.jl env (`~/Julia/MSTMforCAS.jl`) で実行し、対応する `mstm_<basename>.hdf5` を生成
-  - `truncation_order = 15`（[README.md:475-482](README.md#L475-L482) 準拠、Au 含む両材料で完全収束）
+  - `truncation_order = 15`（[README.md](README.md) の doublet ベンチマーク節に準拠、Au 含む両材料で完全収束）
   - スキーマは `/target/{a_eq_um, R_monomer_um, gap_um, beta_rad, observables/{Q_*, S_fw_*, S_bk}, diagnostics/{n_iterations, converged}}`、軸対称性により (a_eq, β) の 2D グリッドのみ（α/γ は VIEM の解析展開と物理的に一致するため不要）
   - 体積等価球の Mie 値は run_viem.jl の `compute_mie_reference` が自動的に書き込む（doublet では Rayleigh サニティチェック用途、厳密解ではない）
 
@@ -120,7 +120,7 @@ HDF5 スイープを起動する前に必ず:
 以下を壊す変更は行わない:
 
 - [test/test_mie_validation.jl](test/test_mie_validation.jl), [test/test_cas_v2.jl](test/test_cas_v2.jl), [test/test_block_krylov.jl](test/test_block_krylov.jl), [test/test_aggregate_mesh.jl](test/test_aggregate_mesh.jl) は常時グリーン
-- block-DDA_Py 互換 HDF5 スキーマ（`C_ext`, `C_abs`, `C_sca` (= C_ext − C_abs), `S_fw_PCAS_theta`, `S_fw_PCAS_phi`, `S_bk_OCBS` ほか [viem_results/create_h5.jl:17-28](viem_results/create_h5.jl#L17-L28)）
+- block-DDA_Py 互換 HDF5 スキーマ（`C_ext`, `C_abs`, `C_sca` (= C_ext − C_abs), `S_fw_PCAS_theta`, `S_fw_PCAS_phi`, `S_bk_OCBS` ほか。一覧は [viem_results/create_h5.jl](viem_results/create_h5.jl) 冒頭のコメント）
 - `Manifest.toml` は Julia **1.12.5** で固定（`juliaup override set -p <project> 1.12.5` 済み）。`Pkg.update()` / `Pkg.resolve()` を不用意に走らせない
 
 ## 8. Julia コーディング・パフォーマンスのガイドライン
@@ -136,8 +136,8 @@ HDF5 スイープを起動する前に必ず:
 
 以下はすべて実装に反映済みのため、**再実装の拠り所ではなく「なぜこの数式か」「なぜこの定数か」の参照用**:
 
-- `Integral-Equation-Methods-for-Electromagnetics.pdf` 第 6 章（VIEM 定式化、特異点積分）— `.claude/reference/`
-- `Essentials of Computational Electromagnetics.pdf`（AIM 定式化、グリッド射影）— `.claude/reference/`
+- Volakis & Sertel, *Integral Equation Methods for Electromagnetics* 第 6 章（VIEM 定式化、特異点積分）— `.claude/reference/`（ファイル名は `Integral-Equation-Methods-for-Electromagnetics John-L.-Volakis-Kubilay-Sertel-.pdf`）
+- Sheng & Song, *Essentials of Computational Electromagnetics*（AIM 定式化、グリッド射影）— `.claude/reference/`（ファイル名は `Essentials of Computational Electromagnetics-Sheng and Song.pdf`）
 - `s00466-009-0424-1.pdf` (Mousavi & Sukumar 2010、一般化 Duffy 変換)— `.claude/reference/`
 - [docs/theory_note.tex](docs/theory_note.tex) / `docs/theory_note.pdf`（本ソルバの理論ノート、セクション番号で参照）
 - [README.md](README.md)（実装方針、ベンチマーク結果、block-DDA_Py との定義対応）
@@ -165,3 +165,15 @@ HDF5 スイープを起動する前に必ず:
 - `viem_results/paper/` の保存済み HDF5（VIEM、Mie、MSTM、T-matrix）は旧定義のまま残す。書き換えない。新旧を比べるときは保存済みの `S_bk` に 1/√2 を掛ける
 - 新しく作る HDF5 の `S_definition` 属性は `.../2`。`run_viem.jl` は旧定義の結果が入ったファイルへの追記を拒否する
 - 回帰ガード: [test/test_backward_amplitude.jl](test/test_backward_amplitude.jl) は常時グリーン
+
+## 12. v0.8.1 の修正（2026-11-19）
+
+- **doublet の gap**: `run_viem.jl`, `run_rhs_scaling.jl`, `estimate_cost.jl` は `mesh_sphere_aggregate(...; overlap_factor = 0)` で doublet を作る。gap は文書と MSTM 参照どおり `0.1 R`。v0.8.0 までは既定の `overlap_factor = 0.02` のままで、メッシュ上の gap は `0.0595 R` だった
+  - `viem_results/paper/doublet_*.hdf5` は `0.0595 R` で計算されている（記録された `n_tet` が一致）。`mstm_doublet_*.hdf5` は `0.1 R`。保存済みファイルは書き換えない
+  - 現行の `run_viem.jl` は doublet ファイルの `/target` に属性 `doublet_gap_over_R = 0.1` を書き、この属性が無く結果が入っているファイルへの追記を拒否する
+  - 離れた単量体の集合体では必ず `overlap_factor = 0` を渡す（`mesh_sphere_aggregate` の docstring の警告を参照）
+- **異方性の AIM 経路**: 質量項は `Σ_α (1/ε_α) M_α`（`AIMOperator.mass_weighted`、`assemble_weighted_mass_matrix`）。v0.8.0 までの AIM 経路は `1/ε_α` の平均を使っており、異方性粒子の観測量が 5–25 % ずれていた。`:dense` は以前から正しい。等方の結果は変わらない
+  - v0.8.0 以前に `:aim_gmres` で作った異方性の結果（`ironoxide_sweep_h5.jl --form-biref` / `--biaxial` の表、`form_birefringence_probe.jl`、`biaxial_probe.jl`）は作り直しが要る
+  - 回帰ガード: [test/test_anisotropic.jl](test/test_anisotropic.jl) の AIM 対 密行列の比較
+- **`run_viem.jl` の失敗時処理**: 既定モードでソルバが例外を出したとき、NaN を書いた後に止まっていた（番兵に `residual_history` が無かった）。修正済みで、NaN を埋めて次の条件へ進む
+

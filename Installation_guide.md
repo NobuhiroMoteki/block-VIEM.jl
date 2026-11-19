@@ -20,8 +20,8 @@ The end state is:
   `Project.toml` / `Manifest.toml` (114 dependencies, fully
   reproducible).
 - `viz/` sub-environment instantiated for figure generation.
-- The full test suite (14 422 tests across Mie, CAS-v2, AIM,
-  block-Krylov, aggregate-mesh, GRE) passing.
+- The full test suite (about 14 800 tests across Mie, CAS-v2, AIM,
+  block-Krylov, shifted block GMRES, aggregate-mesh, GRE) passing.
 
 ---
 
@@ -34,7 +34,7 @@ The end state is:
 - RAM: **16 GB minimum** for benchmark / test runs; **64 GB
   recommended** for paper-production sweeps (peak RSS at GRE
   `r_v = 0.4` μm with `m_p = n20` reaches ~ 30 GB; see
-  [CLAUDE.md §2](CLAUDE.md) for sizing).
+  [CLAUDE.md §5](CLAUDE.md) for sizing).
 - Disk: ~ 5 GB for Julia, dependencies, and FFTW plans;
   add ~ 10 GB if you intend to run the full HDF5 paper-production
   sweeps.
@@ -123,8 +123,9 @@ is pure-software and needs no GPU drivers.  WSLg / X server is
 
 `juliaup` is the official Julia version manager.  We pin Julia
 1.12.5 because the project's `Manifest.toml` is resolved against
-that version (see [CLAUDE.md §7](CLAUDE.md) — "do not unpin without
-re-running the validation suite").
+that version (see [CLAUDE.md §7](CLAUDE.md): the manifest is fixed to
+Julia 1.12.5, and `Pkg.update()` / `Pkg.resolve()` are not to be run
+casually).
 
 ```bash
 curl -fsSL https://install.julialang.org | sh -s -- --yes
@@ -202,9 +203,10 @@ kernel).
 
 ## 8. Run the test suite
 
-The full test set (14 422 tests on Julia 1.12.5) covers Mie sphere,
-CAS-v2 doublet, AIM vs dense, block-Krylov, aggregate-mesh / GRE
-mesh, and surface-integral validations.  Use multiple threads to
+The full test set (about 14 800 tests on Julia 1.12.5) covers Mie
+sphere, CAS-v2 doublet, AIM vs dense, block-Krylov, the shifted block
+GMRES, the backward amplitude, anisotropic permittivity, aggregate-mesh /
+GRE mesh, and surface-integral validations.  Use multiple threads to
 keep wall time around 5–10 minutes:
 
 ```bash

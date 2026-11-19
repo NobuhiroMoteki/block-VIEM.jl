@@ -1,5 +1,37 @@
 # BlockVIEM.jl I/O Specification (block-DDA_Py compatibility)
 
+> **Status (2026-11-19): design document written before the implementation.**
+> It is kept as a record and is not maintained. Several points below were
+> decided differently in the code. For the current interfaces see
+> [README.md](../README.md), the docstrings in `src/`,
+> [paper_simulation_conditions_viem.md](paper_simulation_conditions_viem.md)
+> (general sweep file, `/target/simulated_data` and `/target/cost`) and the
+> header of `src/spheroid_sweep_io.jl` (spheroid look-up-table file).
+> The main differences from this document:
+>
+> - Time convention: the code uses `exp(−iωt)` with the outgoing wave
+>   `exp(+ik₀R)/(4πR)`, as block-DDA_Py does. The sentence below states the
+>   opposite.
+> - There is no `mesh/gre_to_msh.jl` and no mesh-file axis in the output
+>   files. Shapes are generated from `GREParams` or `SphereAggregate`, and
+>   the sweep files keep the axes `r_v_base`, `bc_ratio`, `ab_ratio`,
+>   `gre_beta`.
+> - One permittivity (scalar or diagonal tensor) applies to the whole
+>   particle. A per-region refractive index is not implemented.
+> - Keyword names: `lc` (mesh size), `pitch` (AIM grid, default 0.5 × mean
+>   edge length), `near_radius` (an absolute length).
+> - CAS-v2 observables: `S_fw_theta`, `S_fw_phi`, `S_bk` for circular
+>   incident polarization (`CASv2Result`). The `S_fw_s`, `S_fw_p`, `S_bak`
+>   of this document survive only in the older `ScatteringResult`.
+> - `C_ext = C_abs + C_sca` with `C_sca` from the far-field integration,
+>   not from the optical theorem.
+> - `converged` is one flag per solved block, not per orientation.
+> - The spheroid file stores `log_D_ve_grid` (log10 of `D_ve`), an optional
+>   `psi_grid` and a `provenance` group.
+> - The three "open questions" at the end are settled: anisotropy is
+>   implemented, HDF5.jl is the backend, and the volume rescale is
+>   `apply_scale!`.
+
 This document mirrors the input/output conventions of
 [`block-DDA_Py`](https://github.com/NobuhiroMoteki/block-DDA_Py) so that
 BlockVIEM.jl can be used as a drop-in alternative for CAS-v2 simulation
