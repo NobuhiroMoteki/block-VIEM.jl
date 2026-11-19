@@ -95,11 +95,13 @@ function build_shape_mesh(shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
     if shape_kind == "doublet"
         R = Float64(r_v_base) / 2.0^(1/3)
         agg = _doublet_along_z(R)
-        # overlap_factor = 0: the two spheres are meshed at their nominal radius,
-        # so the gap is 0.1 R as documented and as in the MSTM reference. The
-        # default overlap_factor = 0.02 inflates the radii by 1.02, and the
-        # volume rescale then shrinks the centre distance: the meshed gap was
-        # 0.0595 R up to v0.8.0.
+        # overlap_factor = 0: the two spheres are meshed at their nominal radius.
+        # mesh_sphere_aggregate scales each sphere to its nominal volume about
+        # its own centre (v0.8.2), so the centre distance is 2.1 R and the gap
+        # 0.1 R, as documented and as in the MSTM reference. Up to v0.8.0 the
+        # default overlap_factor = 0.02 and a uniform scaling of the whole mesh
+        # gave a centre distance of 2.06-2.08 R (gap 0.0595 R between the
+        # faceted surfaces); v0.8.1 gave 2.10-2.13 R.
         mesh, _msh = mesh_sphere_aggregate(agg;
                                            overlap_factor=0.0,
                                            wl_0=wl_0_min,
