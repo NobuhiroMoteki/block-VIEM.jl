@@ -176,7 +176,13 @@ HDF5 スイープを起動する前に必ず:
   - MSTM との差（β 5 点の最大）: Au の `C_ext` が 13 % / 5 % / 5 % → 1.5 % / 2.0 % / 1.5 %、n15 の `S_bk`（a_eq 0.1, 0.2 μm）が 4.7 % / 16 % → 0.3 % / 4.7 %。誘電体の小粒径の `S_fw` は 0.2–0.9 % → 0.4–1.7 %（旧メッシュの中心間距離が粗いメッシュでたまたま 2.1 R に近かった）
   - Au の doublet は 3 サイズとも 200 反復で未収束（残差 8e-5〜5.7e-4）。v0.7.8 の本番でも同じ
   - `run_viem.jl` は、属性 `doublet_gap_over_R` が無く結果が入っている doublet ファイルへの追記を拒否する
-  - README の doublet ベンチマーク（`benchmarks/cas_v2/doublet_mstm/`、docs/benchmark_results.md §7–§8）の精度の結果は、再実行するまで掲載しない（2026-11-19、ユーザー指示）。v0.8.1 以前のメッシャーと旧 `S_bk` 定義による結果のため。README・benchmark_results.md §7.3, §7.4, §8.1, §8.2・理論ノートの数値を注記に置き換え、生成物 `results_viem.json`, `results_viem_refinement.json`, `comparison.md`, `refinement.md` をリポジトリから外した（git 履歴 `d1482fa` にある）。設定の説明、MSTM 参照 `results_mstm.json`、メモリ・時間の実測（§8.3、`phase_a_memory.json`）は残してある。再実行は `run_viem.jl` → `run_viem_refinement.jl` → `compare.jl` / `compare_refinement.jl`
+  - README の doublet ベンチマーク（`benchmarks/cas_v2/doublet_mstm/`、docs/benchmark_results.md §7–§8）は v0.8.2 で取り直した（2026-11-19、`moteki-laptop-ryzen`、Julia 1 スレッド）。README・benchmark_results.md §7.3, §7.4, §8.1–§8.3・理論ノートの数値は新しい結果。旧結果は git 履歴 `d1482fa` にある
+    - ソルバ設定は `config.jl` の `VIEM_METHOD = :aim_gmres`, `VIEM_PRECOND = :mass_right`（tol 1e-7、最大 400 反復）。全条件が収束した。反復数は PS が 10、Au が 167 / 166 / 218 / 234（R/5〜R/8）。JSON に `solver_method`, `solver_precond`, `solver_iterations`, `solver_converged`, `solver_residual` を記録する
+    - Au、R/5 でのソルバ比較: block BiCGSTAB は 400 反復で残差 8e-3 のまま収束せず、振幅が収束解から最大 0.5 % ずれる。前処理なしの block GMRES は 400 反復で残差 9.2e-5（振幅のずれは最大 2.7e-5）、収束には 621 反復。`:mass_right` では 167 反復で、収束解は前処理なしと 8 桁一致する
+    - MSTM との差（R/5）: PS は全成分 0.5 % 以内、Au は `|S_fw_mean|` が 0.004 % / 0.69 % / 1.09 %（β = 0, π/4, π/2）、最大は Im `S_fw_θ` の 2.34 %。旧結果は最大 10.5 % で、その大半は旧メッシャーの中心間距離の誤差だった
+    - 細分化（Au、R/5〜R/8）: R/6 以降は全成分が 0.41 % 以内。誤差は単調に減らないので、収束次数は掲載していない。旧結果の `p ≈ 2` は中心間距離の誤差の減り方を見ていた
+    - 再実行の手順: `run_viem.jl` → `run_viem_refinement.jl` → `compare.jl` / `compare_refinement.jl`、4 段階の表は `BM_LC_RATIOS=5,6,7,8` の `phase_a_memory_study.jl` → `compute_refinement_errors.py`
+    - 本番（`viem_results/run_viem.jl`）は前処理なし・最大 200 反復のまま。Au doublet の本番で `:mass_right` を使うかは未決定
 - **異方性の AIM 経路**: 質量項は `Σ_α (1/ε_α) M_α`（`AIMOperator.mass_weighted`、`assemble_weighted_mass_matrix`）。v0.8.0 までの AIM 経路は `1/ε_α` の平均を使っており、異方性粒子の観測量が 5–25 % ずれていた。`:dense` は以前から正しい。等方の結果は変わらない
   - v0.8.0 以前に `:aim_gmres` で作った異方性の結果（`ironoxide_sweep_h5.jl --form-biref` / `--biaxial` の表、`form_birefringence_probe.jl`、`biaxial_probe.jl`）は作り直しが要る
   - 回帰ガード: [test/test_anisotropic.jl](test/test_anisotropic.jl) の AIM 対 密行列の比較

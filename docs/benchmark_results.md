@@ -24,8 +24,8 @@ Per-section quick navigation:
 | [§4](#4-oblate-spheroid-cross-validation-vs-block-dda_py) | Oblate spheroid vs DDA | block-DDA_Py |
 | [§5](#5-gre-cross-validation-vs-block-dda_py-β--0) | GRE (β > 0) vs DDA | block-DDA_Py |
 | [§6](#6-anisotropic-ε_p-cross-validation-vs-block-dda_py) | Anisotropic ε_p vs DDA | block-DDA_Py |
-| [§7](#7-two-sphere-doublet-vs-mstm) | 2-sphere doublet vs MSTM (results withheld) | MSTMforCAS.jl |
-| [§8](#8-doublet-mesh-refinement-and-aim-memory) | Doublet ℓ_c convergence (results withheld) + memory | self |
+| [§7](#7-two-sphere-doublet-vs-mstm) | 2-sphere doublet vs MSTM | MSTMforCAS.jl |
+| [§8](#8-doublet-mesh-refinement-and-aim-memory) | Doublet ℓ_c refinement + memory | self |
 | [§9](#9-per-dof-accuracy-vs-block-dda_py) | Per-DoF accuracy vs DDA | analytical (Mie) |
 | [§10](#10-paper-production-ℓ_c-convergence-protocol) | Paper-production ℓ_c protocol | self |
 | [§11](#11-shifted-block-gmres-for-refractive-index-sweeps) | Shifted block GMRES for refractive-index sweeps | existing solver |
@@ -61,13 +61,15 @@ $\arg(S^\text{VIEM} / S^\text{ref})$.
 **Backward amplitude.** Since v0.8.0 (2026-11-19) `S_bk` is
 $(-S_{11} + S_{22})/2$ at the backward direction, the corrected Eq. (28)
 of Moteki and Adachi (2024). The benchmarks of §1–§10 were run with the
-printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The VIEM
+printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The
+exception is the doublet benchmark of §7 and §8, which was re-run with
+v0.8.2 on 2026-11-19. The VIEM
 value and its reference changed by the same factor, so the relative and
 phase errors of `S_bk` reported below are unchanged. The HDF5 files
 under `viem_results/paper/` were converted to the corrected form on
 2026-11-19. The result files under `benchmarks/` no longer contain
-backward amplitudes in the printed form: the doublet benchmark results
-are withheld (§7) and the two `S_bk` entries of
+backward amplitudes in the printed form: the doublet benchmark files
+hold the corrected form and the two `S_bk` entries of
 `benchmarks/cas_v2/dda_comparison/viem_result.json` were removed.
 
 ---
@@ -299,22 +301,23 @@ near-field, AIM, and far-field paths.
 
 ## 7. Two-sphere doublet vs MSTM
 
-> **Results withheld (2026-11-19).** The accuracy results of §7.3, §7.4,
-> §8.1 and §8.2 are not shown for now. They were computed before v0.8.2:
+> **Re-run with v0.8.2 (2026-11-19).** The results of §7 and §8 were
+> computed again with v0.8.2. Two things differ from the earlier results
+> (git history, commit `d1482fa`):
 >
-> - with the previous doublet mesher, which scaled the whole mesh
->   uniformly to the nominal volume, so that the centre distance of the
->   two spheres was larger than the nominal $2.1 R$ by the scale factor
->   (about 1 % at $\ell_c = R/5$, less on finer meshes). From v0.8.2 each
->   sphere is scaled about its own centre and the centre distance is
->   exactly $2.1 R$;
-> - with the previous definition of the backward amplitude.
+> - **Mesher.** Until v0.8.1 the whole doublet mesh was scaled uniformly
+>   to the nominal volume, so the centre distance of the two spheres was
+>   larger than the nominal $2.1 R$ by the scale factor (about 1 % at
+>   $\ell_c = R/5$, less on finer meshes). From v0.8.2 each sphere is
+>   scaled about its own centre and the centre distance is exactly
+>   $2.1 R$.
+> - **Solver.** The earlier runs used AIM block BiCGSTAB. The present
+>   runs use AIM block GMRES with right preconditioning by the mass
+>   matrix (§7.2). Every solve reported here reached the tolerance
+>   $10^{-7}$.
 >
-> The setup (§7.1, §7.2) and the memory and timing measurements (§8.3),
-> which do not depend on either point, are kept. The earlier tables are
-> in the git history (commit `d1482fa`). For the paper doublets the new
-> mesher improved the agreement with MSTM for Au (for example
-> $C_\text{ext}$ from 5–13 % to 1.5–2 %).
+> The errors against MSTM are several times smaller than before. Most of
+> the earlier error of the Au doublet came from the centre distance.
 
 Drivers under [benchmarks/cas_v2/doublet_mstm/](../benchmarks/cas_v2/doublet_mstm/):
 
@@ -379,8 +382,24 @@ for generic aggregates.
 ### 7.2 Numerical setup
 
 - VIEM: $\ell_c = R/5 = 0.006\,\text{μm}$, 5348 tets,
-  $N = 11501$ half-SWG DOFs. AIM block-BiCGSTAB at tolerance
-  $10^{-7}$, pitch $0.5\bar{h} = 0.0038\,\text{μm}$.
+  $N = 11501$ half-SWG DOFs. AIM block GMRES (`:aim_gmres`) with right
+  preconditioning by the mass matrix (`precond = :mass_right`),
+  tolerance $10^{-7}$, at most 400 iterations, pitch
+  $0.5\bar{h} = 0.0038\,\text{μm}$. The three orientations are solved
+  as one block. The solve converged in 10 iterations for the dielectric
+  doublet and in 167 iterations for the Au doublet.
+- Choice of solver (Au doublet, $\ell_c = R/5$, tolerance $10^{-7}$):
+
+  | Solver | Iterations | Final residual | Largest deviation of an amplitude component from the converged solution |
+  | ------ | ---------- | -------------- | ----------------------------------------------------------------------- |
+  | block BiCGSTAB, at most 400 iterations | 400 (not converged) | 8.0e−3 | 4.8e−3 |
+  | block GMRES, no preconditioner, at most 400 iterations | 400 (not converged) | 9.2e−5 | 2.7e−5 |
+  | block GMRES, no preconditioner, at most 1200 iterations | 621 | < 1e−7 | reference |
+  | block GMRES, mass preconditioner | 167 | 9.3e−8 | < 1e−7 |
+
+  The preconditioner changes the iteration count and not the solution.
+  The production runner `viem_results/run_viem.jl` uses block GMRES
+  without a preconditioner and at most 200 iterations.
 - MSTM: VSWF truncation order **forced to $N_\text{trunc} = 15$**
   for both materials.  The MSTMforCAS auto-truncation returns
   $N = 3$ at $x \approx 0.30$, which is converged for the
@@ -396,13 +415,88 @@ for generic aggregates.
 
 ### 7.3 Dielectric doublet — $m_p = 1.60 + 0.01\,i$
 
-Results withheld until the benchmark has been re-run with v0.8.2 (see
-the note at the top of §7).
+#### Magnitude summary
+
+| β [rad] | $\|S_\text{fw,mean}\|$ VIEM | $\|S_\text{fw,mean}\|$ MSTM | rel. $\|\cdot\|$ err. | complex rel. err. | phase err. [rad] |
+| ------- | ------------------ | ------------------ | --------------------- | ----------------- | ---------------- |
+| 0       | 1.7930e−03         | 1.7939e−03         | 0.05 %                | 0.05 %            | 3.8e−06          |
+| π/4     | 1.8473e−03         | 1.8489e−03         | 0.09 %                | 0.09 %            | 3.5e−06          |
+| π/2     | 1.9056e−03         | 1.9081e−03         | 0.13 %                | 0.13 %            | 2.3e−05          |
+
+#### $S_{\text{fw},\theta}$ — real and imaginary parts
+
+| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
+| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
+| 0       | +1.7925e−03 | +1.7934e−03 | 0.05 %     | +4.1903e−05 | +4.1991e−05 | 0.21 %     |
+| π/4     | +1.9041e−03 | +1.9066e−03 | 0.13 %     | +4.8930e−05 | +4.9082e−05 | 0.31 %     |
+| π/2     | +2.0239e−03 | +2.0279e−03 | 0.20 %     | +5.6501e−05 | +5.6771e−05 | 0.48 %     |
+
+#### $S_{\text{fw},\phi}$ — real and imaginary parts
+
+| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
+| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
+| 0       | +1.7926e−03 | +1.7934e−03 | 0.05 %     | +4.2025e−05 | +4.1991e−05 | 0.08 %     |
+| π/4     | +1.7893e−03 | +1.7902e−03 | 0.05 %     | +4.2780e−05 | +4.2724e−05 | 0.13 %     |
+| π/2     | +1.7860e−03 | +1.7870e−03 | 0.06 %     | +4.3512e−05 | +4.3463e−05 | 0.11 %     |
+
+All components agree with MSTM within 0.5 %: the real parts within
+0.05–0.20 % and the imaginary parts within 0.08–0.48 %. The errors of
+the earlier run (v0.8.1 mesher) were 1.4–1.7 % on the real parts and
+1.7–2.7 % on the imaginary parts.
 
 ### 7.4 Plasmonic Au doublet — $m_p = 0.17525 + 3.4830\,i$
 
-Results withheld until the benchmark has been re-run with v0.8.2 (see
-the note at the top of §7).
+#### Magnitude summary
+
+| β [rad] | $\|S_\text{fw,mean}\|$ VIEM | $\|S_\text{fw,mean}\|$ MSTM | rel. $\|\cdot\|$ err. | complex rel. err. | phase err. [rad] |
+| ------- | ------------------ | ------------------ | --------------------- | ----------------- | ---------------- |
+| 0       | 6.5042e−03         | 6.5039e−03         | 0.004 %               | 0.005 %           | 3.4e−05          |
+| π/4     | 8.2293e−03         | 8.2865e−03         | 0.69 %                | 0.70 %            | 8.9e−04          |
+| π/2     | 1.0085e−02         | 1.0197e−02         | 1.09 %                | 1.10 %            | 1.1e−03          |
+
+#### $S_{\text{fw},\theta}$ — real and imaginary parts
+
+| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
+| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
+| 0       | +6.4886e−03 | +6.4886e−03 | 0.001 %    | +4.4603e−04 | +4.4705e−04 | 0.23 %     |
+| π/4     | +9.9280e−03 | +1.0037e−02 | 1.08 %     | +1.3105e−03 | +1.3381e−03 | 2.07 %     |
+| π/2     | +1.3603e−02 | +1.3818e−02 | 1.55 %     | +2.2322e−03 | +2.2857e−03 | 2.34 %     |
+
+#### $S_{\text{fw},\phi}$ — real and imaginary parts
+
+| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
+| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
+| 0       | +6.4890e−03 | +6.4886e−03 | 0.007 %    | +4.4766e−04 | +4.4705e−04 | 0.14 %     |
+| π/4     | +6.4356e−03 | +6.4392e−03 | 0.06 %     | +4.5567e−04 | +4.5502e−04 | 0.14 %     |
+| π/2     | +6.3862e−03 | +6.3893e−03 | 0.05 %     | +4.6397e−04 | +4.6332e−04 | 0.14 %     |
+
+#### Discussion
+
+The error of the Au doublet depends on the orientation and on the
+polarisation.
+
+- The **$\phi$ channel** agrees with MSTM within 0.06 % on the real
+  part and 0.14 % on the imaginary part at every $\beta$.
+  $S_{\text{fw},\phi}$ probes the polarisation transverse to the doublet
+  axis, for which the coupling of the two spheres through the gap is
+  weak.
+- The **$\theta$ channel** has the largest errors: 1.6 % on the real
+  part and 2.3 % on the imaginary part at $\beta = \pi/2$. In this
+  configuration the field is polarised along the doublet axis and
+  concentrates in the gap. At $\beta = 0$ both channels are transverse
+  to the axis and the errors stay below 0.25 %.
+
+The relative error of $|S_\text{fw,mean}|$ (1.1 % at $\beta = \pi/2$)
+is about half of the error of $\operatorname{Im} S_{\text{fw},\theta}$.
+The component view is therefore the better indicator when $\ell_c$ is
+chosen for plasmonic targets. One refinement step to $\ell_c = R/6$
+brings every component within 0.4 % (§8).
+
+The earlier run (v0.8.1 mesher, block BiCGSTAB) had errors of 4.0 % on
+$|S_\text{fw,mean}|$ and 10.5 % on
+$\operatorname{Im} S_{\text{fw},\theta}$ at $\beta = \pi/2$. The
+$\theta$ channel is sensitive to the gap width, and the centre distance
+of that mesh was about 1 % too large.
 
 ---
 
@@ -414,19 +508,66 @@ Driver:
 geometry, four refinement levels $\ell_c = R/k$ for
 $k = 5, 6, 7, 8$ (the script default is $k = 5, 6, 7$; $k = 8$ is set
 with `BM_LC_RATIOS`), all compared against the converged MSTM
-$N = 15$ reference. Single-threaded (Intel i7-1265U,
-16 GB RAM, Julia 1.11) — the v0.6.0 threaded setup
-+ block MVP gives a 2 – 3 × speed-up at 4 + Julia threads.
+$N = 15$ reference. Solver as in §7.2 (block GMRES with the mass
+preconditioner). Measured on 2026-11-19 with v0.8.2 on an AMD Ryzen 5
+220 laptop (16 GB RAM, 12 GB available to WSL2, Julia 1.12.5) with one
+Julia thread. More Julia threads shorten the setup and the block MVP.
 
 ### 8.1 Per-component error vs ℓ_c at β = π/2
 
-Results withheld until the benchmark has been re-run with v0.8.2 (see
-the note at the top of §7).
+Relative error against MSTM, Au doublet, $\beta = \pi/2$. Every solve
+reached the tolerance $10^{-7}$ (167, 166, 218 and 234 iterations for
+$k = 5, 6, 7, 8$).
+
+| ℓ_c / R | N DOF  | $\|S_\text{fw,mean}\|$ | $\operatorname{Re} S_{\text{fw},\theta}$ | $\operatorname{Im} S_{\text{fw},\theta}$ | $\operatorname{Re} S_{\text{fw},\phi}$ | $\operatorname{Im} S_{\text{fw},\phi}$ |
+| ------- | ------ | ----- | ----- | ------ | ----- | ----- |
+| 1/5     | 11 501 | 1.09 %| 1.55 %| 2.34 % | 0.05 %| 0.14 %|
+| 1/6     | 18 917 | 0.25 %| 0.37 %| 0.03 % | 0.03 %| 0.17 %|
+| 1/7     | 29 616 | 0.12 %| 0.16 %| 0.14 % | 0.04 %| 0.21 %|
+| 1/8     | 45 697 | 0.24 %| 0.35 %| 0.41 % | 0.003 %| 0.05 %|
+
+Largest error over the five components at the other orientations:
+0.23 %, 0.18 %, 0.10 %, 0.05 % at $\beta = 0$ and 2.07 %, 0.25 %,
+0.10 %, 0.36 % at $\beta = \pi/4$ for $k = 5, 6, 7, 8$.
+
+From $\ell_c = R/6$ on, every component at every orientation is within
+0.41 % of MSTM. The step from $R/5$ to $R/6$ reduces the
+$\theta$-channel error by a factor of 4 or more. Below that the errors
+do not decrease monotonically. The error at $R/8$ is larger than at
+$R/7$ for the $\theta$ channel, and the sign of the error of
+$\operatorname{Im} S_{\text{fw},\theta}$ changes between levels
+(−2.34 %, +0.03 %, +0.14 %, −0.41 %).
+
+The earlier run (v0.8.1 mesher) gave 4.4 %, 2.7 %, 1.9 % and 1.6 % on
+$|S_\text{fw,mean}|$ for the same four levels.
 
 ### 8.2 Fitted convergence rate $p$ in $\text{err} \propto (\ell_c/R)^p$
 
-Results withheld until the benchmark has been re-run with v0.8.2 (see
-the note at the top of §7).
+4-point log-log least-squares fit of the $\beta = \pi/2$ errors of
+§8.1:
+
+| Component | $p$ |
+| --------- | --- |
+| $\|S_\text{fw,mean}\|$ | 3.6 |
+| $\operatorname{Re} S_{\text{fw},\theta}$ | 3.6 |
+| $\operatorname{Im} S_{\text{fw},\theta}$ | 2.9 |
+| $\operatorname{Re} S_{\text{fw},\phi}$ | 4.9 |
+| $\operatorname{Im} S_{\text{fw},\phi}$ | 1.8 |
+
+These exponents are **not** convergence rates. The fit is dominated by
+the drop between $R/5$ and $R/6$, and the errors at $R/6$ to $R/8$
+scatter between 0.003 % and 0.41 % without a monotone trend. A
+convergence rate cannot be read from these four levels. The origin of
+the scatter was not investigated. Candidates are the AIM approximation
+of the far-field interactions and the change of the unstructured mesh
+in the gap region from level to level.
+
+The earlier results (v0.8.1 mesher) gave $p = 2.1$–$2.5$ on every
+component. Those errors were dominated by the centre-distance error of
+the uniformly scaled mesh, which decreases with $\ell_c$ as the volume
+defect of the faceted spheres does. That agreement with the linear-SWG
+rate $p \approx 2$ is therefore not a measurement of the convergence
+rate of the solver.
 
 ### 8.3 Phase A AIM-operator memory
 
@@ -437,24 +578,32 @@ reached 486 MiB at $R/5$ and 1074 MiB
 at $R/6$ on the same geometry; Phase A reduces those totals to
 97 MiB and 164 MiB — a 5.0 × / 6.5 × /
 11 × reduction at $R/5$ / $R/6$ / $R/7$ respectively. Asymptotic:
-total tracked grows as $\mathcal O(N_\text{dof}^{1.02})$ —
+total tracked grows as $\mathcal O(N_\text{dof}^{1.05})$ —
 essentially linear in $N$.
 
-| ℓ_c / R | N DOF  | N_bnd | $W^S$    | precorrection | total tracked | t_setup | t_solve (3 orient.) |
-| ------- | ------ | ----- | -------- | ------------- | ------------- | ------- | ------------------- |
-| 1/5     | 11 501 | 1 610 | 4.9 MiB  | 67.2 MiB      | **96.8 MiB**  | 105 s   | 201 s               |
-| 1/6     | 18 919 | 2 254 | 8.1 MiB  | 116.5 MiB     | **164.2 MiB** | 179 s   | 363 s               |
-| 1/7     | 29 636 | 3 176 | 12.6 MiB | 189.0 MiB     | **262.7 MiB** | 299 s   | 718 s               |
-| 1/8     | 45 585 | 4 210 | 19.4 MiB | 300.7 MiB     | **413.3 MiB** | 410 s   | 925 s               |
+| ℓ_c / R | N DOF  | N_bnd | $W^S$    | precorrection | total tracked | t_setup | t_solve (3 orient.) | iterations |
+| ------- | ------ | ----- | -------- | ------------- | ------------- | ------- | ------------------- | ---------- |
+| 1/5     | 11 501 | 1 610 | 4.9 MiB  | 67.3 MiB      | **96.8 MiB**  | 143 s   | 173 s               | 167        |
+| 1/6     | 18 917 | 2 254 | 8.1 MiB  | 116.5 MiB     | **164.3 MiB** | 236 s   | 290 s               | 166        |
+| 1/7     | 29 616 | 3 176 | 12.6 MiB | 188.8 MiB     | **262.5 MiB** | 369 s   | 537 s               | 218        |
+| 1/8     | 45 697 | 4 210 | 19.4 MiB | 302.4 MiB     | **415.2 MiB** | 578 s   | 821 s               | 234        |
 
-Setup and solve times both scale as $\mathcal{O}(N_\text{dof})$
-within measurement noise, consistent with the AIM MVP cost
+The setup time scales as $\mathcal{O}(N_\text{dof})$ (fitted exponent
+1.01). The solve time per iteration grows from 1.0 s to 3.5 s (fitted
+exponent 0.87), consistent with the AIM MVP cost
 $\mathcal{O}(N_g \log N_g + N_\text{dof}\, n_\text{near})$ at fixed
-wavelength. With sub-300 MiB budgets through $R/7$,
-refinement to $R/8$ used 413 MiB operator memory (RSS peak ~ 3.8
-GiB during the 3-orientation block-BiCGSTAB). The projected
+wavelength. The total solve time grows faster (exponent 1.15) because
+the iteration count rises from 167 to 234. With sub-300 MiB budgets
+through $R/7$, refinement to $R/8$ used 415 MiB operator memory. The
+process RSS was 3.2 GiB after the $R/8$ solve and peaked at 5.2 GiB
+over the four levels, which run in one process. The projected
 760 MiB operator memory at $R/10$ is feasible on the
-same 16 GB workstation.
+same 16 GB machine.
+
+The times of the earlier measurement (April 2026, Intel i7-1265U,
+block BiCGSTAB, v0.8.1 mesher) were 105–410 s for the
+setup and 201–925 s for the solve. The operator memory was the same
+within 0.5 %.
 
 ---
 

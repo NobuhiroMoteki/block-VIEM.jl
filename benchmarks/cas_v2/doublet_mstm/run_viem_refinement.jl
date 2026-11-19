@@ -30,7 +30,7 @@ include(joinpath(@__DIR__, "config.jl"))
 # solver scales faster than N in practice (≈ O(N²) near-field storage
 # for this dense-aggregate geometry), so on a 15 GB RAM workstation
 # only R/6 is feasible as the finer point — R/7 (N≈30K DOFs) OOMs
-# with current default block-BiCGSTAB buffer allocation.
+# with the block-BiCGSTAB buffer allocation of that time (April 2026).
 const LC_RATIOS = (6,)
 
 # Refinement is run on Au only: it has the largest baseline error and
@@ -70,13 +70,15 @@ function solve_at_lc(lc::Float64, mat)
 
     euler_list = [(0.0, β, 0.0) for β in BETAS]
 
-    t_solve = @elapsed results = solve_cas_v2_orientations(
+    t_solve = @elapsed results, info = solve_cas_v2_orientations(
         basis, euler_list;
         wl_0 = WL_0, m_m = M_MEDIUM, m_p = ComplexF64(mat.m_p),
-        method = :aim_bicgstab, pitch = pitch, padding = VIEM_PADDING,
+        method = VIEM_METHOD, precond = VIEM_PRECOND, pitch = pitch, padding = VIEM_PADDING,
         tol = VIEM_TOL, maxiter = VIEM_MAXITER, verbose = false,
+        return_solve_info = true,
     )
-    @printf("  solve: %.2f s\n", t_solve)
+    @printf("  solve: %.2f s  iters=%d  converged=%s  residual=%.3e\n",
+            t_solve, info.iterations, info.converged, info.residual_norm)
 
     recs = Dict{String,Any}[]
     for (β, res) in zip(BETAS, results)
@@ -89,6 +91,11 @@ function solve_at_lc(lc::Float64, mat)
             "N_dof"         => N_dof,
             "h_bar"         => hbar,
             "solve_time_s"  => t_solve,
+            "solver_method"     => String(VIEM_METHOD),
+            "solver_precond"    => String(VIEM_PRECOND),
+            "solver_iterations" => info.iterations,
+            "solver_converged"  => info.converged,
+            "solver_residual"   => info.residual_norm,
             "S_fw_mean_re"  => real(res.S_fw_mean),
             "S_fw_mean_im"  => imag(res.S_fw_mean),
             "S_fw_theta_re" => real(res.S_fw_theta),

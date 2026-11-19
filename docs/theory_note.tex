@@ -943,18 +943,19 @@ The Au doublet benchmark
 \SI{638}{nm}$, Johnson--Christy~\cite{JohnsonChristy1972} gold)
 measured at four refinement levels $\ell_c = R/k$ for
 $k \in \{5, 6, 7, 8\}$ shows the total in-memory \texttt{AIMOperator}
-footprint growing as $\mathcal{O}(N_{\text{dof}}^{1.02})$ ---
+footprint growing as $\mathcal{O}(N_{\text{dof}}^{1.05})$ ---
 essentially linear in $N_{\text{dof}}$, confirming the Phase A
 design target.  The dominant contribution is the bulk precorrection
-block $K^{\text{pc}}$ (\SIrange{69}{72}{\percent} of total), whose
+block $K^{\text{pc}}$ (\SIrange{69}{73}{\percent} of total), whose
 sparsity scales as $\mathcal{O}(N_{\text{dof}}\,n_{\text{near}})$
 with $n_{\text{near}} \lesssim (M_{\text{st}}\,r_{\text{near}}/
 \ell_c)^3$ an $\mathcal{O}(1)$ count independent of
 $N_{\text{dof}}$.  The new surface projection $W^{S}$ adds
-\SIrange{4}{5}{\percent} to the total, a small overhead compared
+about \SI{5}{\percent} to the total, a small overhead compared
 with the eliminated $\mathcal{O}(N_{\text{dof}}^{5/3})$ Phase-1a
-\texttt{half\_swg\_extra} matrix.  Setup and solve times also scale
-as $\mathcal{O}(N_{\text{dof}})$ within measurement noise,
+\texttt{half\_swg\_extra} matrix.  The setup time and the solve
+time per iteration also scale as $\mathcal{O}(N_{\text{dof}})$
+within measurement noise,
 consistent with the AIM MVP cost $\mathcal{O}(N_g \log N_g +
 N_{\text{dof}}\,n_{\text{near}})$ at fixed wavelength.  At $R/7$
 the operator footprint is below \SI{300}{MiB} and at $R/8$ below
@@ -1274,9 +1275,10 @@ test cases.  Sub-1\,\% accuracy on all five CAS-v2 observables is
 reached at modest mesh sizes ($N \sim 2 \times 10^3$ half-SWG DoF)
 for the Mie reference, and agreement with the independent codes is
 at the few-percent level expected from the discretisation budget of
-either side.  The numbers of the doublet benchmark are withheld until
-it has been re-run with the doublet mesher of v0.8.2
-(Sec.~\ref{sec:doublet-mstm}).
+either side.  For the touching doublet the forward amplitudes agree
+with the T-matrix reference within \SI{0.5}{\percent} for the
+dielectric and within \SI{2.4}{\percent} for gold at
+$\ell_c = R/5$ (Sec.~\ref{sec:doublet-mstm}).
 
 The full set of validation conditions (geometry, material, mesh,
 solver settings), per-observable error tables (real and imaginary
@@ -1474,26 +1476,60 @@ $\lambda_0 = \SI{0.638}{\micro\metre}$, three orientations $\beta
 dielectric ($m_p = 1.60 + 0.01 i$, polystyrene-like) and plasmonic
 gold ($m_p = 0.17525 + 3.4830 i$, Johnson \& Christy 1972).  The
 half-SWG VIEM mesh uses $\ell_c = R/5$
-($N_{\text{dof}} = 11\,501$) solved by AIM block-BiCGSTAB at
-$\text{tol} = 10^{-7}$; the MSTM reference uses VSWF truncation
-forced to $N = 15$ (rtol $\le 10^{-6}$ on both materials at
-$x \approx 0.30$).
+($N_{\text{dof}} = 11\,501$).
+The system is solved by AIM block GMRES with right preconditioning by
+the mass matrix at $\text{tol} = 10^{-7}$.
+The MSTM reference uses VSWF truncation forced to $N = 15$
+(rtol $\le 10^{-6}$ on both materials at $x \approx 0.30$).
+The results below were computed with v0.8.2, in which each sphere of
+the mesh is scaled about its own centre to the nominal volume.
+The centre distance is then exactly $2.1 R$.
 
-The accuracy results of this benchmark, including the four-point
-mesh-refinement study at $\ell_c = R/k$, $k \in \{5, 6, 7, 8\}$, are
-withheld for now.
-They were computed before v0.8.2 with the previous doublet mesher,
-which scaled the whole mesh uniformly to the nominal volume.
-The centre distance of the two spheres was then larger than the
-nominal one by the scale factor, about \SI{1}{\percent} at
-$\ell_c = R/5$.
-From v0.8.2 each sphere is scaled about its own centre.
-The results will be given again when the benchmark has been re-run.
+For the dielectric doublet $|S_{\text{fw,mean}}|$ matches MSTM within
+\SI{0.13}{\percent} at all orientations.
+The largest component error is \SI{0.48}{\percent}
+($\Im S_{\text{fw},\theta}$ at $\beta = \pi/2$).
+For the plasmonic Au doublet the error of $|S_{\text{fw,mean}}|$ grows
+with $\beta$ from \SI{0.004}{\percent} at $\beta = 0$ to
+\SI{1.09}{\percent} at $\beta = \pi/2$.
+The error depends strongly on the polarisation.
+The $\phi$ channel stays within \SI{0.14}{\percent} at every $\beta$.
+The $\theta$ channel at $\beta = \pi/2$ has errors of
+\SI{1.55}{\percent} on the real part and \SI{2.34}{\percent} on the
+imaginary part.
+In that configuration the field is polarised along the doublet axis
+and concentrates in the gap between the spheres.
+
+A four-level mesh-refinement study at $\ell_c = R/k$ for
+$k \in \{5, 6, 7, 8\}$ was run for the Au doublet.
+From $\ell_c = R/6$ on, every component at every orientation is
+within \SI{0.41}{\percent} of MSTM.
+The errors at $k = 6, 7, 8$ do not decrease monotonically.
+At $\beta = \pi/2$ the error of $|S_{\text{fw,mean}}|$ is
+\SI{1.09}{\percent}, \SI{0.25}{\percent}, \SI{0.12}{\percent} and
+\SI{0.24}{\percent} for $k = 5, 6, 7, 8$.
+A convergence rate is therefore not quoted from this study.
+
+Two points about the solver were established with this benchmark.
+First, block BiCGSTAB does not converge for the Au doublet.
+Its residual is $8 \times 10^{-3}$ after 400 iterations and its
+amplitudes deviate from the converged ones by up to
+\SI{0.5}{\percent}.
+Second, block GMRES without a preconditioner needs 621 iterations at
+$\ell_c = R/5$, and 167 iterations with the mass preconditioner.
+The two converged solutions agree to eight digits.
+
+Results published before v0.8.2 showed larger errors for this
+benchmark, up to \SI{10.5}{\percent} on $\Im S_{\text{fw},\theta}$,
+and a fitted rate $p \approx 2$.
+The mesher of that time scaled the whole mesh uniformly, so the centre
+distance was too large by about \SI{1}{\percent} at $\ell_c = R/5$.
+That geometric error dominated the earlier numbers.
+
 Phase A (Sec.~\ref{sec:aim-surface}) brings the AIM-operator memory to
-a near-linear $\mathcal{O}(N_{\text{dof}}^{1.02})$ scaling, so the
-$R/8$ ($N_{\text{dof}} = 45\,585$) refinement fits in
-\SI{413}{\mebi\byte} of operator memory.
-This measurement does not depend on the mesher change.
+a near-linear $\mathcal{O}(N_{\text{dof}}^{1.05})$ scaling, so the
+$R/8$ ($N_{\text{dof}} = 45\,697$) refinement fits in
+\SI{415}{\mebi\byte} of operator memory.
 
 \paragraph{MSTMforCAS truncation order.} The MSTMforCAS
 auto-truncation returns $N_{\text{trunc}} = 3$ at
@@ -1509,9 +1545,10 @@ re-confirm convergence with
 \texttt{benchmarks/cas\_v2/doublet\_mstm/check\_trunc\_\allowbreak convergence.jl}.
 
 \paragraph{}
-The full benchmark setup and the Phase A AIM-operator memory
-measurements are tabulated in
-\texttt{docs/benchmark\_results.md} \S\S 7--8.
+The file \texttt{docs/benchmark\_results.md} (\S\S 7--8) tabulates
+the full benchmark setup, the per-orientation error tables for
+$S_{\text{fw},\theta}$ and $S_{\text{fw},\phi}$, the refinement
+study and the Phase A AIM-operator memory measurements.
 
 
 %======================================================================

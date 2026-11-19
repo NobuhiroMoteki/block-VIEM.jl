@@ -47,6 +47,13 @@ const VIEM_LC_BASE   = R_MONOMER / 5  # base mesh size [μm] (overridden per mat
 const VIEM_TOL       = 1e-7
 const VIEM_MAXITER   = 400
 const VIEM_PADDING   = 4
+# Block GMRES, the production default since v0.7.1. Until v0.8.2 this benchmark
+# used :aim_bicgstab, the default at the time it was written.
+const VIEM_METHOD    = :aim_gmres
+# Right preconditioning with the mass matrix. The Au doublet at lc = R/5 then
+# reaches VIEM_TOL in 167 iterations. Without it the solve needs 621 iterations
+# (more than VIEM_MAXITER) and gives the same amplitudes to 9 digits (2026-11-19).
+const VIEM_PRECOND   = :mass_right
 
 # MSTM solver options (used by run_mstm.jl)
 const MSTM_USE_FFT   = false
