@@ -5,7 +5,7 @@
 # observables plus the Mie reference for the volume-equivalent sphere.
 #
 # Features:
-#   - AIM FFT-MVP + block-BiCGSTAB by default (O(N log N) per iteration)
+#   - AIM FFT-MVP + block GMRES by default (O(N log N) per iteration)
 #   - Automatic spheroid-mode detection (ab_ratio==1 && gre_beta==0):
 #     solve only N_beta orientations at α=0, fill the full grid analytically
 #   - On solver failure, fills NaN and continues (matches block-DDA_Py)
@@ -143,10 +143,16 @@ function build_particle(shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
         # a_eq = r_v_base; monomer radius R = a_eq / 2^(1/3) (CLAUDE.md §2)
         R = Float64(r_v_base) / 2.0^(1/3)
         agg = _doublet_along_z(R)
+        # overlap_factor = 0: the two spheres are meshed at their nominal radius,
+        # so the gap is 0.1 R as documented and as in the MSTM reference. The
+        # default overlap_factor = 0.02 inflates the radii by 1.02, and the
+        # volume rescale then shrinks the centre distance: the meshed gap was
+        # 0.0595 R up to v0.8.0.
         mesh, _msh = mesh_sphere_aggregate(agg;
+                                           overlap_factor=0.0,
                                            wl_0=wl_0, m_p_max=m_p_max, N_pw=N_PW)
-        # r_ve from actual discretised volume (small deviation from a_eq
-        # due to mesh truncation of the sphere surfaces)
+        # r_ve from the mesh volume. mesh_sphere_aggregate rescales the mesh to
+        # the nominal volume, so this equals a_eq to rounding error.
         V = total_volume(mesh)
         r_ve = (3 * V / (4π))^(1/3)
     else
@@ -503,8 +509,8 @@ function main()
         # with block-DDA_Py).  Refuse to run on HDF5 files produced by
         # an older create_paper_h5.jl — they must be regenerated.
         haskey(t, "cost") || error(
-            "HDF5 is missing the /target/cost/ group — regenerate via " *
-            "viem_results/paper/<shape>_<material>.jl (v0.7.3+).")
+            "HDF5 is missing the /target/cost/ group — regenerate it with " *
+            "viem_results/create_h5.jl or viem_results/paper/<shape>_<material>.jl.")
         cost = t["cost"]
 
         # S_bk_OCBS is (-S11+S22)(180°)/2 since 2026-11-19 (corrected Eq. (28)
@@ -561,6 +567,19 @@ function main()
         # shape_kind: "gre" (default for legacy files) or "doublet"
         shape_kind = haskey(attributes(t), "shape_kind") ?
             String(read_attribute(t, "shape_kind")) : "gre"
+
+        # Doublet geometry: the meshed gap is 0.1 R. Up to v0.8.0 it was
+        # 0.0595 R (see build_particle). A doublet file filled by this code
+        # carries the attribute doublet_gap_over_R. A file that holds doublet
+        # results without it was computed with the smaller gap and is not
+        # resumed, so that one file never mixes the two geometries.
+        if shape_kind == "doublet" && !haskey(attributes(t), "doublet_gap_over_R")
+            any(x -> imag(x) != 0.0, read(sd["S_fw_PCAS_mie"])) && error(
+                "$OUTPUT_FILE holds doublet results computed with a meshed gap of " *
+                "0.0595 R (run_viem.jl up to v0.8.0). The present code meshes the " *
+                "documented gap of 0.1 R. Keep this file as it is and use a new file.")
+            attrs(t)["doublet_gap_over_R"] = 0.1
+        end
 
         wl_m_m_pairs  = read(t["wl_m_m_pairs"])     # (N_pairs, 2) in Julia
         m_p_xyz_list  = read(t["m_p_xyz_list"])      # (N_m_p, 3)
@@ -746,7 +765,7 @@ function main()
                 # Sentinel values used when the solver raises; overwritten
                 # on success by the 6th return value of run_viem_*.
                 solve_info = (iterations = 0, converged = false,
-                              residual_norm = NaN)
+                              residual_norm = NaN, residual_history = Float64[])
                 t0_solve = time_ns()
                 try
                     if spheroid_mode

@@ -15,8 +15,9 @@ Duffy Singular Integration, and AIM-FFT Acceleration\\
 for Light Scattering by Arbitrary Dielectric Particles}
 \author{N.\ Moteki}
 \date{Last updated: 2026-11-19 (Sec.~\ref{sec:shifted-gmres} added and
-Sec.~\ref{sec:S-bk} corrected in block-VIEM.jl v0.8.0; the other
-sections correspond to v0.7.7)}
+Sec.~\ref{sec:S-bk} corrected in block-VIEM.jl v0.8.0; the
+descriptions of the implementation in the other sections were brought
+in line with the code after v0.8.0)}
 
 \begin{document}
 \maketitle
@@ -490,9 +491,11 @@ The weakly singular kernel $1/R$ in \eqref{eq:K-A}--\eqref{eq:K-D}
 remains integrable but standard Gauss quadrature fails when the source
 and test tetrahedra share a vertex, edge, or face, or when the outer
 Gauss point approaches a face of the inner element. Following
-Mousavi--Sukumar~\cite{MousaviSukumar2010}, all such cases are handled
-uniformly by a \emph{vertex-only} Duffy transform applied to sub-tetrahedra
-obtained by projecting the singular point onto the inner element.
+Mousavi--Sukumar~\cite{MousaviSukumar2010}, the building block for all
+such cases is a \emph{vertex-only} Duffy transform. It is applied in
+two ways (Sec.~\ref{sec:pair-class}): to the sub-tetrahedra obtained by
+subdividing the inner element around an interior singular point, and
+at the vertices that the inner element shares with the outer one.
 
 For $\alpha = 1$ (a $1/R$ singularity at a single vertex), the
 optimised transform from the unit cube
@@ -516,12 +519,11 @@ affine map from reference to physical coordinates is
 \end{equation}
 The factor $u_1^{2}$ exactly cancels the $1/R$ singularity, leaving a
 smooth integrand on the unit cube that is integrated by a tensor-product
-Gauss--Legendre rule. For the $K^{A}$ kernel
-\eqref{eq:K-A} the recommended order is $5\times 5\times 5$
-(125~points) for self and face-adjacent pairs, and a $4\times 4\times 4$
-rule for edge- and vertex-adjacent pairs; a $5$-point Gauss rule on the
-source tetrahedron is sufficient for all pairs that are not near the
-observation point.
+Gauss--Legendre rule. The code uses one rule, $5\times 5\times 5$
+(125~points, \texttt{duffy\_reference\_rule(5)}), for every singular and
+near-singular volume integral. The outer integral over the test
+tetrahedron and all regular inner integrals use the $5$-point Gauss rule
+on the tetrahedron.
 
 %----------------------------------------------------------------------
 \subsection{Pair classification}
@@ -529,22 +531,28 @@ observation point.
 %----------------------------------------------------------------------
 
 Given an outer quadrature point $\bm{r}$ inside the test tetrahedron
-$T_m$, the source element $T_n$ is classified and integrated according
-to the minimum distance:
+$T_m$, the source element $T_n$ is classified by the mesh topology,
+that is by the nodes the two tetrahedra share, and not by a distance:
 \begin{itemize}
-  \item \emph{self} ($T_n = T_m$): the outer Gauss point is the singular
-        vertex. The source tetrahedron is subdivided into four
-        sub-tetrahedra with the outer Gauss point as a common vertex,
-        and each is integrated by the Duffy transform
+  \item \emph{self} ($T_n = T_m$): the outer Gauss point lies inside
+        the source tetrahedron. The source tetrahedron is subdivided
+        into four sub-tetrahedra with the outer Gauss point as a common
+        vertex, and each is integrated by the Duffy transform
         \eqref{eq:duffy-map}.
-  \item \emph{face-/edge-/vertex-adjacent}: the singular point is the
-        nearest vertex, the nearest point on the shared edge, or the
-        shared face. Sub-tetrahedra are generated as above around that
-        singular point and integrated by the same Duffy rule.
-  \item \emph{far} ($R$ larger than a chosen threshold): the inner
-        integral is evaluated with a plain tetrahedron Gauss rule
-        (5~points). Pairs further than the AIM near-field radius are
-        never integrated directly (Sec.~\ref{sec:aim}).
+  \item \emph{adjacent} ($T_n$ shares a face, an edge or a vertex with
+        $T_m$): the outer point lies outside $T_n$ but can be close to
+        the shared feature. The kernel is split as
+        $G = G_0 + (G - G_0)$ with the static part
+        $G_0 = 1/(4\pi R)$. The static part is integrated with the
+        Duffy rule placed at each shared vertex of $T_n$ in turn, and
+        the results are averaged over the shared vertices. The
+        remainder $G - G_0$ is bounded, with the limit
+        $i k_0/(4\pi)$ for $R \to 0$, and is integrated with the
+        5-point Gauss rule.
+  \item \emph{far} (no shared node): the inner integral is evaluated
+        with the 5-point Gauss rule. Pairs further apart than the AIM
+        near-field radius are never integrated directly
+        (Sec.~\ref{sec:aim}).
 \end{itemize}
 
 %----------------------------------------------------------------------
@@ -567,15 +575,32 @@ coordinates $(\eta_1, \eta_2, \eta_3)$,
 with Jacobian $J_{D,2}(\bm{u}) = 2\abs{A_{\text{tri}}}\,u_1$. The
 linear factor $u_1$ cancels the $1/R$ singularity at the vertex $\eta_1
 = 1$, and the face $u_1 = 0$ collapses to that vertex just as in the
-three-dimensional case. For the $K^{D}$ self/edge/vertex branches, the
-outer triangle is first subdivided into sub-triangles at the singular
-feature and the 2D Duffy rule is applied to each.
-
-The near-singular sub-cases of $K^{B}$ and $K^{C}$ (for example, the
-outer tetrahedron $T_m$ having a face coincident with the inner
-boundary face $S_n$) are handled by projecting the outer Gauss point
-onto the inner triangle and applying the 2D Duffy rule around that
-projection.
+three-dimensional case. The outer integral always uses a plain Gauss
+rule, on the triangle or on the tetrahedron. The inner integral is
+chosen by the shared nodes, as in Sec.~\ref{sec:pair-class}:
+\begin{itemize}
+  \item $K^{D}$ (triangle--triangle). Same face: the inner triangle is
+        subdivided around the outer point and the 2D Duffy rule is
+        applied to each sub-triangle. Shared edge or vertex: the 2D
+        Duffy rule is placed at each shared vertex of the inner
+        triangle and the results are averaged. No shared node: Gauss
+        rule.
+  \item $K^{B}$ (outer tetrahedron, inner triangle). If the test
+        tetrahedron owns the face, the outer Gauss point is projected
+        onto the plane of the triangle, the triangle is subdivided
+        around the projection and the 2D Duffy rule is applied. If the
+        tetrahedron only shares nodes with the face, the 2D Duffy rule
+        is placed at the shared vertices and averaged. Otherwise the
+        Gauss rule is used.
+  \item $K^{C}$ (outer triangle, inner tetrahedron). The inner integral
+        is a volume integral of $G$. For the tetrahedron that owns the
+        face it uses the subdivision around the outer point with the 3D
+        Duffy rule. For a node-sharing tetrahedron it uses the 3D Duffy
+        rule at the shared vertices, averaged. Otherwise the 5-point
+        Gauss rule is used.
+\end{itemize}
+The default rules are a collapsed tensor Gauss rule with 4 points per
+axis on the triangle and a 2D Duffy rule with 6 points per axis.
 
 %======================================================================
 \section{FFT-Accelerated MVP: Adaptive Integral Method}
@@ -684,9 +709,11 @@ complete MVP is
               (K^{\text{far}} + K^{\text{pc}})\bigr)\,\bm{x},
   \label{eq:aim-mvp}
 \end{equation}
-where $D_M$ is the sparse diagonal mass contribution
-$M/\epsilon_p$ and $K^{\text{pc}}$ has
-$\mathcal{O}(N_{\text{dof}})$ non-zero entries. The default near radius
+where $D_M = M/\epsilon_p$ is the sparse mass contribution (for an
+anisotropic particle $\sum_\alpha \epsilon_\alpha^{-1} M_\alpha$,
+Sec.~\ref{sec:anisotropic}) and $K^{\text{pc}}$ has
+$\mathcal{O}(N_{\text{dof}})$ non-zero entries. Only the upper triangle
+of the symmetric $K^{\text{pc}}$ is stored. The default near radius
 is $r_{\text{near}} = 2 \times (\text{stencil extent})$, verified in
 Phase-3 benchmarks to produce $<0.5\%$ relative error between the
 AIM-accelerated and the dense matrix--vector products.
@@ -705,10 +732,13 @@ N_{\text{dof}}$, which for the iron-oxide doublet geometry dominates
 total live memory at $81$--$86\%$ (measured at R/5, R/6 mesh
 refinement). This subsection extends the moment-matching projection to
 the boundary-face supports so that $K^{B}, K^{C}, K^{D}$ share the same
-three-dimensional FFT convolution as $K^{A}$, reducing
-\texttt{half\_swg\_extra} to a sparse near-field correction block whose
-storage scales as $\mathcal{O}(N_{\text{bnd}})$ rather than
-$\mathcal{O}(N_{\text{bnd}} N_{\text{dof}})$. The construction follows
+three-dimensional FFT convolution as $K^{A}$. Their near-field part is
+then a sparse correction with $\mathcal{O}(N_{\text{bnd}})$ entries
+rather than $\mathcal{O}(N_{\text{bnd}} N_{\text{dof}})$, and it is
+stored in the precorrection matrix $K^{\text{pc}}$ of
+Sec.~\ref{sec:aim-precorrection}. The separate matrix is no longer
+filled: the field \texttt{half\_swg\_extra} of the operator remains as
+an empty placeholder. The construction follows
 Anastassiu \emph{et~al.}~\cite{Anastassiu1998}, which supplies the
 mathematical rigour (``thin-sheet constraint'') omitted from the
 original AIM presentation of Bleszynski \emph{et~al.}~\cite{Bleszynski1996}.
@@ -789,15 +819,17 @@ $\{\Lambda^{S}_{nq}\}_{q \in \mathcal{S}^{S}_n}$ are determined by
   \label{eq:surf-matching}
 \end{equation}
 where $\mathcal{S}^{S}_n$ is a cubic stencil of
-$M_{\text{st}} = (n_{\text{st}}+1)^{3}$ grid nodes centred on the
-triangle centroid $\bm{c}_n$. The stencil size and grid are identical
-to the bulk case of Sec.~\ref{sec:aim-grid}, so the surface and bulk
-contributions share a single FFT plan. Only a single scalar linear
-system per boundary face must be solved; the Vandermonde-type matrix
+$M_{\text{st}} = (n_{\text{st}}+1)^{3}$ grid nodes. The expansion
+centre $\bm{c}_n$ and the stencil are those of the bulk channels of the
+same basis function: $\bm{c}_n$ is the volume-weighted centroid of the
+supporting tetrahedra, which for a half-SWG function is the centroid of
+its tetrahedron. The surface and bulk contributions therefore share one
+grid and one FFT plan. The Vandermonde-type matrix
 $\bigl[(\bm{g}_q-\bm{c}_n)^{\bm{\alpha}}\bigr]$ is of size
 $\binom{n_{\text{st}}+3}{3}\times M_{\text{st}}$ and is independent of
-the kernel $G$, so it is factored once and reused for every boundary
-face.
+the kernel $G$. It depends on the position of the stencil relative to
+$\bm{c}_n$, so it is built once per basis function and solved for the
+bulk and for the surface right-hand sides.
 
 \subsubsection*{Far-field product via the shared FFT}
 
@@ -805,50 +837,44 @@ With the bulk vector weights $W^{\text{vec},\alpha}_{np}$ (three
 Cartesian components), the bulk divergence weights $W^{\div}_{np}$,
 and the new surface weights $\Lambda^{S}_{nq}$, the full far-field MVP
 $\bm{y}^{\text{far}} = K^{\text{far}}\bm{x}$ proceeds through a single
-grid pass. Define three source projections
+grid pass. The divergence and the surface density enter only through
+their difference, so they are combined into one effective scalar
+source:
 \begin{equation}
   q^{\text{vec},\alpha}_p = \sum_{n} W^{\text{vec},\alpha}_{np}\,x_n,
   \qquad
-  q^{\div}_p = \sum_{n} W^{\div}_{np}\,x_n,
-  \qquad
-  q^{S}_p = \sum_{n\in\mathcal{N}_{\text{bnd}}}
-    \Lambda^{S}_{np}\,x_n,
+  q^{\text{sc}}_p = \sum_{n} W^{\div}_{np}\,x_n
+    - \sum_{n\in\mathcal{N}_{\text{bnd}}} \Lambda^{S}_{np}\,x_n,
   \label{eq:aim-surf-proj}
 \end{equation}
 where $\mathcal{N}_{\text{bnd}}$ is the index set of half-SWG basis
-functions with a boundary face. A single three-dimensional FFT
-convolution with the Green-function kernel is then applied
-independently to each scalar source field,
+functions with a boundary face. One three-dimensional FFT convolution
+with the Green-function kernel is applied to each of the four scalar
+source fields,
 \begin{equation}
   Q^{\bullet}_p = \sum_{p'} G(\bm{g}_p - \bm{g}_{p'})\,q^{\bullet}_{p'},
   \qquad
-  \bullet\in\{\text{vec},\alpha;\ \div;\ S\},
+  \bullet\in\{\text{vec},x;\ \text{vec},y;\ \text{vec},z;\ \text{sc}\},
   \label{eq:aim-surf-fft}
 \end{equation}
 reusing the precomputed FFT of $G$ exactly as in
-Sec.~\ref{sec:aim-fft}. Finally, the test-side interpolation combines
-the vector and two scalar grid channels,
+Sec.~\ref{sec:aim-fft}. The test-side interpolation uses the same
+combination of weights,
 \begin{equation}
-\begin{aligned}
   y_m^{\text{far}}
-  &= k_0^{2}\sum_{\alpha}\sum_{p\in\mathcal{S}_m}
+  = k_0^{2}\sum_{\alpha}\sum_{p\in\mathcal{S}_m}
      W^{\text{vec},\alpha}_{mp}\,Q^{\text{vec},\alpha}_p
-  \;+\; \sum_{p\in\mathcal{S}_m}
-     W^{\div}_{mp}\,
-     \bigl(Q^{S}_p - Q^{\div}_p\bigr) \\
-  &\quad+\; \bigl[m\in\mathcal{N}_{\text{bnd}}\bigr]
-     \sum_{p\in\mathcal{S}_m^{S}}
-     \Lambda^{S}_{mp}\,
-     \bigl(Q^{\div}_p - Q^{S}_p\bigr),
-\end{aligned}
+  \;-\; \sum_{p\in\mathcal{S}_m}
+     \bigl(W^{\div}_{mp} - \bigl[m\in\mathcal{N}_{\text{bnd}}\bigr]\,
+           \Lambda^{S}_{mp}\bigr)\,Q^{\text{sc}}_p ,
   \label{eq:aim-surf-mvp}
 \end{equation}
-where the first line accumulates $K^{A,\text{far}}$ and (via
-$Q^{S}-Q^{\div}$) $K^{B,\text{far}}$ minus the divergence-divergence
-piece of $K^{A}$, and the second line adds $K^{C,\text{far}}$ and
-$K^{D,\text{far}}$ for test functions on a boundary face (Iverson
-bracket $[\,\cdot\,]$). The symmetric appearance of
-$Q^{\div}-Q^{S}$ on both sides reflects the charge-neutrality identity
+with the Iverson bracket $[\,\cdot\,]$. Expanding the product of the two
+differences gives the four contributions: $W^{\div}$ with $W^{\div}$ is
+the divergence--divergence piece of $K^{A}$, the two mixed terms are
+$K^{B}$ and $K^{C}$, and $\Lambda^{S}$ with $\Lambda^{S}$ is $K^{D}$. The
+appearance of the same difference on the source and on the test side
+reflects the charge-neutrality identity
 $Q_{\text{vol}} + Q_{\text{surf}} = 0$ of
 Sec.~\ref{sec:charge-neutrality}: the bulk divergence and the
 boundary-face normal flux are the two halves of a single conserved
@@ -856,10 +882,9 @@ charge distribution, and the AIM projection preserves this
 cancellation on the grid.
 
 No additional FFT is required compared to the bulk-only pipeline of
-Sec.~\ref{sec:aim-fft}: the surface channel is absorbed as one extra
-scalar grid array, for a total of $3 + 2 = 5$ scalar FFTs per MVP
-(three vector components, one bulk divergence, and one surface
-density) versus $3 + 1 = 4$ in Phase-1a.
+Sec.~\ref{sec:aim-fft}: the surface density is added to the divergence
+channel, for a total of $3 + 1 = 4$ scalar FFT convolutions per MVP
+(three vector components and one effective scalar source).
 
 \subsubsection*{Near-field correction}
 
@@ -867,85 +892,49 @@ For pairs $(m,n)$ with at least one of $\{m,n\}$ on a boundary face
 and $\norm{\bm{c}_m - \bm{c}_n}\le r_{\text{near}}$, the far-field
 approximation in Eq.~\eqref{eq:aim-surf-mvp} is insufficient. In
 direct analogy with the bulk precorrection of
-Sec.~\ref{sec:aim-precorrection}, we store the difference between the
-Duffy-integrated $K^{B/C/D}_{mn}$ of Sec.~\ref{sec:K-BCD} and its
-AIM-reconstructed far-field value in a sparse correction block
-$K^{S,\text{pc}}$. The storage scales as
+Sec.~\ref{sec:aim-precorrection}, the difference between the directly
+integrated $K^{A}+K^{B}+K^{C}+K^{D}$ of a near pair and its
+AIM-reconstructed value is stored in the same sparse matrix
+$K^{\text{pc}}$. No separate block is kept for the surface terms. The
+number of additional entries scales as
 $\mathcal{O}(N_{\text{bnd}}\,\langle M^{S}_{\text{near}}\rangle)$,
 where $\langle M^{S}_{\text{near}}\rangle$ is the mean number of
 near-neighbours per boundary face. For a mesh with characteristic
 edge length $\ell_c$ and near radius
 $r_{\text{near}} = 2 \times (\text{stencil extent})$, this count is
-$\mathcal{O}(1)$, so $K^{S,\text{pc}} = \mathcal{O}(N_{\text{bnd}})$.
-On compact objects with
+$\mathcal{O}(1)$. On compact objects with
 $N_{\text{bnd}} = \mathcal{O}(N_{\text{dof}}^{2/3})$, this is a
 reduction from $\mathcal{O}(N_{\text{dof}}^{5/3})$
 (\texttt{half\_swg\_extra} in Phase-1a) to
 $\mathcal{O}(N_{\text{dof}}^{2/3})$---an asymptotic factor of
 $N_{\text{dof}}$.
 
-\subsubsection*{Closed-form surface moment evaluation}
+\subsubsection*{Evaluation of the surface moments}
 
-The surface moment integral \eqref{eq:surf-moments} over a planar
-triangle $S_n$ admits a closed-form recursive evaluation in simplex
-coordinates, eliminating quadrature error entirely. Let
-$(\bm{r}_1, \bm{r}_2, \bm{r}_3)$ be the triangle vertices,
-$(\xi,\eta)$ the affine simplex coordinates of the unit isosceles
-triangle $T_0 = \{0\le\xi,\eta;\ \xi+\eta\le 1\}$, so that
-$\bm{r}_s = \bm{r}_1 + \xi(\bm{r}_2-\bm{r}_1) + \eta(\bm{r}_3-\bm{r}_1)$.
-Each monomial factor $(r_\beta - c_{n,\beta})$, $\beta\in\{x,y,z\}$,
-becomes linear in $(\xi,\eta)$,
-$r_\beta - c_{n,\beta}
- = \mu^{(\beta)}_{10}\xi + \mu^{(\beta)}_{01}\eta + \mu^{(\beta)}_{00}$,
-and the order-$Q = \abs{\bm{\alpha}}$ moment reduces to a bivariate
-polynomial integral
-\begin{equation}
-  J^{(Q)}_{\bm{\alpha}}
-    = \int_{T_0}
-      \prod_{q=1}^{Q}
-      \bigl(\mu^{(\beta_q)}_{10}\,\xi + \mu^{(\beta_q)}_{01}\,\eta
-            + \mu^{(\beta_q)}_{00}\bigr)\,
-      \dd\xi\,\dd\eta
-    = \sum_{i=0}^{Q}\!\sum_{j=0}^{Q}
-      \lambda^{(Q)}_{ij}\,\frac{i!\,j!}{(i+j+2)!},
-  \label{eq:simplex-moment}
-\end{equation}
-where $\beta_q$ runs over the multi-index $\bm{\alpha}$ entry by entry
-(so $Q$ factors appear in total). The polynomial coefficients
-$\lambda^{(Q)}_{ij}$ are generated by the recursion
-\begin{equation}
-  \lambda^{(Q+1)}_{ij}
-    = \lambda^{(Q)}_{i-1,j}\,\mu^{(\beta_{Q+1})}_{10}
-    + \lambda^{(Q)}_{i,j-1}\,\mu^{(\beta_{Q+1})}_{01}
-    + \lambda^{(Q)}_{i,j}  \,\mu^{(\beta_{Q+1})}_{00},
-    \qquad \lambda^{(0)}_{00} = 1,
-  \label{eq:simplex-recursion}
-\end{equation}
-with $\lambda^{(Q)}_{ij} = 0$ whenever $i<0$ or $j<0$. The final
-surface moment is recovered by multiplying $J^{(Q)}_{\bm{\alpha}}$ by
-the Jacobian $2\abs{S_n}$. The cost per boundary face is
-$\mathcal{O}(n_{\text{st}}^{4})$ operations with no numerical
-quadrature, eliminating one of the two truncation-error sources in the
-Phase-1a projection (the bulk tetrahedral moments retain a
-Gauss-cubature error of $\sim 10^{-12}$ which dominates machine
-epsilon but is well below the AIM far-field truncation at
-$n_{\text{st}} = 2$).
+With $\sigma_n = 1$ on $S_n$ the surface moment
+\eqref{eq:surf-moments} is the integral of a monomial of degree
+$\abs{\bm{\alpha}} \le n_{\text{st}}$ over a planar triangle. It is
+evaluated with the triangle Gauss rule used for the surface integrals
+(a collapsed tensor rule with 4 points per axis by default). This rule
+is exact for polynomials of this degree, so the surface moments carry
+no quadrature error beyond rounding. The bulk moments are polynomial
+integrals over tetrahedra and are evaluated with the 5-point rule.
 
 \subsubsection*{Summary of Phase A impedance}
 
-With the surface projection in place, the complete AIM-accelerated
-impedance equation \eqref{eq:aim-mvp} is augmented to
+With the surface projection in place, the AIM-accelerated impedance
+equation keeps the form \eqref{eq:aim-mvp},
 \begin{equation}
   \bm{y} = \bigl(D_M
       - \tfrac{\kappa}{\epsilon_{\text{bg}}}
-        \bigl(K^{\text{far}} + K^{\text{pc}} + K^{S,\text{pc}}\bigr)
+        \bigl(K^{\text{far}} + K^{\text{pc}}\bigr)
     \bigr)\,\bm{x},
   \label{eq:aim-mvp-phaseA}
 \end{equation}
 where $K^{\text{far}}$ now evaluates all four kernel contributions
 $K^{A}+K^{B}+K^{C}+K^{D}$ via Eq.~\eqref{eq:aim-surf-mvp} and
-$K^{S,\text{pc}}$ is the sparse surface-near-field correction. The
-Phase-1a \texttt{half\_swg\_extra} matrix is removed entirely.
+$K^{\text{pc}}$ holds the near-field correction of all four. The
+Phase-1a \texttt{half\_swg\_extra} matrix is no longer filled.
 
 \subsubsection*{Memory and timing scaling}
 
@@ -990,10 +979,13 @@ $t_{\text{solve}}$ — is in
 For small problems ($N_{\text{dof}} \lesssim$ a few~thousand), the
 dense assembly of $Z$ and its LU factorisation is practical and serves
 as a validation reference for the AIM path. For larger problems we use
-a Krylov iterative method (BiCGSTAB from
-\texttt{Krylov.jl}~\cite{KrylovJl}) applied to the AIM operator
-\eqref{eq:aim-mvp}. A Jacobi preconditioner formed from the diagonal of
-the sparse mass and precorrection contributions suffices in our tests.
+a Krylov iterative method applied to the AIM operator
+\eqref{eq:aim-mvp}. The production path is the block GMRES of
+Sec.~\ref{sec:block-krylov}, which solves all orientations at once.
+The single right-hand-side function \texttt{solve\_iterative} uses
+BiCGSTAB from \texttt{Krylov.jl}~\cite{KrylovJl}. No preconditioner is
+applied by default. Right preconditioning with the mass matrix is
+available as an option (Sec.~\ref{sec:shift-precond}).
 
 %----------------------------------------------------------------------
 \subsection{Multi-orientation batch solve}
@@ -1005,7 +997,7 @@ and permittivity, it can be assembled once and then reused across many
 orientations: each orientation changes only the right-hand side
 $\bm{b}$. The function \texttt{solve\_cas\_v2\_orientations} is the
 user-facing entry point; by default it selects
-\texttt{method=:aim\_bicgstab}, which builds the AIM operator
+\texttt{method=:aim\_gmres} (since v0.7.1), which builds the AIM operator
 (Sec.~\ref{sec:aim}) once and then solves the block system
 $\mathbf{Z}\mathbf{X}=\mathbf{B}$ for all orientations simultaneously
 via a single block-Krylov iteration
@@ -1038,8 +1030,8 @@ partitioned into chunks and launched as independent
 \texttt{Threads.@spawn} tasks; each task accumulates its own COO
 triplets and the resulting \texttt{SparseMatrixCSC} is built once
 from the concatenated lists. The same pattern parallelises
-\texttt{build\_aim\_projection} (basis loop) and the near-field
-impedance assembly used by the dense path. BLAS is forced to a
+\texttt{build\_aim\_projection} (basis loop). The dense assembly uses a
+row-parallel \texttt{Threads.@threads} loop. BLAS is forced to a
 single thread inside the parallel region to avoid nested
 oversubscription from LAPACK calls (the monomial-matrix
 least-squares solves inside \texttt{build\_aim\_projection}). On an
@@ -1424,7 +1416,7 @@ Element geometry
   & unstructured tetrahedra \\
 Green kernel on grid
   & analytic dyadic, $\mathcal{O}(N_g)$
-  & scalar + moment-matched dyadic, $\mathcal{O}(N_g)$ \\
+  & scalar, with moment-matched projection, $\mathcal{O}(N_g)$ \\
 Near-field ``precorrection''
   & none (exact on the lattice)
   & Duffy volumetric, $\mathcal{O}(N\,n_{\text{near}})$ \\
@@ -1432,8 +1424,8 @@ MVP cost
   & $\mathcal{O}(N_g \log N_g)$
   & $\mathcal{O}(N_g \log N_g + N\,n_{\text{near}})$ \\
 Multi-orientation batch
-  & block-BiCGSTAB on $L$ RHS
-  & shared LU (small $N$) or $L$ indep.\ BiCGSTAB \\
+  & block GMRES on $L$ RHS
+  & shared LU (small $N$) or block GMRES on $L$ RHS \\
 Dominant memory
   & $\mathcal{O}(N_g)$ FFT kernel
   & $\mathcal{O}(N_g)$ FFT kernel ${}+\mathcal{O}(N\,n_{\text{near}})$ precorr.\ \\
@@ -1536,15 +1528,13 @@ AIM-operator memory measurements are tabulated in
 %======================================================================
 
 For parameter-sweep applications the forward scattering amplitudes on a
-five-dimensional grid are written to an HDF5 file whose layout is
-deliberately identical to that produced by
-\texttt{block-DDA\_Py}~\cite{Moteki2024}, so the downstream consumer
-\texttt{PCAS\_Bayes\_APM\_\allowbreak Nonspherical/\allowbreak
-lut\_generation/\allowbreak build\_spheroid\_lut.py}
-reads VIEM output without modification.  The schema is documented in
-\texttt{block-DDA\_Py/\allowbreak .claude/\allowbreak
-spheroid\_h5\_schema\_spec.md}
-and summarised here for completeness.
+five-dimensional grid are written to an HDF5 file in the layout that
+\texttt{block-DDA\_Py}~\cite{Moteki2024} produces, so the downstream
+consumer \texttt{build\_spheroid\_lut.py} reads VIEM output without
+modification. The writer is \texttt{write\_spheroid\_sweep\_h5}
+(\texttt{src/spheroid\_sweep\_io.jl}). It follows the
+\texttt{pcas\_lut\_schema} contract (version 0.1.0), and the header of
+that source file is the reference for the layout summarised here.
 
 %----------------------------------------------------------------------
 \subsection{Parameter grid}
@@ -1554,8 +1544,8 @@ and summarised here for completeness.
 The five grid axes are stored at the root level of the file and shared
 across wavelength groups:
 \begin{itemize}
-  \item \texttt{D\_ve\_grid} --- volume-equivalent diameter $D_{ve}$
-        [\si{\micro\metre}];
+  \item \texttt{log\_D\_ve\_grid} --- base-10 logarithm of the
+        volume-equivalent diameter $D_{ve}$ in \si{\micro\metre};
   \item \texttt{RI\_real\_grid} --- real part of the particle refractive
         index, $\Re(m_p)$;
   \item \texttt{log\_AR\_grid} --- base-10 logarithm of
@@ -1572,6 +1562,21 @@ across wavelength groups:
 All axes must be equidistant; \texttt{write\_spheroid\_sweep\_h5}
 enforces this constraint and raises an error otherwise, because the
 downstream \texttt{NdimSpline\_JAX} consumer assumes uniform grids.
+For the size axis the stored quantity $\log_{10} D_{ve}$ must be
+equidistant, so the sizes are logarithmically spaced.
+
+An optional sixth axis \texttt{psi\_grid} holds the spin angle $\psi$
+about the particle $z$ axis. It is written for particles without axial
+symmetry (biaxial index or triaxial shape), together with the root
+attributes \texttt{axis\_order} and \texttt{psi\_note}. The amplitude
+arrays then have $\psi$ as their last dimension.
+
+The root group also carries the attributes \texttt{m\_m},
+\texttt{m\_imag}, \texttt{solver\_tol} and
+\texttt{block\_viem\_version}, and a group \texttt{provenance} with
+the producer repository and version, the git commit and its dirty flag,
+the contract version, a hash of the configuration
+(\texttt{config\_hash}) and the creation time.
 
 %----------------------------------------------------------------------
 \subsection{Per-wavelength datasets}
@@ -1581,7 +1586,10 @@ downstream \texttt{NdimSpline\_JAX} consumer assumes uniform grids.
 Results for each wavelength $\lambda_0$ are stored under a group
 \texttt{wl\_<value>} (e.g.\ \texttt{wl\_0p638} for
 $\lambda_0 = \SI{0.638}{\micro\metre}$), with the attributes
-\texttt{wl\_0} and \texttt{m\_m}. Each group contains
+\texttt{wl\_0}, \texttt{m\_m} and \texttt{m\_imag}. The last one is
+the imaginary part of the particle refractive index, which is fixed per
+wavelength because only the real part is a grid axis. Each group
+contains
 \begin{itemize}
   \item \texttt{S\_fw\_theta\_re}, \texttt{S\_fw\_theta\_im},
         \texttt{S\_fw\_phi\_re}, \texttt{S\_fw\_phi\_im}: the real and
@@ -1597,7 +1605,8 @@ The $\phi_o$ axis corresponds exactly to the Euler angle $\alpha$, and
 the populating code applies the analytical $\alpha$-expansion
 \eqref{eq:alpha-exp-theta}--\eqref{eq:alpha-exp-phi} to the $\alpha = 0$
 solves, so only $N_{u_{1/2}}$ independent VIEM solves are required per
-$(D_{ve},\Re(m_p),\text{AR})$ triple.
+$(D_{ve},\Re(m_p),\text{AR})$ triple. With the $\psi$ axis the number
+is $N_\psi N_{u_{1/2}}$.
 
 %======================================================================
 \section{AIM-accelerated block-Krylov multi-orientation solve}
@@ -1606,7 +1615,7 @@ $(D_{ve},\Re(m_p),\text{AR})$ triple.
 For large orientation sweeps --- orientation LUTs typically require
 $L = 10^2$--$10^3$ incidence directions per $(D_{ve},\Re(m_p),
 \text{AR})$ cell --- reusing the same LU factorization of the dense
-impedance matrix (Sec.~\ref{sec:cas-v2} style) becomes infeasible as
+impedance matrix (Sec.~\ref{sec:multi-orient}) becomes infeasible as
 soon as $N \gg 10^3$. For those problems \texttt{block-VIEM.jl} v0.2.0
 exposes an AIM-accelerated \emph{block-Krylov} path that solves
 \begin{equation}
@@ -1624,15 +1633,16 @@ The AIM operator supports the multi-RHS form
   \text{aim\_mvp}(\mathbf{X}) \;=\;
   \tfrac{1}{\epsilon_p}\mathbf{M}\mathbf{X}
   \;-\;\tfrac{\kappa}{\epsilon_{\text{bg}}}\bigl[
-  \mathbf{K}_{\text{AIM}}(\mathbf{X}) + \mathbf{K}_{\text{near}}\mathbf{X}\bigr]
-  \;+\;\mathbf{K}_{\text{half-SWG}}\mathbf{X},
+  \mathbf{K}_{\text{AIM}}(\mathbf{X}) + \mathbf{K}_{\text{near}}\mathbf{X}\bigr],
 \]
-where $\mathbf{M},\mathbf{K}_{\text{near}},\mathbf{K}_{\text{half-SWG}}$
-are sparse and their matrix--matrix products cost $\mathcal{O}(\text{nnz}\cdot L)$
-in a single BLAS call. The far-field convolution
-$\mathbf{K}_{\text{AIM}}(\mathbf{X})$ is applied column-by-column and
+where $\mathbf{M}$ and $\mathbf{K}_{\text{near}}$ are sparse and their
+products cost $\mathcal{O}(\text{nnz}\cdot L)$. The half-SWG surface
+terms are contained in $\mathbf{K}_{\text{AIM}}$ and
+$\mathbf{K}_{\text{near}}$ (Sec.~\ref{sec:aim-surface}). The near-field
+product and the far-field convolution
+$\mathbf{K}_{\text{AIM}}(\mathbf{X})$ are applied column-by-column and
 the $L$ columns are dispatched across the available Julia threads via
-\texttt{Threads.@spawn}; the FFT plans themselves are shared and use
+\texttt{Threads.@threads}; the FFT plans themselves are shared and use
 the process-wide FFTW thread pool, so the three levels of parallelism
 --- column, FFT, and iteration --- can be balanced as
 $n_{\text{col}}\!\times\!n_{\text{FFT}} \approx n_{\text{cores}}$ via
@@ -1641,9 +1651,11 @@ $L=8$ we measure a $2.6\times$ per-column speed-up over the serial
 baseline.
 
 \paragraph{Block BiCGSTAB.}
-The default solver follows Tadano, Sakurai and Kuramashi~\cite{TSK2009}
+The alternative solver (\texttt{method=:aim\_bicgstab}, the default up
+to v0.7.0) follows Tadano, Sakurai and Kuramashi~\cite{TSK2009}
 and is a direct port of \texttt{block-DDA\_Py}'s
-\texttt{bl\_bicgstab\_jacobi\_mvp\_fft}, sans the Jacobi preconditioner
+\texttt{bl\_bicgstab\_\allowbreak jacobi\_\allowbreak mvp\_fft},
+sans the Jacobi preconditioner
 (which is cheap for DDA because the dipole self-term is diagonal, but
 would require $\mathcal{O}(N)$ FFT probes for VIEM; the SWG mass matrix
 already normalizes the system adequately). Given $\mathbf{B}\in
@@ -1676,10 +1688,12 @@ Gram matrices, so the per-iteration cost is
 $\mathcal{O}\!\bigl(T_{\text{MVP}} \cdot L + NL^2\bigr)$. Block BiCGSTAB
 can break down when the columns of $\mathbf{R}_k$ lose numerical
 independence; in practice this is rare for the physically distinct
-incidence directions of a CAS-v2 LUT, but the fallback below exists.
+incidence directions of a CAS-v2 LUT. It was observed for $L \ge 64$ in
+the paper-production pilots, which is why block GMRES is the default.
 
 \paragraph{Block GMRES.}
-The fallback is unrestarted Block GMRES~\cite{SimoncSzyld1996}: a
+The default solver (\texttt{method=:aim\_gmres}, since v0.7.1) is
+unrestarted Block GMRES~\cite{SimoncSzyld1996}: a
 block-Arnoldi recurrence with thin QR factorization of each new block
 Krylov vector builds an orthonormal basis
 $\mathbf{V}_1,\mathbf{V}_2,\ldots$ of the block Krylov space
@@ -1691,9 +1705,12 @@ $\mathbf{X}_k = \mathbf{X}_0
 where $\mathbf{Y}_k$ minimizes
 $\|\underline{\mathbf{H}}_k\mathbf{Y} - \mathbf{E}_1\boldsymbol{\Lambda}\|_F$
 with $\boldsymbol{\Lambda}$ the thin-QR factor of the initial
-residual. Unlike BiCGSTAB the memory grows linearly in the iteration
-count ($k$ blocks of shape $N\times L$ are retained), so in practice
-Block GMRES is used as a robust fallback rather than a default.
+residual. The small least-squares problem is updated by an incremental
+block-Givens QR factorisation of $\underline{\mathbf{H}}_k$ (since
+v0.7.4), so its cost per iteration grows linearly with $k$. The residual
+norm decreases monotonically. Unlike BiCGSTAB the memory grows linearly
+in the iteration count ($k$ blocks of shape $N\times L$ are
+retained).
 
 \paragraph{Numerical verification.}
 On an oblate AR$=3$ spheroid
@@ -1705,7 +1722,7 @@ agree to $\sim 10^{-10}$ relative. Compared to the dense LU
 reference, the AIM block-Krylov observables agree to $\sim 0.8\%$,
 which is the AIM discretization error at the chosen pitch and not a
 Krylov convergence issue. The analytical $+2j\alpha$ spheroid symmetry
-(Sec.~\ref{sec:cas-v2}) on the AIM block-BiCGSTAB solution holds at
+(Sec.~\ref{sec:alpha-expansion}) on the AIM block-BiCGSTAB solution holds at
 $\sim 5\times 10^{-10}$, confirming that the block iteration preserves
 orientation symmetry to the solver tolerance.
 
@@ -2380,7 +2397,14 @@ $\alpha$).
 
 \begin{itemize}
 \item \textbf{Mass term:} component-weighted inner product
-  $\sum_\alpha (1/\epsilon_\alpha)\int (f_m)_\alpha(f_n)_\alpha\,dV$.
+  $\sum_\alpha (1/\epsilon_\alpha)\int (f_m)_\alpha(f_n)_\alpha\,dV$,
+  in the dense assembly and in the AIM operator (sparse matrix
+  \texttt{mass\_weighted}). Up to v0.8.0 the AIM operator used
+  $\tfrac{1}{3}\sum_\alpha \epsilon_\alpha^{-1}$ times the unweighted
+  mass matrix instead. This changed the observables of anisotropic
+  particles by \SIrange{5}{25}{\percent} in the cases tested, so
+  anisotropic results of the AIM path from those versions are not
+  reliable. The dense path was not affected.
 \item \textbf{Radiation kernel (bulk):} $k_0^2$ term uses per-component
   $\kappa_\alpha$; $\nabla\nabla\!\cdot$ term uses $\bar{\kappa}$.
 \item \textbf{Half-SWG surface terms} ($K^B$, $K^C$, $K^D$): scaled by
@@ -2390,14 +2414,16 @@ $\alpha$).
   the $x,y,z$ vector channels; $\bar{\kappa}$ on the divergence channel.
 \item \textbf{Far-field amplitude:}
   $\bm{F} = (k_0^2/\epsilon_{\text{bg}})
-  (\mathbf{I} - \hat{\bm{r}}\hat{\bm{r}})\cdot(\bar{\kappa}\cdot\bm{P})$.
+  (\mathbf{I} - \hat{\bm{r}}\hat{\bm{r}})\cdot
+  (\kappa_x P_x,\ \kappa_y P_y,\ \kappa_z P_z)^{\top}$,
+  with the component-wise contrasts and not their average.
 \item \textbf{Absorption:}
   $C_{\text{abs}} = \frac{k_0}{\epsilon_{\text{bg}}}
   \sum_\alpha \frac{\operatorname{Im}(\epsilon_\alpha)}{|\epsilon_\alpha|^2}
   \int |D_\alpha|^2\,dV$.
 \end{itemize}
 When $\epsilon_x = \epsilon_y = \epsilon_z$ all expressions reduce to the
-isotropic formulation of Sec.~\ref{sec:viem-formulation} and earlier
+isotropic formulation of Sec.~\ref{sec:formulation} and the following
 sections.
 
 \subsection{Cross-validation vs block-DDA\_Py}

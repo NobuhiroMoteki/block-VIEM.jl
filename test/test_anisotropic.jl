@@ -155,4 +155,77 @@ using LinearAlgebra: norm
         # (unlike isotropic sphere where S(alpha) = const)
         @test !isapprox(res[1].S_fw_theta, res[2].S_fw_theta; rtol=1e-3)
     end
+
+    # ── AIM path: component-weighted mass term ───────────────────────────
+    # The mass term of an anisotropic particle is Σ_α (1/ε_α) M_α. Until
+    # v0.8.0 the AIM operator used mean(1/ε_α) M instead, which differs from
+    # the dense matrix by about 10 % for the tensors below. The dense path was
+    # always component-weighted.
+    @testset "AIM operator matches the dense matrix for anisotropic ε_p" begin
+        mesh = read_msh(joinpath(@__DIR__, "meshes", "sphere.msh"))
+        basis = build_swg_basis(mesh; include_boundary_faces=true)
+        N = n_basis(basis)
+        k0 = 1.2
+        pitch = 0.5 * mean_edge_length(mesh)
+        relerr(a, b) = norm(a .- b) / norm(b)
+        X = ComplexF64[sin(0.7i + 1.3j) + im * cos(0.4i - 0.9j) for i in 1:N, j in 1:3]
+
+        # Weighted mass matrix: equal weights reduce to the unweighted one,
+        # and the three components add up to it.
+        M = assemble_mass_matrix(basis)
+        w = SVector{3,ComplexF64}(0.4 + 0.1im, 0.4 + 0.1im, 0.4 + 0.1im)
+        @test relerr(assemble_weighted_mass_matrix(basis, w), (0.4 + 0.1im) .* M) < 1e-13
+        e(a) = SVector{3,ComplexF64}(a == 1, a == 2, a == 3)
+        Mc = [assemble_weighted_mass_matrix(basis, e(a)) for a in 1:3]
+        @test relerr(Mc[1] + Mc[2] + Mc[3], M) < 1e-13
+        @test all(A -> relerr(A, transpose(A)) < 1e-13, Mc)
+        @test relerr(Mc[1], Mc[3]) > 0.1          # the components differ
+
+        err_iso = 0.0
+        for (iso, eps) in ((true,  ComplexF64[2.25, 2.25, 2.25]),
+                           (false, ComplexF64[2.25, 2.25, 4.0]),
+                           (false, ComplexF64[2.25 + 0.1im, 3.0 + 0.3im, 4.0 + 0.05im]))
+            Z = assemble_impedance_matrix(basis; k0=k0, eps_p=eps, eps_bg=1.0,
+                                          symmetrize=true)
+            op = build_aim_operator(basis; k0=k0, eps_p=eps, eps_bg=1.0,
+                                    pitch=pitch, padding=4)
+            @test (op.mass_weighted === nothing) == iso
+            err = relerr(aim_mvp(op, X), Z * X)
+            iso && (err_iso = err)
+            # AIM approximation error only, the same size for all three tensors.
+            @test err < 5e-3
+            @test err < 3 * err_iso
+            @test relerr(aim_mvp(op, X[:, 2]), Z * X[:, 2]) < 5e-3
+            @test aim_mvp(op, X)[:, 1] ≈ aim_mvp(op, X[:, 1]) rtol = 1e-12
+            if !iso
+                inv_eps = 1 ./ eps
+                w_eps = SVector{3,ComplexF64}(inv_eps...)
+                @test relerr(op.mass_weighted,
+                             assemble_weighted_mass_matrix(basis, w_eps)) < 1e-14
+                # The former mean-weight mass term is far from the dense one.
+                @test relerr((sum(inv_eps) / 3) .* (M * X), op.mass_weighted * X) > 0.05
+            end
+        end
+    end
+
+    @testset "anisotropic observables: :aim_gmres against :dense" begin
+        mesh = read_msh(joinpath(@__DIR__, "meshes", "sphere.msh"))
+        basis = build_swg_basis(mesh; include_boundary_faces=true)
+        euler_list = [(0.0, 0.0, 0.0), (0.3, 1.1, 0.0), (2.0, 2.4, 0.7)]
+        fields(r) = (r.S_fw_theta, r.S_fw_phi, r.S_bk)
+        for m_p in ([1.5 + 0.0im, 1.5 + 0.0im, 2.0 + 0.0im],
+                    [1.5 + 0.02im, 1.73 + 0.0im, 2.0 + 0.05im])
+            dense = solve_cas_v2_orientations(basis, euler_list; wl_0=2π/1.2, m_m=1.0,
+                                              m_p=m_p, method=:dense)
+            aim = solve_cas_v2_orientations(basis, euler_list; wl_0=2π/1.2, m_m=1.0,
+                                            m_p=m_p, method=:aim_gmres,
+                                            tol=1e-8, maxiter=300)
+            for i in eachindex(euler_list)
+                scale = maximum(abs, fields(dense[i]))
+                diff = maximum(abs.(collect(fields(aim[i])) .- collect(fields(dense[i]))))
+                # 0.25 and 0.16 with the former mass term.
+                @test diff / scale < 0.02
+            end
+        end
+    end
 end

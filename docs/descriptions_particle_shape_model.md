@@ -13,7 +13,7 @@ families supported by **block-VIEM.jl**:
 
 Both classes are discretised into a single conforming tetrahedral mesh
 that the SWG / half-SWG basis is built on (see
-[theory_note §3.2](theory_note.tex)). The two pipelines share the same
+[theory_note §2.3](theory_note.tex)). The two pipelines share the same
 volume-preserving rescale step (v0.7.7+) so the discretised mesh
 volume matches the user-specified target to machine precision; this
 step removes a small ($\lesssim 1\,\%$) discretisation-volume bias from
@@ -22,8 +22,8 @@ cross-solver paper plots against the sister project
 
 The reader is assumed to know:
 
-- The VIEM volume-equivalent radius convention $r_{ve}$ (see
-  [theory_note §2.1](theory_note.tex)).
+- The volume-equivalent radius $r_{ve} = (3V/4\pi)^{1/3}$ of a particle
+  of volume $V$.
 - That all lengths use the same physical unit throughout the API
   (paper-production code uses **μm**).
 - The lab-frame convention $\hat{\bm z} = $ incident beam direction,
@@ -39,10 +39,11 @@ The reader is assumed to know:
 ### 1.1 Particle frame and base ellipsoid
 
 Both shape families are constructed in a **particle frame** in which the
-geometry is defined without reference to the incident beam. Lab-frame
-nodes are obtained by applying the rotation matrix $R = R_z(\alpha)
-R_y(\beta) R_z(\gamma)$ to particle-frame node coordinates at solve
-time.
+geometry is defined without reference to the incident beam. The mesh
+is never rotated. For an orientation $R = R_z(\alpha) R_y(\beta)
+R_z(\gamma)$ the incident, polarization and scattering vectors are
+mapped into the particle frame with $R^\top$ at solve time
+(`cas_orientation`).
 
 For GRE the particle-frame x/y/z axes coincide with the major/inter-
 mediate/minor semi-axes of the base ellipsoid ($a \ge b \ge c$, with
@@ -75,7 +76,7 @@ this document are
   ([src/mesh.jl:107-109](../src/mesh.jl#L107-L109)),
 - `apply_scale!(mesh, s)` — multiply all node coordinates by a scalar
   $s$ and rescale cached volumes by $s^3$
-  ([src/mesh.jl:112-130](../src/mesh.jl#L112-L130)).
+  ([src/mesh.jl:111-134](../src/mesh.jl#L111-L134)).
 
 ### 1.4 Volume-preserving rescale (v0.7.7+)
 
@@ -198,7 +199,7 @@ The implementation enforces $\eta \in [0, 1)$:
 
 | $\eta$ | $\varepsilon$ | Physical interpretation |
 | --- | --- | --- |
-| $0$ | $0$ | Point contact — degenerate (forbidden if `gap = 0`) |
+| $0$ | $0$ | Point contact — degenerate for `gap = 0` (the code does not reject it) |
 | $0.10$ | $0.005$ | Very weak van-der-Waals / sintering neck |
 | $0.20$ | $0.020$ | API default for PTSA aggregates |
 | $0.50$ | $0.118$ | Heavy partial sintering |
@@ -259,7 +260,7 @@ pair before publishing $\eta$ as a single number.
 ### 2.4 Tetrahedral meshing via Gmsh OpenCASCADE
 
 `mesh_sphere_aggregate(agg; ...)`
-([src/aggregate_mesh.jl:640-727](../src/aggregate_mesh.jl#L640-L727))
+([src/aggregate_mesh.jl:654-741](../src/aggregate_mesh.jl#L654-L741))
 performs the following steps:
 
 1. Resolve the inflation factor:
@@ -386,7 +387,7 @@ paper-production value for readability.
 | Doublet, `gap = 0.1·R`, $\eta = 0$ (paper convention) | Linear chain $N = 5$, $\eta = 0.20$ |
 | :--------------------------------------------------: | :--------------------------------: |
 | ![doublet gap](../viz/figs/agg_doublet_gap010R.png)  | ![chain5](../viz/figs/agg_chain5_eta020.png) |
-| Disjoint monomers, no neck — used for the CAS-v2 doublet benchmark | Five monomers, four sintered necks |
+| Disjoint monomers, no neck (`overlap_factor = 0`) — used for the CAS-v2 doublet benchmark | Five monomers, four sintered necks |
 
 | FCC cluster ($N \approx 13$) | HCP cluster ($N \approx 13$) |
 | :--------------------------: | :--------------------------: |
@@ -504,7 +505,9 @@ $$
 \tag{G3}
 $$
 
-Defaults are $N_\text{pw} = 10$, $N_\text{per\_radius} = 3$. The
+Defaults are $N_\text{pw} = 10$, $N_\text{per\_radius} = 3$. For GRE
+shapes the 3 is fixed in `adaptive_lc`; only `adaptive_lc_aggregate` and
+`mesh_sphere_aggregate` take `N_per_radius` as a keyword. The
 correlation-length term ($\ell_\text{corr}/3 = 0.1\,c$) is what makes
 GRE meshes substantially finer than smooth ellipsoid meshes once
 $\beta > 0$.
@@ -518,7 +521,8 @@ shading and front-face mesh edges overlaid; the same Möller–Trumbore
 hidden-edge removal is applied so back-face edges and edges
 self-occluded by surface concavities (which can develop in GREs
 with strong $\beta$) are correctly suppressed.  All five shapes use
-$r_\text{v,base} = 0.30$ μm and a coarsened mesh ($\ell_c = c/2.5$)
+$r_\text{v,base} = 0.30$ μm and a coarsened mesh ($\ell_c = c/2.5$ for
+the smooth shapes, $c/5$ for the two with $\beta > 0$)
 purely for wireframe readability — paper-production runs use the
 adaptive value (G3).
 
@@ -538,7 +542,7 @@ adaptive value (G3).
 
 | Physical scenario | Generator | `mesh_sphere_aggregate` keyword |
 | --- | --- | --- |
-| Paper doublet ($g = 0.1 R$, disjoint) | `make_linear_chain(2, R; gap=0.1R)` | `neck_ratio = 0` |
+| Paper doublet ($g = 0.1 R$, disjoint) | `make_linear_chain(2, R; gap=0.1R)` (axis x). `viem_results/run_viem.jl` builds the same pair along z | `overlap_factor = 0` |
 | Touching doublet, smallest physical neck | `make_linear_chain(2, R; gap=0)` | `neck_ratio = 0.05`–`0.10` |
 | Sintered chain (physical neck) | `make_linear_chain(N, R; gap=0)` | `neck_ratio = 0.20`–`0.50` |
 | PTSA fractal aggregate | `load_ptsa_h5(...)` | `overlap_factor = 0.02` (= $\eta \approx 0.20$, default) |
@@ -546,6 +550,19 @@ adaptive value (G3).
 | GRE sphere reference | `GREParams(r_v_base, 1, 1, 0)` | (use `gre_mesh`) |
 | GRE oblate spheroid | `GREParams(r_v_base, b/c, 1, 0)` | (use `gre_mesh`) |
 | GRE irregular ($\beta > 0$) | `GREParams(r_v_base, b/c, a/b, β)` | (use `gre_mesh`) |
+
+**Disjoint monomers and the default `overlap_factor`.** The default
+`overlap_factor = 0.02` inflates every monomer radius by 1.02 before
+meshing. For touching monomers this creates the neck. For monomers
+separated by a gap the union has a larger volume than the nominal one,
+and the volume-preserving rescale then scales all coordinates by about
+$1/1.02$. The monomer radii return to their nominal values, but every
+centre distance is reduced by the same factor. A nominal gap of
+$0.1 R$ becomes $0.0595 R$. Pass `overlap_factor = 0` (or
+`neck_ratio = 0`) whenever the gaps of a disjoint aggregate must be
+kept. `viem_results/run_viem.jl` did not do this up to v0.8.0, so the
+paper doublet files `viem_results/paper/doublet_*.hdf5` hold results for
+a gap of $0.0595 R$.
 
 ## 5. Cross-reference summary
 
@@ -558,12 +575,12 @@ adaptive value (G3).
 | PTSA HDF5 I/O | [src/aggregate_mesh.jl:218-328](../src/aggregate_mesh.jl#L218-L328) |
 | Built-in aggregate generators | [src/aggregate_mesh.jl:334-568](../src/aggregate_mesh.jl#L334-L568) |
 | `adaptive_lc_aggregate` | [src/aggregate_mesh.jl:587-598](../src/aggregate_mesh.jl#L587-L598) |
-| `mesh_sphere_aggregate` (Gmsh OCC fuse + rescale) | [src/aggregate_mesh.jl:640-727](../src/aggregate_mesh.jl#L640-L727) |
+| `mesh_sphere_aggregate` (Gmsh OCC fuse + rescale) | [src/aggregate_mesh.jl:654-741](../src/aggregate_mesh.jl#L654-L741) |
 | `GREParams` data type | [src/gre_mesh.jl:39-52](../src/gre_mesh.jl#L39-L52) |
 | `gre_semi_axes`, `adaptive_lc` (GRE) | [src/gre_mesh.jl:65-103](../src/gre_mesh.jl#L65-L103) |
 | Gaussian-field sampling and interpolation | [src/gre_mesh.jl:116-280](../src/gre_mesh.jl#L116-L280) |
 | `gre_mesh` (Gmsh OCC ellipsoid + node deformation + rescale) | [src/gre_mesh.jl:504-552](../src/gre_mesh.jl#L504-L552) |
 | `gre_mesh_with_field` (cross-validation entry point) | [src/gre_mesh.jl:571-599](../src/gre_mesh.jl#L571-L599) |
-| `apply_scale!`, `total_volume` | [src/mesh.jl:107-130](../src/mesh.jl#L107-L130) |
+| `apply_scale!`, `total_volume` | [src/mesh.jl:107-134](../src/mesh.jl#L107-L134) |
 | GRE wireframe visualiser | [viz/visualize_gre.jl](../viz/visualize_gre.jl) |
 | Aggregate wireframe visualiser | [viz/visualize_aggregate.jl](../viz/visualize_aggregate.jl) |

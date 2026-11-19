@@ -573,16 +573,28 @@ function _resolve_physical_inputs(wl_0, m_m, m_p, k0, eps_p, eps_bg)
     end
 end
 
+# Project one incident plane wave onto the basis and store it as column `col`.
+function _project_rhs_column!(B::AbstractMatrix{ComplexF64}, col::Int,
+                              basis::AbstractDivBasis,
+                              u_inc, e0_inc, k_bg, outer_rule)
+    rhs = project_plane_wave(basis; k_hat = u_inc, E0 = e0_inc,
+                              k_bg = k_bg, rule = outer_rule)
+    @inbounds for r in 1:size(B, 1)
+        B[r, col] = rhs[r]
+    end
+    return nothing
+end
+
 """
     solve_cas_v2_orientations(basis::AbstractDivBasis,
                               euler_angles::AbstractVector;
                               # --- block-DDA_Py-compatible physical inputs ---
                               wl_0::Union{Real,Nothing}   = nothing,
                               m_m::Union{Real,Nothing}    = nothing,
-                              m_p::Union{Number,Nothing}  = nothing,
+                              m_p = nothing,     # scalar, or [m_x, m_y, m_z]
                               # --- or the raw VIEM inputs ---
                               k0::Union{Number,Nothing}    = nothing,
-                              eps_p::Union{Number,Nothing} = nothing,
+                              eps_p = nothing,   # scalar, or [ε_x, ε_y, ε_z]
                               eps_bg::Union{Number,Nothing} = nothing,
                               duffy_rule::DuffyQuadRule = duffy_reference_rule(5),
                               outer_rule::TetQuadRule = TET_QUAD_5PT,
@@ -594,6 +606,10 @@ end
                               tol::Float64 = 1e-5,
                               maxiter::Integer = 100,
                               verbose::Bool = false,
+                              return_D::Bool = false,
+                              return_solve_info::Bool = false,
+                              projection = nothing,
+                              mass = nothing,
                               precond::Symbol = :none)
         -> Vector{CASv2Result}
 
@@ -651,18 +667,22 @@ Mixing the two forms, or supplying neither complete set, raises an
 `euler_angles` is an iterable of `(alpha, beta, gamma)` tuples in the
 intrinsic ZYZ convention, matching `scipy.spatial.transform.Rotation`
 and block-DDA_Py.
-"""
-function _project_rhs_column!(B::AbstractMatrix{ComplexF64}, col::Int,
-                              basis::AbstractDivBasis,
-                              u_inc, e0_inc, k_bg, outer_rule)
-    rhs = project_plane_wave(basis; k_hat = u_inc, E0 = e0_inc,
-                              k_bg = k_bg, rule = outer_rule)
-    @inbounds for r in 1:size(B, 1)
-        B[r, col] = rhs[r]
-    end
-    return nothing
-end
 
+# Anisotropic particles
+
+`m_p` (or `eps_p`) may be a 3-vector of the principal values along the
+particle axes x, y, z. All three methods then use the component-weighted
+mass term `Σ_α (1/ε_α) M_α`.
+
+# Other keywords and return value
+
+- `return_D = true` also returns the solution block `D`, shape `(N, L)`.
+- `return_solve_info = true` also returns a named tuple with `iterations`,
+  `residual_norm`, `converged` and `residual_history`.
+- With both, the return value is `(results, D, solve_info)`.
+- `projection`, `mass`: a pre-built `AIMProjection` and mass matrix, reused
+  across solves on the same mesh and AIM grid (AIM methods only).
+"""
 function solve_cas_v2_orientations(basis::AbstractDivBasis,
                                    euler_angles::AbstractVector;
                                    wl_0::Union{Real,Nothing}   = nothing,

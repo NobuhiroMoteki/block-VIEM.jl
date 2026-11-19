@@ -1,5 +1,14 @@
 # Roadmap: 2% Accuracy on CAS-v2 Observables
 
+> **Status (2026-11-19): plan of 2026-04-12, kept as a record and not
+> maintained.** The status markers below were not updated. The work it
+> describes is finished: the half-SWG basis with the surface terms reached
+> the accuracy goal, the AIM path with block GMRES is the production
+> default, the GRE mesher (`gre_mesh`) and the comparisons with block-DDA_Py
+> exist, and the CAS-v2 observables are `S_fw_theta`, `S_fw_phi`, `S_bk`
+> (not the `S_fw_s`, `S_fw_p`, `S_bak` named below). Current results are in
+> [benchmark_results.md](benchmark_results.md).
+
 **Goal**: Achieve ≤ 2% relative error on the CAS-v2 observables `S_fw_s`,
 `S_fw_p`, `S_bak`, and derived cross sections `C_ext`, `C_abs`, `C_sca`,
 validated against Mie theory for a dielectric sphere.

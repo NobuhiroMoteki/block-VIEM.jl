@@ -264,6 +264,14 @@ cubic-lattice DDA and tetrahedral VIEM.
 
 Drivers under [benchmarks/cas_v2/aniso_comparison/](../benchmarks/cas_v2/aniso_comparison/).
 
+The VIEM side of this benchmark uses `method = :dense`. Up to v0.8.0 the
+AIM path applied the mass term of an anisotropic particle with the mean
+of $1/\epsilon_\alpha$ instead of the component weights, and its
+anisotropic results were off by 5–25 % (measured on the coarse test
+sphere for index differences of 0.1–0.5 between the axes). The AIM path
+now matches the dense matrix to 0.2 %, as for isotropic particles
+(`test/test_anisotropic.jl`).
+
 **Setup.** Sphere, $r_{ve} = 0.20\,\text{μm}$,
 $\lambda_0 = 0.638\,\text{μm}$, with diagonal-tensor
 refractive index $\boldsymbol{m}_p = (m_x, m_y, m_z)$ passed identically to
@@ -464,7 +472,8 @@ Driver:
 [benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl](../benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl)
 + `compute_refinement_errors.py`. Au doublet of §7.4. Same
 geometry, four refinement levels $\ell_c = R/k$ for
-$k = 5, 6, 7, 8$, all compared against the converged MSTM
+$k = 5, 6, 7, 8$ (the script default is $k = 5, 6, 7$; $k = 8$ is set
+with `BM_LC_RATIOS`), all compared against the converged MSTM
 $N = 15$ reference. Single-threaded (Intel i7-1265U,
 16 GB RAM, Julia 1.11) — the v0.6.0 threaded setup
 + block MVP gives a 2 – 3 × speed-up at 4 + Julia threads.
@@ -543,7 +552,7 @@ same 16 GB workstation.
 
 ## 9. Per-DoF accuracy vs block-DDA_Py
 
-Driver: [benchmarks/cas_v2/au_sphere_mie.jl](../benchmarks/cas_v2/au_sphere_mie.jl)
+Driver: [benchmarks/cas_v2/low_contrast_sphere.jl](../benchmarks/cas_v2/low_contrast_sphere.jl)
 (VIEM side) and the equivalent block-DDA_Py sweep on the same
 sphere. The Mie analytical solution is the common reference.
 
@@ -623,7 +632,7 @@ error is an order of magnitude smaller.
 | Green kernel on grid | analytic dyadic, $\mathcal O(N_g)$ | scalar + moment-matched dyadic, $\mathcal O(N_g)$ |
 | Near-field precorrection | none (exact on lattice) | Duffy volumetric, $\mathcal O(N\,n_\text{near})$ |
 | MVP cost | $\mathcal O(N_g \log N_g)$ | $\mathcal O(N_g \log N_g + N\,n_\text{near})$ |
-| Multi-orientation batch | block-BiCGSTAB on $L$ RHS | shared LU (small $N$) or $L$ indep. BiCGSTAB / shared block-Krylov |
+| Multi-orientation batch | block GMRES on $L$ RHS | shared LU (small $N$) or block GMRES on $L$ RHS |
 | Dominant memory | $\mathcal O(N_g)$ FFT kernel | $\mathcal O(N_g)$ FFT kernel + $\mathcal O(N\,n_\text{near})$ precorr. |
 
 DDA has a strictly translation-invariant interaction matrix —
@@ -661,15 +670,15 @@ factor ∈ {1.5, 1.0, 0.7, 0.5, 0.35} × adaptive_lc(...)
 ```
 
 at the representative size $a_{eq} = 0.1\,\text{μm}$,
-single orientation, and writes `convergence_<shape>_<material>.hdf5`
-with the standard observable schema plus a `lc_factor` attribute
-on every slot.
+single orientation, and writes `convergence_<shape>_<material>.hdf5`.
+The file has its own layout: a group `/target/lc_convergence/` with one
+entry per factor (`lc_factor`, the mean edge length `lc`, `n_tet`,
+`n_dof`, the observables and the cost fields) and the Mie reference in
+`/target/reference/`. The shapes are sphere, oblate and GRE.
 
-**Scope.** Used to choose the production `ℓ_c`-factor for the
-large-scale sweeps. The current production choice is
-**factor = 0.7** — the central value in the converged regime
-(per-shape verification on `n15`, `n20`, `Au` for sphere /
-doublet / oblate / GRE).
+**Scope.** Shows where the production mesh lies on the convergence
+curve. The production sweeps (`run_viem.jl`) use **factor = 1.0**, the
+adaptive `ℓ_c` itself.
 
 **Reproduce one combination:**
 

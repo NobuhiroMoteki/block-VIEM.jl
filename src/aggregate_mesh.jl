@@ -608,7 +608,8 @@ end
                           lc=nothing,
                           wl_0=NaN, m_p_max=NaN, N_pw=10, N_per_radius=3,
                           mesh_path=nothing,
-                          verbosity=0)
+                          verbosity=0,
+                          rescale_to_target_volume=true)
         -> (mesh::TetMesh, mesh_path::String)
 
 Generate a tetrahedral mesh of a sphere aggregate via Gmsh OpenCASCADE.
@@ -621,6 +622,17 @@ neck-to-radius ratio of about 0.20 for equal monomers.
 If `neck_ratio` is provided it overrides `overlap_factor` via
 [`neck_ratio_to_overlap`](@ref).
 
+After meshing, all node coordinates are scaled so that the mesh volume
+equals the nominal volume of the aggregate (`rescale_to_target_volume`).
+
+!!! warning "Disjoint monomers"
+    For monomers separated by a gap, an `overlap_factor > 0` inflates the
+    radii and the volume rescale then shrinks every centre distance by
+    about `1/(1 + overlap_factor)`. The radii return to their nominal
+    values but the gaps do not: a nominal gap of `0.1 R` becomes
+    `0.0595 R` with the default `0.02`. Pass `overlap_factor = 0` to keep
+    the gaps of a disjoint aggregate.
+
 # Arguments
 - `overlap_factor` : uniform radius inflation ε ≥ 0.  Default `0.02`.
 - `neck_ratio`     : target neck-to-radius ratio (equal-monomer convention);
@@ -631,6 +643,8 @@ If `neck_ratio` is provided it overrides `overlap_factor` via
   `adaptive_lc_aggregate` when `lc === nothing`.
 - `mesh_path`      : `.msh` output path; defaults to a tempfile.
 - `verbosity`      : Gmsh `General.Terminal` level (0 = silent).
+- `rescale_to_target_volume` : scale the mesh to the nominal aggregate
+  volume (default `true`).
 
 # Returns
 - `mesh::TetMesh`     : the tet mesh parsed via [`read_msh`](@ref)
