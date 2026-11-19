@@ -283,4 +283,90 @@ end
         rm(path2; force=true)
     end
 
+    # ── Disconnected aggregates: every piece keeps its place ─────────────
+    # Volume and volume-weighted centroid of the tetrahedra selected by `sel`
+    # (a predicate on the tetrahedron centroid).
+    function _piece_volume_centroid(mesh, sel)
+        V = 0.0
+        c = zero(BlockVIEM.Vec3)
+        for t in eachindex(mesh.tets)
+            sel(mesh.tet_centroids[t]) || continue
+            V += mesh.tet_volumes[t]
+            c += mesh.tet_volumes[t] * mesh.tet_centroids[t]
+        end
+        return V, c / V
+    end
+
+    @testset "rescale of disjoint monomers keeps the centre distance" begin
+        a_eq = 0.05
+        R    = a_eq / 2^(1/3)
+        d    = 2.1 * R                          # gap 0.1 R
+        agg  = SphereAggregate(reshape([0.0, 0.0, -d/2, 0.0, 0.0, d/2], 3, 2), [R, R])
+        V1   = (4π / 3) * R^3
+        for (ov, lc) in ((0.0, 0.012), (0.02, 0.012), (0.0, 0.006))
+            mesh, path = mesh_sphere_aggregate(agg; overlap_factor=ov, lc=lc, verbosity=0)
+            rm(path; force=true)
+            Vu, cu = _piece_volume_centroid(mesh, c -> c[3] > 0)
+            Vl, cl = _piece_volume_centroid(mesh, c -> c[3] < 0)
+            # Each monomer has its nominal volume, not only their sum.
+            @test isapprox(Vu, V1; rtol=1e-12)
+            @test isapprox(Vl, V1; rtol=1e-12)
+            @test isapprox(total_volume(mesh), 2V1; rtol=1e-12)
+            # The centre distance is the nominal 2.1 R for every mesh size and
+            # every overlap_factor. A uniform scaling of the whole mesh gave
+            # 2.083 R (overlap_factor 0.02) and 2.126 R (0) on the coarse mesh.
+            @test isapprox(cu[3] - cl[3], d; rtol=2e-3)
+            @test abs(cu[1]) < 2e-3 * R && abs(cu[2]) < 2e-3 * R
+            # The cached tetrahedron data agree with the scaled nodes.
+            ref = BlockVIEM.TetMesh(mesh.nodes, mesh.tets)
+            @test ref.tet_volumes ≈ mesh.tet_volumes rtol = 1e-12
+            @test all(norm(ref.tet_centroids[t] - mesh.tet_centroids[t]) < 1e-14
+                      for t in eachindex(mesh.tets))
+        end
+    end
+
+    @testset "rescale of a disjoint polydisperse pair" begin
+        r1, r2 = 0.04, 0.025
+        d = r1 + r2 + 0.01
+        agg = SphereAggregate(reshape([0.0, 0.0, 0.0, d, 0.0, 0.0], 3, 2), [r1, r2])
+        mesh, path = mesh_sphere_aggregate(agg; overlap_factor=0.0, lc=0.008, verbosity=0)
+        rm(path; force=true)
+        Va, ca = _piece_volume_centroid(mesh, c -> c[1] < r1 + 0.005)
+        Vb, cb = _piece_volume_centroid(mesh, c -> c[1] > r1 + 0.005)
+        @test isapprox(Va, (4π / 3) * r1^3; rtol=1e-12)
+        @test isapprox(Vb, (4π / 3) * r2^3; rtol=1e-12)
+        @test isapprox(cb[1] - ca[1], d; rtol=3e-3)
+    end
+
+    @testset "rescale: a connected pair and a separate monomer" begin
+        R = 0.03
+        gap = 0.2 * R
+        # Monomers 1 and 2 touch (fused by the default overlap); 3 is apart.
+        centers = hcat([0.0, 0.0, 0.0], [2R, 0.0, 0.0], [4R + gap, 0.0, 0.0])
+        agg = SphereAggregate(centers, [R, R, R])
+        mesh, path = mesh_sphere_aggregate(agg; overlap_factor=0.02, lc=0.008, verbosity=0)
+        rm(path; force=true)
+        x_split = 3R + gap / 2
+        Vp, cp = _piece_volume_centroid(mesh, c -> c[1] < x_split)
+        Vs, cs = _piece_volume_centroid(mesh, c -> c[1] > x_split)
+        V1 = (4π / 3) * R^3
+        @test isapprox(Vp, 2V1; rtol=1e-12)       # the fused pair: two nominal volumes
+        @test isapprox(Vs, V1; rtol=1e-12)        # the separate monomer
+        @test isapprox(cp[1], R; rtol=3e-3)       # pair centred between its monomers
+        @test isapprox(cs[1], 4R + gap; rtol=2e-3)
+    end
+
+    @testset "rescale of a connected aggregate is the uniform scaling" begin
+        R = 0.03
+        agg = make_linear_chain(3, R; gap=0.0)
+        mesh, path = mesh_sphere_aggregate(agg; overlap_factor=0.02, lc=0.008, verbosity=0)
+        raw, path2 = mesh_sphere_aggregate(agg; overlap_factor=0.02, lc=0.008, verbosity=0,
+                                           rescale_to_target_volume=false)
+        rm(path; force=true); rm(path2; force=true)
+        s = cbrt(monomer_volume_sum(agg) / total_volume(raw))
+        @test length(mesh.nodes) == length(raw.nodes)
+        @test all(mesh.nodes[i] == raw.nodes[i] * s for i in eachindex(raw.nodes))
+        @test isapprox(total_volume(mesh), monomer_volume_sum(agg); rtol=1e-12)
+    end
+
 end # @testset "Aggregate mesh"
