@@ -163,7 +163,7 @@ HDF5 スイープを起動する前に必ず:
 
 - `S_bk`（HDF5 の `S_bk_OCBS`）は `(−S_bk_θ + S_bk_φ)/2 = (−S11 + S22)(180°)/2`。Moteki and Adachi (2024) Eq. (28) の erratum の修正式で、block-DDA_Py v0.8.2 以降と同じ
 - v0.7.9 以前は印刷版の `1/√2` を使っており、`S_bk` は現行の √2 倍だった（位相、VIEM/参照値の比、前方散乱振幅、断面積は同じ）
-- `viem_results/paper/` の保存済み HDF5（VIEM、Mie、MSTM、T-matrix）は旧定義のまま残す。書き換えない。新旧を比べるときは保存済みの `S_bk` に 1/√2 を掛ける
+- `viem_results/paper/` の HDF5 はすべて修正式に揃えてある（2026-11-19、ユーザー指示）。`doublet_*.hdf5` は v0.8.2 で作り直し。それ以外（sphere / oblate / gre / pilot の VIEM と Mie、MSTM の `mstm_doublet_*.hdf5`、T-matrix の `tmm_oblate*.hdf5`、`convergence_*.hdf5`）は保存値に 1/√2 を掛けて変換した。再計算はしておらず、後方散乱振幅以外のデータセットは元のまま。属性 `S_definition`（無いファイルは `S_bk_definition`）と `S_bk_conversion_note` で確認できる。v0.7.8 が作った元のファイルは git 履歴の `416cece`外部にある v0.7.9 以前のファイルと比べるときは、その `S_bk` に 1/√2 を掛ける
 - 新しく作る HDF5 の `S_definition` 属性は `.../2`。`run_viem.jl` は旧定義の結果が入ったファイルへの追記を拒否する
 - 回帰ガード: [test/test_backward_amplitude.jl](test/test_backward_amplitude.jl) は常時グリーン
 

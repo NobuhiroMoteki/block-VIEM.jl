@@ -554,11 +554,15 @@ julia --project=. benchmarks/cas_v2/doublet_mstm/compare.jl
   that paper, and the definition of block-DDA_Py from v0.8.2. Up to
   v0.7.9 block-VIEM.jl followed the printed equation, which has `1/√2`
   in place of `1/2`. Values of `S_bk` from v0.7.9 or earlier are `√2`
-  times the present ones, with the same phase. This includes the VIEM, Mie,
-  MSTM and T-matrix values in the files under `viem_results/paper/`, which
-  are kept as produced. Multiply their backward amplitudes by `1/√2` to
-  compare with the present code. The forward amplitudes and the cross
-  sections are not affected.
+  times the present ones, with the same phase. The forward amplitudes and
+  the cross sections are not affected. All files under
+  `viem_results/paper/` hold the corrected form. `doublet_*.hdf5` were
+  regenerated with v0.8.2. In the other files (VIEM, Mie, MSTM and
+  T-matrix values) the stored backward amplitudes were multiplied by
+  `1/√2` on 2026-11-19, without recomputation, and the attributes
+  `S_definition` or `S_bk_definition` and `S_bk_conversion_note` say so.
+  The files as produced by v0.7.8 are in the git history (commit
+  `416cece`).
 - **Euler angles:** ZYZ intrinsic, same as
   `scipy.spatial.transform.Rotation` and block-DDA_Py.
   `R(α,β,γ) = Rz(α)·Ry(β)·Rz(γ)` maps particle-frame to lab-frame;
