@@ -19,9 +19,9 @@
 #   julia --project=. -t auto viem_results/estimate_cost.jl <sweep.hdf5>
 #
 # Tunable env vars (optional):
-#   N_ITER_EST       assumed BiCGSTAB iterations per RHS block  (default 200)
-#   T_SETUP_MS_DOF   setup time per DOF, milliseconds            (default  9.0)
-#   T_ITER_MS_DOF    per-iteration cost per DOF, milliseconds    (default  0.20)
+#   N_ITER_EST       assumed block-Krylov iterations per RHS block (default 200)
+#   T_SETUP_MS_DOF   setup time per DOF, milliseconds            (default  0.3)
+#   T_ITER_MS_DOF    per-iteration cost per DOF, milliseconds    (default  0.01)
 #   RSS_KB_PER_DOF   peak RSS per DOF, kilobytes                 (default 100.0)
 #   MEM_LIMIT_GB     machine memory limit override               (default auto)
 
@@ -95,7 +95,13 @@ function build_shape_mesh(shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
     if shape_kind == "doublet"
         R = Float64(r_v_base) / 2.0^(1/3)
         agg = _doublet_along_z(R)
+        # overlap_factor = 0: the two spheres are meshed at their nominal radius,
+        # so the gap is 0.1 R as documented and as in the MSTM reference. The
+        # default overlap_factor = 0.02 inflates the radii by 1.02, and the
+        # volume rescale then shrinks the centre distance: the meshed gap was
+        # 0.0595 R up to v0.8.0.
         mesh, _msh = mesh_sphere_aggregate(agg;
+                                           overlap_factor=0.0,
                                            wl_0=wl_0_min,
                                            m_p_max=Float64(m_p_max_global),
                                            N_pw=N_PW)

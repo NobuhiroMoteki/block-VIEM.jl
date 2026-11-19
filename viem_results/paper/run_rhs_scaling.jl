@@ -84,7 +84,13 @@ function build_particle(shape_kind, r_v_base, bc_ratio, ab_ratio, gre_beta,
     if shape_kind == "doublet"
         R = Float64(r_v_base) / 2.0^(1/3)
         agg = _doublet_along_z(R)
+        # overlap_factor = 0: the two spheres are meshed at their nominal radius,
+        # so the gap is 0.1 R as documented and as in the MSTM reference. The
+        # default overlap_factor = 0.02 inflates the radii by 1.02, and the
+        # volume rescale then shrinks the centre distance: the meshed gap was
+        # 0.0595 R up to v0.8.0.
         mesh, _msh = mesh_sphere_aggregate(agg;
+                                           overlap_factor=0.0,
                                            wl_0=wl_0, m_p_max=m_p_max, N_pw=N_PW)
         V = total_volume(mesh)
         r_ve = (3 * V / (4π))^(1/3)
