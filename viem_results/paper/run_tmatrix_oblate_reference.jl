@@ -108,8 +108,9 @@ end
 #              = (−S₁₁ + S₂₂ − i S₁₂ − i S₂₁)(π) / 2
 #  NOTE 2026-11-19: the factor is 1/2, the corrected Eq. (28) of Moteki and
 #  Adachi (2024) given in its erratum. Until this date the script used
-#  1/sqrt(2), the factor of the printed equation, and the stored
-#  tmm_oblate_*.hdf5 files hold S_bk values sqrt(2) times the present ones.
+#  1/sqrt(2), the factor of the printed equation. The stored
+#  tmm_oblate_*.hdf5 files were converted on the same date by multiplying
+#  their S_bk by 1/sqrt(2).
 #  NOTE 2026-04-29: previous version used the *forward-mean* combination
 #  (S₁₁+S₂₂+i S₁₂−i S₂₁)/√2 evaluated at the backward angle, which is the
 #  LCP→LCP back-channel — NOT the OCBS observable defined in theory_note.
