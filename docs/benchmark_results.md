@@ -296,6 +296,16 @@ near-field, AIM, and far-field paths.
 
 ## 7. Two-sphere doublet vs MSTM
 
+> **Note (2026-11-19).** The numbers of §7 and §8 were computed with
+> the mesher of v0.8.1 or earlier, which scaled the whole doublet mesh
+> uniformly to the nominal volume. The centre distance of the two spheres
+> was then larger than the nominal $2.1 R$ by the scale factor (about
+> 1 % at $\ell_c = R/5$, less on finer meshes). From v0.8.2 each sphere
+> is scaled about its own centre and the centre distance is exactly
+> $2.1 R$. This benchmark has not been re-run with v0.8.2. For the paper
+> doublets the change improved the agreement with MSTM for Au (for
+> example $C_\text{ext}$ from 5–13 % to 1.5–2 %).
+
 Drivers under [benchmarks/cas_v2/doublet_mstm/](../benchmarks/cas_v2/doublet_mstm/):
 
 ```bash

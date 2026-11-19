@@ -381,13 +381,24 @@ wavelength) is a different file. It is written by
 `benchmarks/cas_v2/ironoxide_sweep_h5.jl` use.
 
 **Doublet geometry.** For `shape_kind = "doublet"` the runner meshes two
-spheres of radius `R = a_eq / 2^(1/3)` with a surface-to-surface gap of
-`0.1 R`. Up to v0.8.0 the mesh call inflated the spheres by 2 % and the
-meshed gap was `0.0595 R`. The files `viem_results/paper/doublet_*.hdf5`
-were produced with that smaller gap and are kept as produced, while the
-MSTM reference files `mstm_doublet_*.hdf5` are for `0.1 R`. A doublet
-file filled by the present runner carries the attribute
-`doublet_gap_over_R = 0.1` on `/target`.
+spheres of radius `R = a_eq / 2^(1/3)` with a centre distance of `2.1 R`
+(surface-to-surface gap `0.1 R`), the geometry of the MSTM reference
+files `mstm_doublet_*.hdf5`. From v0.8.2 `mesh_sphere_aggregate` scales
+each sphere to its nominal volume about its own centre, so the centre
+distance does not depend on the mesh size.
+
+Earlier versions scaled the whole mesh uniformly. Up to v0.8.0 the
+runner also used the default 2 % inflation of the spheres, and the centre
+distance was `2.06 R` to `2.08 R` (gap `0.0595 R` between the faceted
+surfaces). With v0.8.1 it was `2.10 R` to `2.13 R`.
+
+The files `viem_results/paper/doublet_*.hdf5` were regenerated with
+v0.8.2 on 2026-11-19 (`supermicro-647`). They carry the attribute
+`doublet_gap_over_R = 0.1` on `/target` and the corrected `S_bk`
+definition. The files of the v0.7.8 production run are in the git history
+(commit `416cece`). The cost fields of the regenerated files come from a
+different machine than those of the other paper files and are not
+comparable with them.
 
 ## Paper-production workflow (v0.7.0)
 

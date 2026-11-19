@@ -17,7 +17,7 @@ for Light Scattering by Arbitrary Dielectric Particles}
 \date{Last updated: 2026-11-19 (Sec.~\ref{sec:shifted-gmres} added and
 Sec.~\ref{sec:S-bk} corrected in block-VIEM.jl v0.8.0; the
 descriptions of the implementation in the other sections were brought
-in line with the code after v0.8.0)}
+in line with the code in v0.8.1 and v0.8.2)}
 
 \begin{document}
 \maketitle
@@ -2338,7 +2338,10 @@ single conforming tetrahedral mesh, share the same volume-preserving
 final rescale (so the discretised volume matches the analytical
 target to machine precision, in parity with block-DDA\_Py's
 \texttt{Target.\_\_init\_\_} spacing adjustment), and feed the SWG /
-half-SWG basis of Sec.~\ref{sec:swg}.  The full specification of
+half-SWG basis of Sec.~\ref{sec:swg}.  For an aggregate of monomers
+separated by gaps the rescale is applied to each disconnected piece
+about the centre of its own monomers (from v0.8.2), so the centre
+distances keep their nominal values on any mesh.  The full specification of
 parameter ranges, the \texttt{neck\_ratio} neck-width convention,
 the equal-radius polydisperse extension, the adaptive characteristic
 length, and worked discretisation examples is given in

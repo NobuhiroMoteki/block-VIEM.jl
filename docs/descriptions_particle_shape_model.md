@@ -101,10 +101,23 @@ precision. The targets are:
 | GRE | $(4\pi/3)\,r_\text{v,base}^3$ | $r_{ve} = r_\text{v,base}$ exactly |
 | Aggregate | $\sum_j (4\pi/3)\,r_j^3$ (overlaps ignored) | sum of ideal monomer volumes |
 
-The rescale is uniform, so every angular ratio (semi-axis ratios for
-GRE; neck-to-radius ratio and inter-monomer angles for aggregates) is
-preserved. Absolute lengths shrink or grow by the factor $s$; the
-implications for aggregate neck width are analysed in §2.5.
+For a GRE and for a connected aggregate the rescale is uniform, so
+every angular ratio (semi-axis ratios for GRE; neck-to-radius ratio and
+inter-monomer angles for aggregates) is preserved. Absolute lengths
+shrink or grow by the factor $s$; the implications for aggregate neck
+width are analysed in §2.5.
+
+An aggregate whose mesh consists of several disconnected pieces
+(monomers or fused groups of monomers separated by gaps) is rescaled
+piece by piece (v0.8.2+). Each piece is scaled to the nominal volume of
+the monomers it contains, about the $r^3$-weighted mean of their
+centres, which is the centre itself for a single monomer. The centres of
+the pieces stay where the aggregate puts them, and the gaps between the
+nominal spheres are kept. A single uniform scaling would move the pieces
+apart, because a faceted sphere has a smaller volume than the nominal
+one and $s > 1$, more so on a coarse mesh. The pieces are found from the
+mesh connectivity and matched to the groups of monomers whose inflated
+spheres overlap (`_rescale_to_monomer_volumes!`).
 
 The block-DDA_Py companion enforces the same invariant via a
 spacing/lattice adjustment in `Target.__init__`, which is why
@@ -551,18 +564,16 @@ adaptive value (G3).
 | GRE oblate spheroid | `GREParams(r_v_base, b/c, 1, 0)` | (use `gre_mesh`) |
 | GRE irregular ($\beta > 0$) | `GREParams(r_v_base, b/c, a/b, β)` | (use `gre_mesh`) |
 
-**Disjoint monomers and the default `overlap_factor`.** The default
-`overlap_factor = 0.02` inflates every monomer radius by 1.02 before
-meshing. For touching monomers this creates the neck. For monomers
-separated by a gap the union has a larger volume than the nominal one,
-and the volume-preserving rescale then scales all coordinates by about
-$1/1.02$. The monomer radii return to their nominal values, but every
-centre distance is reduced by the same factor. A nominal gap of
-$0.1 R$ becomes $0.0595 R$. Pass `overlap_factor = 0` (or
-`neck_ratio = 0`) whenever the gaps of a disjoint aggregate must be
-kept. `viem_results/run_viem.jl` did not do this up to v0.8.0, so the
-paper doublet files `viem_results/paper/doublet_*.hdf5` hold results for
-a gap of $0.0595 R$.
+**Disjoint monomers.** From v0.8.2 the rescale of §1.4 treats every
+disconnected piece of an aggregate on its own, so the centre distances of
+separated monomers keep their nominal values for any `overlap_factor`
+and any mesh size. Up to v0.8.1 the whole mesh was scaled uniformly. The
+centre distance of the paper doublet (nominal $2.1 R$) was then
+$2.06$–$2.08\,R$ with the default `overlap_factor = 0.02`
+(`viem_results/run_viem.jl` up to v0.8.0) and $2.10$–$2.13\,R$ with
+`overlap_factor = 0` (v0.8.1), depending on the mesh size. The paper
+doublet files `viem_results/paper/doublet_*.hdf5` were regenerated with
+v0.8.2.
 
 ## 5. Cross-reference summary
 

@@ -622,16 +622,20 @@ neck-to-radius ratio of about 0.20 for equal monomers.
 If `neck_ratio` is provided it overrides `overlap_factor` via
 [`neck_ratio_to_overlap`](@ref).
 
-After meshing, all node coordinates are scaled so that the mesh volume
+After meshing, the node coordinates are scaled so that the mesh volume
 equals the nominal volume of the aggregate (`rescale_to_target_volume`).
+A connected aggregate is scaled uniformly about the origin. Pieces that
+are separated by gaps are scaled one by one, each to the nominal volume of
+its own monomers and about their centre, so the centre distances and the
+gaps between nominal spheres are kept (from v0.8.2).
 
-!!! warning "Disjoint monomers"
-    For monomers separated by a gap, an `overlap_factor > 0` inflates the
-    radii and the volume rescale then shrinks every centre distance by
-    about `1/(1 + overlap_factor)`. The radii return to their nominal
-    values but the gaps do not: a nominal gap of `0.1 R` becomes
-    `0.0595 R` with the default `0.02`. Pass `overlap_factor = 0` to keep
-    the gaps of a disjoint aggregate.
+!!! note "Disjoint monomers before v0.8.2"
+    Up to v0.8.1 the whole mesh was scaled uniformly also for disjoint
+    monomers. The centre distances then changed with the scale factor:
+    with the default `overlap_factor = 0.02` a nominal gap of `0.1 R`
+    became `0.0595 R` between the faceted surfaces, and with
+    `overlap_factor = 0` the centre distance of a doublet was `2.103 R`
+    to `2.126 R` instead of `2.1 R`, depending on the mesh size.
 
 # Arguments
 - `overlap_factor` : uniform radius inflation ε ≥ 0.  Default `0.02`.
@@ -722,8 +726,13 @@ function mesh_sphere_aggregate(agg::SphereAggregate;
     # for an equal-radius cluster).  Scale node coordinates so the
     # discretised mesh hits this exactly, matching DDA's Target spacing
     # adjustment and removing the discretisation-volume bias from paper
-    # 1:1 cross-solver plots.  Inter-monomer geometry (gap, axis) is
-    # preserved by the uniform scaling.
+    # 1:1 cross-solver plots.
+    #
+    # A connected aggregate is scaled uniformly about the origin. An
+    # aggregate of several disconnected pieces is scaled piece by piece,
+    # each about the centre of its own monomers, so that the distances
+    # between the pieces keep their nominal values (see
+    # `_rescale_to_monomer_volumes!`).
     #
     # Disabled (`rescale_to_target_volume=false`) when callers want the
     # gmsh-faceted overlap geometry preserved — e.g. analytical
@@ -731,11 +740,179 @@ function mesh_sphere_aggregate(agg::SphereAggregate;
     # `V_inflated_spheres − V_lens` rather than the no-overlap
     # `monomer_volume_sum`.
     if rescale_to_target_volume
-        V_target = monomer_volume_sum(agg)
-        V_mesh   = total_volume(mesh)
-        s = (V_target / V_mesh) ^ (1/3)
-        apply_scale!(mesh, s)
+        _rescale_to_monomer_volumes!(mesh, agg, eps_eff)
     end
 
     return mesh, path
+end
+
+# Connected pieces of a tetrahedral mesh: two tetrahedra belong to the same
+# piece when they are linked through shared nodes. Returns the piece index
+# of every node (1..n_pieces) and the number of pieces.
+function _mesh_pieces(mesh::TetMesh)
+    parent = collect(1:length(mesh.nodes))
+    function root(i::Int)
+        while parent[i] != i
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        end
+        return i
+    end
+    @inbounds for t in mesh.tets
+        r1 = root(t[1])
+        for k in 2:4
+            rk = root(t[k])
+            rk != r1 && (parent[rk] = r1)
+        end
+    end
+    label = zeros(Int, length(parent))
+    piece = Vector{Int}(undef, length(parent))
+    n_pieces = 0
+    @inbounds for i in eachindex(parent)
+        r = root(i)
+        if label[r] == 0
+            n_pieces += 1
+            label[r] = n_pieces
+        end
+        piece[i] = label[r]
+    end
+    return piece, n_pieces
+end
+
+# Groups of monomers whose inflated spheres overlap (transitively).
+# Returns the group index of every monomer and the number of groups.
+function _monomer_groups(agg::SphereAggregate, eps_eff::Float64)
+    N = n_monomers(agg)
+    group = collect(1:N)
+    function root(i::Int)
+        while group[i] != i
+            group[i] = group[group[i]]
+            i = group[i]
+        end
+        return i
+    end
+    c, r = agg.centers, agg.radii
+    @inbounds for i in 1:N, j in i+1:N
+        d = sqrt((c[1,i] - c[1,j])^2 + (c[2,i] - c[2,j])^2 + (c[3,i] - c[3,j])^2)
+        if d < (1 + eps_eff) * (r[i] + r[j])
+            ri, rj = root(i), root(j)
+            ri != rj && (group[rj] = ri)
+        end
+    end
+    label = zeros(Int, N)
+    out = Vector{Int}(undef, N)
+    n_groups = 0
+    @inbounds for i in 1:N
+        g = root(i)
+        if label[g] == 0
+            n_groups += 1
+            label[g] = n_groups
+        end
+        out[i] = label[g]
+    end
+    return out, n_groups
+end
+
+"""
+    _rescale_to_monomer_volumes!(mesh, agg, eps_eff) -> mesh
+
+Scale the node coordinates so that the mesh volume equals the sum of the
+nominal monomer volumes.
+
+- **Connected aggregate** (one mesh piece): uniform scaling about the origin
+  by `(V_target / V_mesh)^(1/3)`.
+- **Disconnected aggregate** (monomers or groups of monomers separated by
+  gaps): every piece is scaled on its own, to the nominal volume of the
+  monomers it contains, about the `r³`-weighted mean of their centres (the
+  centre itself for a single monomer). The centres of the pieces therefore
+  stay where the aggregate puts them, and the gaps between nominal spheres
+  are kept. A single uniform scaling would instead move the pieces apart or
+  together: a faceted sphere has a smaller volume than the nominal one, so
+  the scale factor exceeds 1 and grows as the mesh gets coarser.
+
+The pieces of the mesh are matched to the groups of monomers whose inflated
+spheres overlap. If they cannot be matched one to one (for example monomers
+in exact point contact), the whole mesh is scaled uniformly and a warning is
+issued.
+"""
+function _rescale_to_monomer_volumes!(mesh::TetMesh, agg::SphereAggregate,
+                                      eps_eff::Float64)
+    V_target = monomer_volume_sum(agg)
+    piece, n_pieces = _mesh_pieces(mesh)
+    if n_pieces == 1
+        apply_scale!(mesh, (V_target / total_volume(mesh))^(1/3))
+        return mesh
+    end
+
+    group, n_groups = _monomer_groups(agg, eps_eff)
+    c, r = agg.centers, agg.radii
+    N = n_monomers(agg)
+
+    # Monomer group of every mesh piece, from the inflated sphere nearest to
+    # each node (signed distance to the sphere surface).
+    piece_group = zeros(Int, n_pieces)
+    matched = n_groups == n_pieces
+    if matched
+        @inbounds for (i, x) in enumerate(mesh.nodes)
+            best, jbest = Inf, 0
+            for j in 1:N
+                d = sqrt((x[1] - c[1,j])^2 + (x[2] - c[2,j])^2 + (x[3] - c[3,j])^2) -
+                    (1 + eps_eff) * r[j]
+                if d < best
+                    best, jbest = d, j
+                end
+            end
+            g = group[jbest]
+            p = piece[i]
+            if piece_group[p] == 0
+                piece_group[p] = g
+            elseif piece_group[p] != g
+                matched = false
+                break
+            end
+        end
+        matched = matched && all(!=(0), piece_group) && allunique(piece_group)
+    end
+    if !matched
+        @warn "mesh_sphere_aggregate: the pieces of the mesh do not match the groups " *
+              "of overlapping monomers; scaling the whole mesh uniformly" n_pieces n_groups
+        apply_scale!(mesh, (V_target / total_volume(mesh))^(1/3))
+        return mesh
+    end
+
+    # Nominal volume and pivot of every piece.
+    V_nom = zeros(Float64, n_pieces)
+    pivot = [zero(Vec3) for _ in 1:n_pieces]
+    w_sum = zeros(Float64, n_pieces)
+    group_piece = zeros(Int, n_groups)
+    @inbounds for p in 1:n_pieces
+        group_piece[piece_group[p]] = p
+    end
+    @inbounds for j in 1:N
+        p = group_piece[group[j]]
+        w = r[j]^3
+        V_nom[p] += (4π / 3) * w
+        pivot[p] += w * Vec3(c[1,j], c[2,j], c[3,j])
+        w_sum[p] += w
+    end
+    V_mesh = zeros(Float64, n_pieces)
+    @inbounds for (t, nd) in enumerate(mesh.tets)
+        V_mesh[piece[nd[1]]] += mesh.tet_volumes[t]
+    end
+    scale = Vector{Float64}(undef, n_pieces)
+    @inbounds for p in 1:n_pieces
+        pivot[p] = pivot[p] / w_sum[p]
+        scale[p] = (V_nom[p] / V_mesh[p])^(1/3)
+    end
+
+    @inbounds for i in eachindex(mesh.nodes)
+        p = piece[i]
+        mesh.nodes[i] = pivot[p] + scale[p] * (mesh.nodes[i] - pivot[p])
+    end
+    @inbounds for (t, nd) in enumerate(mesh.tets)
+        p = piece[nd[1]]
+        mesh.tet_centroids[t] = pivot[p] + scale[p] * (mesh.tet_centroids[t] - pivot[p])
+        mesh.tet_volumes[t]  *= scale[p]^3
+    end
+    return mesh
 end
