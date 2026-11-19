@@ -959,9 +959,7 @@ consistent with the AIM MVP cost $\mathcal{O}(N_g \log N_g +
 N_{\text{dof}}\,n_{\text{near}})$ at fixed wavelength.  At $R/7$
 the operator footprint is below \SI{300}{MiB} and at $R/8$ below
 \SI{450}{MiB}, so further refinement on a \SI{16}{GB} workstation
-is feasible and is the next step toward closing the residual
-$\Im S_{\text{fw},\theta}$ error at $\beta = \pi/2$
-(Sec.~\ref{sec:doublet-mstm}).  The full per-row table — DoF count,
+is feasible (Sec.~\ref{sec:doublet-mstm}).  The full per-row table — DoF count,
 $N_{\text{bnd}}$, per-component memory, $t_{\text{setup}}$,
 $t_{\text{solve}}$ — is in
 \texttt{docs/benchmark\_results.md} \S 8.3.
@@ -1276,9 +1274,9 @@ test cases.  Sub-1\,\% accuracy on all five CAS-v2 observables is
 reached at modest mesh sizes ($N \sim 2 \times 10^3$ half-SWG DoF)
 for the Mie reference, and agreement with the independent codes is
 at the few-percent level expected from the discretisation budget of
-either side.  Mesh refinement on the plasmonic doublet recovers
-the theoretical linear-SWG convergence rate $p \approx 2$ on every
-observable.
+either side.  The numbers of the doublet benchmark are withheld until
+it has been re-run with the doublet mesher of v0.8.2
+(Sec.~\ref{sec:doublet-mstm}).
 
 The full set of validation conditions (geometry, material, mesh,
 solver settings), per-observable error tables (real and imaginary
@@ -1479,30 +1477,23 @@ half-SWG VIEM mesh uses $\ell_c = R/5$
 ($N_{\text{dof}} = 11\,501$) solved by AIM block-BiCGSTAB at
 $\text{tol} = 10^{-7}$; the MSTM reference uses VSWF truncation
 forced to $N = 15$ (rtol $\le 10^{-6}$ on both materials at
-$x \approx 0.30$).  For the dielectric doublet
-$|S_{\text{fw,mean}}|$ matches MSTM to $\le 1.6\,\%$ across all
-orientations.  For the plasmonic Au doublet the error grows with
-$\beta$ from \SI{1.3}{\percent} at $\beta = 0$ to \SI{4.0}{\percent}
-at $\beta = \pi/2$, with strong polarisation anisotropy
-($\Im S_{\text{fw},\theta}$ at $\beta = \pi/2$ reaches
-\SI{10.5}{\percent}) traced to the concentration of the plasmonic
-surface mode in the sub-wavelength inter-sphere gap when the
-doublet axis is aligned with the incident polarisation.
+$x \approx 0.30$).
 
-A four-point mesh-refinement study at $\ell_c = R/k$ for
-$k \in \{5, 6, 7, 8\}$, fitted as
-$\text{rel.\ err.}(\ell_c) \propto (\ell_c/R)^p$, recovers the
-theoretical linear-SWG rate $p \approx 2.10$--$2.49$ on every
-component, including the stiff $\Im S_{\text{fw},\theta}$ at
-$p = 2.10$.  An earlier two-point fit using only $R/5$ and $R/6$
-had given $p \in [0.78, 3.39]$; that spread is now understood as a
-two-point artefact.  Phase A (Sec.~\ref{sec:aim-surface}) brings
-the AIM-operator memory to a near-linear
-$\mathcal{O}(N_{\text{dof}}^{1.02})$ scaling, so the $R/8$
-($N_{\text{dof}} = 45\,585$) refinement fits in
-\SI{413}{\mebi\byte} of operator memory and is the basis for the
-extrapolation that $\ell_c = R/10$ should bring
-$\Im S_{\text{fw},\theta}$ below \SI{3}{\percent}.
+The accuracy results of this benchmark, including the four-point
+mesh-refinement study at $\ell_c = R/k$, $k \in \{5, 6, 7, 8\}$, are
+withheld for now.
+They were computed before v0.8.2 with the previous doublet mesher,
+which scaled the whole mesh uniformly to the nominal volume.
+The centre distance of the two spheres was then larger than the
+nominal one by the scale factor, about \SI{1}{\percent} at
+$\ell_c = R/5$.
+From v0.8.2 each sphere is scaled about its own centre.
+The results will be given again when the benchmark has been re-run.
+Phase A (Sec.~\ref{sec:aim-surface}) brings the AIM-operator memory to
+a near-linear $\mathcal{O}(N_{\text{dof}}^{1.02})$ scaling, so the
+$R/8$ ($N_{\text{dof}} = 45\,585$) refinement fits in
+\SI{413}{\mebi\byte} of operator memory.
+This measurement does not depend on the mesher change.
 
 \paragraph{MSTMforCAS truncation order.} The MSTMforCAS
 auto-truncation returns $N_{\text{trunc}} = 3$ at
@@ -1518,10 +1509,8 @@ re-confirm convergence with
 \texttt{benchmarks/cas\_v2/doublet\_mstm/check\_trunc\_\allowbreak convergence.jl}.
 
 \paragraph{}
-The full benchmark setup, the per-orientation Re/Im-resolved error
-tables for $S_{\text{fw},\theta}$ and $S_{\text{fw},\varphi}$, the
-$\ell_c$-refinement convergence-rate fits, and the Phase A
-AIM-operator memory measurements are tabulated in
+The full benchmark setup and the Phase A AIM-operator memory
+measurements are tabulated in
 \texttt{docs/benchmark\_results.md} \S\S 7--8.
 
 

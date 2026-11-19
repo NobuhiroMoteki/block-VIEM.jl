@@ -24,8 +24,8 @@ Per-section quick navigation:
 | [§4](#4-oblate-spheroid-cross-validation-vs-block-dda_py) | Oblate spheroid vs DDA | block-DDA_Py |
 | [§5](#5-gre-cross-validation-vs-block-dda_py-β--0) | GRE (β > 0) vs DDA | block-DDA_Py |
 | [§6](#6-anisotropic-ε_p-cross-validation-vs-block-dda_py) | Anisotropic ε_p vs DDA | block-DDA_Py |
-| [§7](#7-two-sphere-doublet-vs-mstm) | 2-sphere doublet vs MSTM | MSTMforCAS.jl |
-| [§8](#8-doublet-mesh-refinement-and-aim-memory) | Doublet ℓ_c convergence + memory | self |
+| [§7](#7-two-sphere-doublet-vs-mstm) | 2-sphere doublet vs MSTM (results withheld) | MSTMforCAS.jl |
+| [§8](#8-doublet-mesh-refinement-and-aim-memory) | Doublet ℓ_c convergence (results withheld) + memory | self |
 | [§9](#9-per-dof-accuracy-vs-block-dda_py) | Per-DoF accuracy vs DDA | analytical (Mie) |
 | [§10](#10-paper-production-ℓ_c-convergence-protocol) | Paper-production ℓ_c protocol | self |
 | [§11](#11-shifted-block-gmres-for-refractive-index-sweeps) | Shifted block GMRES for refractive-index sweeps | existing solver |
@@ -63,11 +63,12 @@ $(-S_{11} + S_{22})/2$ at the backward direction, the corrected Eq. (28)
 of Moteki and Adachi (2024). The benchmarks of §1–§10 were run with the
 printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The VIEM
 value and its reference changed by the same factor, so the relative and
-phase errors of `S_bk` reported below are unchanged. Absolute `S_bk`
-values in the result files stored under `benchmarks/` (JSON) are
-$\sqrt{2}$ times those of the present code. The HDF5 files under
-`viem_results/paper/` were converted to the corrected form on
-2026-11-19.
+phase errors of `S_bk` reported below are unchanged. The HDF5 files
+under `viem_results/paper/` were converted to the corrected form on
+2026-11-19. The result files under `benchmarks/` no longer contain
+backward amplitudes in the printed form: the doublet benchmark results
+are withheld (§7) and the two `S_bk` entries of
+`benchmarks/cas_v2/dda_comparison/viem_result.json` were removed.
 
 ---
 
@@ -298,15 +299,22 @@ near-field, AIM, and far-field paths.
 
 ## 7. Two-sphere doublet vs MSTM
 
-> **Note (2026-11-19).** The numbers of §7 and §8 were computed with
-> the mesher of v0.8.1 or earlier, which scaled the whole doublet mesh
-> uniformly to the nominal volume. The centre distance of the two spheres
-> was then larger than the nominal $2.1 R$ by the scale factor (about
-> 1 % at $\ell_c = R/5$, less on finer meshes). From v0.8.2 each sphere
-> is scaled about its own centre and the centre distance is exactly
-> $2.1 R$. This benchmark has not been re-run with v0.8.2. For the paper
-> doublets the change improved the agreement with MSTM for Au (for
-> example $C_\text{ext}$ from 5–13 % to 1.5–2 %).
+> **Results withheld (2026-11-19).** The accuracy results of §7.3, §7.4,
+> §8.1 and §8.2 are not shown for now. They were computed before v0.8.2:
+>
+> - with the previous doublet mesher, which scaled the whole mesh
+>   uniformly to the nominal volume, so that the centre distance of the
+>   two spheres was larger than the nominal $2.1 R$ by the scale factor
+>   (about 1 % at $\ell_c = R/5$, less on finer meshes). From v0.8.2 each
+>   sphere is scaled about its own centre and the centre distance is
+>   exactly $2.1 R$;
+> - with the previous definition of the backward amplitude.
+>
+> The setup (§7.1, §7.2) and the memory and timing measurements (§8.3),
+> which do not depend on either point, are kept. The earlier tables are
+> in the git history (commit `d1482fa`). For the paper doublets the new
+> mesher improved the agreement with MSTM for Au (for example
+> $C_\text{ext}$ from 5–13 % to 1.5–2 %).
 
 Drivers under [benchmarks/cas_v2/doublet_mstm/](../benchmarks/cas_v2/doublet_mstm/):
 
@@ -388,93 +396,13 @@ for generic aggregates.
 
 ### 7.3 Dielectric doublet — $m_p = 1.60 + 0.01\,i$
 
-#### Magnitude summary
-
-| β [rad] | $\|S_\text{fw,mean}\|$ VIEM | $\|S_\text{fw,mean}\|$ MSTM | rel. $\|\cdot\|$ err. | complex rel. err. | phase err. [rad] |
-| ------- | ------------------ | ------------------ | --------------------- | ----------------- | ---------------- |
-| 0       | 1.769e−03          | 1.794e−03          | 1.4 %                 | 1.4 %             | 1.3e−04          |
-| π/4     | 1.822e−03          | 1.849e−03          | 1.5 %                 | 1.5 %             | 1.6e−04          |
-| π/2     | 1.878e−03          | 1.908e−03          | 1.6 %                 | 1.6 %             | 2.0e−04          |
-
-#### $S_{\text{fw},\theta}$ — real and imaginary parts
-
-| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
-| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
-| 0       | +1.7682e−03 | +1.7934e−03 | 1.4 %      | +4.1063e−05 | +4.1991e−05 | 2.2 %      |
-| π/4     | +1.8768e−03 | +1.9066e−03 | 1.6 %      | +4.7872e−05 | +4.9082e−05 | 2.5 %      |
-| π/2     | +1.9933e−03 | +2.0279e−03 | 1.7 %      | +5.5225e−05 | +5.6771e−05 | 2.7 %      |
-
-#### $S_{\text{fw},\phi}$ — real and imaginary parts
-
-| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
-| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
-| 0       | +1.7683e−03 | +1.7934e−03 | 1.4 %      | +4.1285e−05 | +4.1991e−05 | 1.7 %      |
-| π/4     | +1.7651e−03 | +1.7902e−03 | 1.4 %      | +4.2005e−05 | +4.2724e−05 | 1.7 %      |
-| π/2     | +1.7619e−03 | +1.7870e−03 | 1.4 %      | +4.2680e−05 | +4.3463e−05 | 1.8 %      |
-
-Agreement is essentially polarisation- and orientation-independent
-at this level: Re parts to 1.4 – 1.7 %, Im parts to 1.7 – 2.7 %.
-The extra factor on Im is a pure scale effect — $|\operatorname{Im} S_\text{fw,mean}|$
-is 30 – 50 × smaller than $|\operatorname{Re} S_\text{fw,mean}|$ in the weakly
-absorbing case so a fixed absolute error appears larger on Im.
+Results withheld until the benchmark has been re-run with v0.8.2 (see
+the note at the top of §7).
 
 ### 7.4 Plasmonic Au doublet — $m_p = 0.17525 + 3.4830\,i$
 
-#### Magnitude summary
-
-| β [rad] | $\|S_\text{fw,mean}\|$ VIEM | $\|S_\text{fw,mean}\|$ MSTM | rel. $\|\cdot\|$ err. | complex rel. err. | phase err. [rad] |
-| ------- | ------------------ | ------------------ | --------------------- | ----------------- | ---------------- |
-| 0       | 6.420e−03          | 6.504e−03          | 1.3 %                 | 1.3 %             | 5.1e−04          |
-| π/4     | 8.043e−03          | 8.287e−03          | 2.9 %                 | 3.0 %             | 4.9e−03          |
-| π/2     | 9.785e−03          | 1.020e−02          | 4.0 %                 | 4.1 %             | 7.0e−03          |
-
-#### $S_{\text{fw},\theta}$ — real and imaginary parts
-
-| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
-| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
-| 0       | +6.4046e−03 | +6.4886e−03 | 1.3 %      | +4.3635e−04 | +4.4705e−04 | 2.4 %      |
-| π/4     | +9.6439e−03 | +1.0037e−02 | 3.9 %      | +1.2147e−03 | +1.3381e−03 | **9.2 %**  |
-| π/2     | +1.3102e−02 | +1.3818e−02 | 5.2 %      | +2.0467e−03 | +2.2857e−03 | **10.5 %** |
-
-#### $S_{\text{fw},\phi}$ — real and imaginary parts
-
-| β [rad] | Re VIEM     | Re MSTM     | rel err Re | Im VIEM     | Im MSTM     | rel err Im |
-| ------- | ----------- | ----------- | ---------- | ----------- | ----------- | ---------- |
-| 0       | +6.4049e−03 | +6.4886e−03 | 1.3 %      | +4.3967e−04 | +4.4705e−04 | 1.7 %      |
-| π/4     | +6.3556e−03 | +6.4392e−03 | 1.3 %      | +4.4777e−04 | +4.5502e−04 | 1.6 %      |
-| π/2     | +6.3084e−03 | +6.3893e−03 | 1.3 %      | +4.5536e−04 | +4.6332e−04 | 1.7 %      |
-
-#### Discussion
-
-The plasmonic doublet exhibits a strong
-**orientation–polarisation anisotropy** of the discretisation
-error.
-
-- The **$\phi$ channel** is essentially flat in $\beta$
-  ($\approx 1.3 \%$ on Re, 1.6 – 1.7 % on Im), because
-  $S_{\text{fw},\phi}$ probes the polarisation transverse to both
-  the incidence and the doublet axis — the two spheres are
-  effectively independent through this channel.
-- The **$\theta$ channel** at $\beta = \pi/2$ couples to the
-  polarisation aligned with the doublet axis. Both monomers are
-  driven in phase along their centre line, the interaction field
-  concentrates in the sub-wavelength gap, and the surface plasmon
-  lives in a skin layer of depth
-  $\delta = \lambda_0/(2\pi \operatorname{Im} m_p) \approx 29\,\text{nm}$,
-  essentially the monomer radius itself. With
-  $\ell_c = R/5 = 6\,\text{nm}$ the skin layer is resolved
-  by ~ 5 linear tets — adequate for few-percent accuracy but the
-  Im $\theta$ channel is the stiffest observable at 10.5 %.
-
-**Practical takeaway.** A single-number relative error on
-$|S_\text{fw,mean}|$ undersells the orientation / polarisation
-structure of the discretisation error: at $\beta = \pi/2$ the
-4.0 % $|S_\text{fw,mean}|$ error hides a **10.5 %** error on
-$\operatorname{Im} S_{\text{fw},\theta}$. The Re/Im-resolved component view
-should be used as the convergence indicator when sizing $\ell_c$
-for plasmonic targets. The $\theta$-channel error also converges
-the fastest under refinement (§8), so modest mesh refinement is
-highly cost-effective here.
+Results withheld until the benchmark has been re-run with v0.8.2 (see
+the note at the top of §7).
 
 ---
 
@@ -482,7 +410,7 @@ highly cost-effective here.
 
 Driver:
 [benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl](../benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl)
-+ `compute_refinement_errors.py`. Au doublet of §7.4. Same
++ `compute_refinement_errors.py`. Au doublet of §7. Same
 geometry, four refinement levels $\ell_c = R/k$ for
 $k = 5, 6, 7, 8$ (the script default is $k = 5, 6, 7$; $k = 8$ is set
 with `BM_LC_RATIOS`), all compared against the converged MSTM
@@ -492,45 +420,13 @@ $N = 15$ reference. Single-threaded (Intel i7-1265U,
 
 ### 8.1 Per-component error vs ℓ_c at β = π/2
 
-| ℓ_c / R | $\|S_\text{fw,mean}\|$ | $\operatorname{Re} S_{\text{fw},\theta}$ | $\operatorname{Im} S_{\text{fw},\theta}$ | $\operatorname{Re} S_{\text{fw},\phi}$ | $\operatorname{Im} S_{\text{fw},\phi}$ |
-| ------- | ----- | ----- | ------ | ----- | ----- |
-| 1/5     | 4.36 %| 5.61 %| 10.72 %| 1.38 %| 2.03 %|
-| 1/6     | 2.73 %| 3.47 %|  6.43 %| 0.97 %| 1.82 %|
-| 1/7     | 1.94 %| 2.44 %|  4.62 %| 0.73 %| 1.38 %|
-| 1/8     | 1.60 %| 2.05 %|  4.07 %| 0.50 %| 0.58 %|
+Results withheld until the benchmark has been re-run with v0.8.2 (see
+the note at the top of §7).
 
 ### 8.2 Fitted convergence rate $p$ in $\text{err} \propto (\ell_c/R)^p$
 
-4-point log-log least-squares fit:
-
-| Component | $p$ |
-| --------- | --- |
-| $\|S_\text{fw,mean}\|$ | 2.16 |
-| $\operatorname{Re} S_{\text{fw},\theta}$ | 2.17 |
-| $\operatorname{Im} S_{\text{fw},\theta}$ | 2.10 |
-| $\operatorname{Re} S_{\text{fw},\phi}$ | 2.11 |
-| $\operatorname{Im} S_{\text{fw},\phi}$ | 2.49 |
-
-**Every observable converges at the theoretical linear-SWG
-rate $p \approx 2$** (or faster for $\operatorname{Im} S_{\text{fw},\phi}$). An
-earlier two-point fit using only $R/5, R/6$ had given
-$p \in [0.78, 3.39]$ with $\operatorname{Im} S_{\text{fw},\theta}$ apparently
-the *fastest* — that spread is a two-point artefact. The clean
-$p \approx 2$ slope on the stiffest observable extrapolates to
-
-$$
-\operatorname{Im} S_{\text{fw},\theta}(\ell_c = R/10)
-\;\approx\; 4.07 \% \times (8/10)^{2.10}
-\;\approx\; 2.6 \%,
-$$
-
-$$
-|S_\text{fw,mean}|(\ell_c = R/10)
-\;\approx\; 1.60 \% \times (8/10)^{2.16}
-\;\approx\; 1.0 \%.
-$$
-
-$\ell_c = R/10$ is the next planned refinement step.
+Results withheld until the benchmark has been re-run with v0.8.2 (see
+the note at the top of §7).
 
 ### 8.3 Phase A AIM-operator memory
 
