@@ -72,7 +72,7 @@ n20 (非吸収) で N_DOF が ~4× 縮小し両ソルバとも安定収束見込
   - monomer 半径: `R = a_eq / 2^(1/3) ≈ 0.7937 a_eq`
   - 軸方向 surface-to-surface gap: `g = 0.1 R`
   - 中心間距離は `2.1 R`。v0.8.2 から `mesh_sphere_aggregate` が各球を自分の中心のまわりで公称体積に合わせるので、メッシュの粗さに依らない
-  - **注記 (2026-11-19)**: それ以前はメッシュ全体を一様にスケールしていた。v0.8.0 までの `run_viem.jl` は既定の `overlap_factor = 0.02` も使っており、中心間距離は `2.06–2.08 R`（多面体の表面間の gap は `0.0595 R`）。v0.8.1 では `2.10–2.13 R`。`viem_results/paper/doublet_*.hdf5` は v0.8.2 で作り直した（2026-11-19、supermicro-647、`S_bk` は修正式、`/target` に属性 `doublet_gap_over_R = 0.1`）。v0.7.8 の本番ファイルは git 履歴（`416cece`）にある。作り直したファイルの cost は他の論文用ファイルと計算機が違うので、所要時間は横並びで比べられない。MSTM 参照 `mstm_doublet_*.hdf5` は `0.1 R` で、`S_bk` は旧定義のまま（比較時は 1/√2 を掛ける）
+  - **注記 (2026-11-19)**: それ以前はメッシュ全体を一様にスケールしていた。v0.8.0 までの `run_viem.jl` は既定の `overlap_factor = 0.02` も使っており、中心間距離は `2.06–2.08 R`（多面体の表面間の gap は `0.0595 R`）。v0.8.1 では `2.10–2.13 R`。`viem_results/paper/doublet_*.hdf5` は v0.8.2 で作り直した（2026-11-19、supermicro-647、`S_bk` は修正式、`/target` に属性 `doublet_gap_over_R = 0.1`）。v0.7.8 の本番ファイルは git 履歴（`416cece`）にある。作り直したファイルの cost は他の論文用ファイルと計算機が違うので、所要時間は横並びで比べられない。MSTM 参照 `mstm_doublet_*.hdf5` は `0.1 R` で、`S_bk` は修正式に変換済み（§8.2）
   - **doublet 軸 = 粒子 z 軸**（spheroid mode の α-展開公式が適用可能になる前提条件）
   - a_eq = 0.05, 0.10, 0.20, 0.40 μm → R ≈ 0.0397, 0.0794, 0.1587, 0.3175 μm
 
@@ -218,7 +218,7 @@ v0.7.4 以前は serial bottleneck があったが O(kL²) Givens QR への書�
 | `C_abs` | Float64 | 同上 | μm² | 吸収断面積 |
 | `S_fw_PCAS_theta` | ComplexF64 | 同上 | μm | 前方散乱振幅 θ 成分 = `S11(0) + i·S12(0)` |
 | `S_fw_PCAS_phi` | ComplexF64 | 同上 | μm | 前方散乱振幅 φ 成分 = `S22(0) − i·S21(0)` |
-| `S_bk_OCBS` | ComplexF64 | 同上 | μm | 後方散乱振幅 = `(−S11+S22−i·S12−i·S21)(180°)/√2` (theory_note.tex §S-bk; `(−S_bk_θ + S_bk_φ)/√2` with `S_bk_θ = S11+i·S12`, `S_bk_φ = S22−i·S21` at θ=π)。**注記 (2026-11-19)**: これは `viem_results/paper/` の論文用データを生成した時点の定義 (Moteki and Adachi 2024 の印刷版 Eq. (28)) で、保存済みファイルはこの定義のまま残してある。v0.8.0 (2026-11-19) 以降のコードは erratum の修正式 `(−S11+S22)(180°)/2` に従い、値は保存済みデータの 1/√2 倍になる (位相、VIEM/参照値の比は同じ)。block-DDA_Py は v0.8.2 から修正式。 |
+| `S_bk_OCBS` | ComplexF64 | 同上 | μm | 後方散乱振幅 = `(−S11+S22−i·S12−i·S21)(180°)/2` (theory_note.tex §S-bk; `(−S_bk_θ + S_bk_φ)/2` with `S_bk_θ = S11+i·S12`, `S_bk_φ = S22−i·S21` at θ=π)。Moteki and Adachi 2024 の Eq. (28) の erratum の修正式で、block-DDA_Py v0.8.2 以降と同じ。**注記 (2026-11-19)**: 論文用データを生成した v0.7.8 は印刷版の `.../√2` を使っていた。`viem_results/paper/` の保存済みファイルは 2026-11-19 に修正式へ変換済み (下の §8.2)。git 履歴の `416cece` にある元のファイルの `S_bk` は現行の √2 倍 (位相、VIEM/参照値の比は同じ)。 |
 | `Euler_angles` | Float64 | (...,100,3) | rad | (α, β, γ) per orientation |
 | `r_ve` | Float64 | (N_rv,1,1,1) | μm | 離散化メッシュ体積から計算した実効体積等価半径 |
 
@@ -232,10 +232,16 @@ v0.7.4 以前は serial bottleneck があったが O(kL²) Givens QR への書�
 
 doublet 形状でも書き込まれるが、Rayleigh 領域以外では参考値（厳密解は MSTM、§11 参照）。
 
-`S_bk_OCBS_mie` と、MSTM・T-matrix 参照ファイル (`mstm_*.hdf5`, `tmm_*.hdf5`) の `S_bk` も、保存済みのものは
-印刷版 Eq. (28) の `1/√2` で計算されている (上の注記と同じ)。新しく生成するファイルは修正式で書かれ、
-`S_definition` 属性が `.../2` になるので、属性で新旧を区別できる。新旧の `S_bk` を比べるときは保存済みの値に
-1/√2 を掛ける。`run_viem.jl` は、旧定義の結果が入ったファイルへの追記 (中断再開) を拒否する。
+**保存済みファイルの `S_bk` (2026-11-19)。** `viem_results/paper/` の HDF5 はすべて修正式 `.../2` に揃えてある。
+
+- `doublet_*.hdf5`: v0.8.2 で作り直した。
+- それ以外 (sphere / oblate / gre と pilot の `S_bk_OCBS`, `S_bk_OCBS_mie`、MSTM 参照 `mstm_doublet_*.hdf5` と T-matrix 参照 `tmm_oblate*.hdf5` の `S_bk`、
+  `convergence_*.hdf5` の `S_bk`, `S_bk_mie`): 保存値に 1/√2 を掛けて変換した。再計算はしていない。変えたのは後方散乱振幅のデータセットだけで、
+  ほかのデータセットはビット単位で元のまま。
+- 属性: `S_definition` は `.../2` に書き換えた。`S_definition` を持たないファイルには `S_bk_definition` を付けた。変換したファイルには
+  `S_bk_conversion_note` がある。
+- 元のファイル (印刷版の `.../√2`) は git 履歴の `416cece` にある。
+- `run_viem.jl` は、`S_definition` が `.../sqrt(2)` で結果が入っているファイルへの追記 (中断再開) を拒否する。
 
 ### 8.3 規格化光学断面積（解析時に算出）
 

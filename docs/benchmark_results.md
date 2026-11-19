@@ -64,8 +64,10 @@ of Moteki and Adachi (2024). The benchmarks of §1–§10 were run with the
 printed equation, which has $1/\sqrt{2}$ in place of $1/2$. The VIEM
 value and its reference changed by the same factor, so the relative and
 phase errors of `S_bk` reported below are unchanged. Absolute `S_bk`
-values in the stored result files of these benchmarks are $\sqrt{2}$
-times those of the present code.
+values in the result files stored under `benchmarks/` (JSON) are
+$\sqrt{2}$ times those of the present code. The HDF5 files under
+`viem_results/paper/` were converted to the corrected form on
+2026-11-19.
 
 ---
 
