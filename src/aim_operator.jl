@@ -77,6 +77,52 @@ function assemble_mass_matrix(basis::AbstractDivBasis; rule::TetQuadRule = TET_Q
     return sparse(Is, Js, Vs, N, N)
 end
 
+"""
+    assemble_weighted_mass_matrix(basis::AbstractDivBasis, w::SVector{3,ComplexF64};
+                                  rule::TetQuadRule = TET_QUAD_5PT)
+        -> SparseMatrixCSC{ComplexF64,Int}
+
+Assemble the component-weighted mass matrix
+
+    M^w_mn = Σ_α w_α ∫ (f_m)_α (f_n)_α dV,      α = x, y, z.
+
+With `w_α = 1/ε_α` this is the first term of the impedance matrix of a
+particle with the diagonal permittivity tensor `diag(ε_x, ε_y, ε_z)`, as in
+the dense assembly (`_mass_term_weighted`). For equal weights `w_α = w` it
+equals `w * assemble_mass_matrix(basis)`. Same sparsity pattern as the
+unweighted mass matrix.
+"""
+function assemble_weighted_mass_matrix(basis::AbstractDivBasis,
+                                       w::SVector{3,ComplexF64};
+                                       rule::TetQuadRule = TET_QUAD_5PT)
+    N = n_basis(basis)
+    mesh = basis.mesh
+    tet_to_basis = build_tet_to_dofs(basis)
+
+    Is = Int[]
+    Js = Int[]
+    Vs = ComplexF64[]
+    for (tet, blist) in tet_to_basis
+        verts = _tet_vertices(mesh, tet)
+        V = tet_volume(verts...)
+        for m in blist, n in blist
+            s = zero(ComplexF64)
+            @inbounds for i in 1:rule.n
+                r = bary_to_point(rule.bary[i], verts)
+                fm = evaluate(basis, m, r, tet)
+                fn = evaluate(basis, n, r, tet)
+                s += rule.weights[i] * (w[1] * fm[1] * fn[1] +
+                                        w[2] * fm[2] * fn[2] +
+                                        w[3] * fm[3] * fn[3])
+            end
+            push!(Is, m)
+            push!(Js, n)
+            push!(Vs, s * V)
+        end
+    end
+    return sparse(Is, Js, Vs, N, N)
+end
+
 # ---------------------------------------------------------------------------
 # Near-pair enumeration (Phase 3.7 helper)
 # ---------------------------------------------------------------------------
@@ -614,7 +660,18 @@ struct AIMOperator
     kappa_v::SVector{3,ComplexF64}
     kappa_avg::ComplexF64
     inv_eps_v::SVector{3,ComplexF64}
+    # Component-weighted mass Σ_α (1/ε_α) M_α for an anisotropic particle.
+    # `nothing` for an isotropic one, where the mass term is (1/ε_p) * mass.
+    mass_weighted::Union{Nothing,SparseMatrixCSC{ComplexF64,Int}}
 end
+
+# Constructor without the weighted mass (isotropic particle).
+AIMOperator(projection, G_hat, mass, precorrection, diag_precorrection,
+            half_swg_extra, diag_half_swg_extra, k0, eps_bg,
+            kappa_v, kappa_avg, inv_eps_v) =
+    AIMOperator(projection, G_hat, mass, precorrection, diag_precorrection,
+                half_swg_extra, diag_half_swg_extra, k0, eps_bg,
+                kappa_v, kappa_avg, inv_eps_v, nothing)
 
 # Apply y += scale * (A + Aᵀ − Diagonal(diag_A)) * x for upper-triangle A.
 # Used for both precorrection and half_swg_extra, in vector and block forms.
@@ -724,10 +781,16 @@ function build_aim_operator(basis::AbstractDivBasis;
     length(diag_pre) == N || error("diag_precorrection length mismatch")
     half_extra = spzeros(ComplexF64, N, N)
     diag_half = zeros(ComplexF64, N)
+    # Anisotropic particle: the mass term is Σ_α (1/ε_α) M_α, as in the dense
+    # assembly. The unweighted `mass` cannot represent it.
+    isotropic = inv_eps_v[1] == inv_eps_v[2] == inv_eps_v[3]
+    mass_w = isotropic ? nothing :
+        assemble_weighted_mass_matrix(basis, inv_eps_v; rule = outer_rule)
     return AIMOperator(proj, G_hat, mass_m,
                        precorr, diag_pre,
                        half_extra, diag_half,
-                       ComplexF64(k0), eps_bg_c, kappa_v, kappa_avg, inv_eps_v)
+                       ComplexF64(k0), eps_bg_c, kappa_v, kappa_avg, inv_eps_v,
+                       mass_w)
 end
 
 """
@@ -738,13 +801,21 @@ Apply the AIM-accelerated impedance operator to vector `x`:
 ```
 y = (1/ε_p) M x  −  (κ/ε_bg) [ K_AIM(x) + K_near x ]
 ```
+
+For an anisotropic particle the mass term is `Σ_α (1/ε_α) M_α x`, with
+`M_α` the mass matrix of the Cartesian component `α`
+(`op.mass_weighted`).
 """
 function aim_mvp(op::AIMOperator, x::AbstractVector)
-    # Mass term: Σ_α (1/ε_α) M_α x  ≈ inv_eps_avg * M*x for isotropic.
-    # For SWG, M is the unweighted mass; anisotropic weighting enters here.
-    # When inv_eps components are all equal this is exactly (1/ε_p) M*x.
-    inv_avg = (op.inv_eps_v[1] + op.inv_eps_v[2] + op.inv_eps_v[3]) / 3
-    y = ComplexF64.(inv_avg .* (op.mass * x))
+    # Mass term. Isotropic: (1/ε_p) M x (the three inv_eps components are
+    # equal, so their mean is 1/ε_p). Anisotropic: Σ_α (1/ε_α) M_α x.
+    mw = op.mass_weighted
+    if mw === nothing
+        inv_avg = (op.inv_eps_v[1] + op.inv_eps_v[2] + op.inv_eps_v[3]) / 3
+        y = ComplexF64.(inv_avg .* (op.mass * x))
+    else
+        y = Vector{ComplexF64}(mw * x)
+    end
     if !all(iszero, op.kappa_v)
         K_aim_x = aim_far_mvp_weighted(op.projection, op.G_hat, op.k0,
                                         op.kappa_v, op.kappa_avg, x)
@@ -782,9 +853,14 @@ threads.
 function aim_mvp(op::AIMOperator, X::AbstractMatrix)
     N, L = size(X)
     Y = Matrix{ComplexF64}(undef, N, L)
-    inv_avg = (op.inv_eps_v[1] + op.inv_eps_v[2] + op.inv_eps_v[3]) / 3
-    mul!(Y, op.mass, X)
-    Y .*= inv_avg
+    mw = op.mass_weighted
+    if mw === nothing
+        inv_avg = (op.inv_eps_v[1] + op.inv_eps_v[2] + op.inv_eps_v[3]) / 3
+        mul!(Y, op.mass, X)
+        Y .*= inv_avg
+    else
+        mul!(Y, mw, X)
+    end
     if !all(iszero, op.kappa_v)
         inv_eb = 1 / op.eps_bg
         # aim_far_mvp_weighted allocates its own scratch and only reads

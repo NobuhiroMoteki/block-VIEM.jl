@@ -11,7 +11,7 @@ The package implements:
 - Block-Krylov iterative solvers for multi-orientation batch problems
 - CAS-v2 compatible scattering observables (mirroring block-DDA_Py)
 
-See `.claude/technical_note.md` for the formulation reference.
+See `docs/theory_note.pdf` for the formulation.
 """
 module BlockVIEM
 
@@ -103,7 +103,7 @@ export AIMGrid, n_grid_points, grid_point, aim_grid, grid_stencil, grid_point_at
 export AIMProjection, build_aim_projection, basis_centroid
 export basis_moments, divergence_moments, multi_indices, n_moments
 export build_green_toeplitz, precompute_green_fft, fft_convolve, fft_convolve!
-export assemble_mass_matrix, near_pairs, near_pairs_by_distance
+export assemble_mass_matrix, assemble_weighted_mass_matrix, near_pairs, near_pairs_by_distance
 export aim_far_mvp, aim_radiation_element, assemble_precorrection
 export AIMOperator, build_aim_operator, aim_mvp, aim_K0_mvp
 
