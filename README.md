@@ -70,8 +70,7 @@ block-VIEM.jl is validated against four independent references:
 the **Mie series** (sphere, dielectric and plasmonic Au), an
 analytical **α-symmetry identity** (oblate spheroid), the
 multi-sphere T-matrix package **MSTMforCAS.jl** (touching doublet,
-dielectric and plasmonic Au; the numbers of this benchmark are withheld
-until it has been re-run with v0.8.2), and **block-DDA_Py** (spheroid, GRE
+dielectric and plasmonic Au), and **block-DDA_Py** (spheroid, GRE
 β > 0, anisotropic ε_p). Sub-1 % accuracy on all five CAS-v2
 observables is reached at modest mesh sizes for the Mie reference;
 agreement against the independent codes is at the few-percent
@@ -511,12 +510,27 @@ on a touching doublet of equal spheres (radius 0.030 μm, gap
 (polystyrene-like dielectric and Johnson & Christy 1972 gold).
 Numerically exact MSTM reference at VSWF truncation $N = 15$.
 
-**Results withheld (2026-11-19).** The numbers of this benchmark were
-computed before v0.8.2, with the previous doublet mesher (centre
-distance about 1 % too large at $\ell_c = R/5$) and the previous
-definition of the backward amplitude. They are not shown until the
-benchmark has been re-run. The earlier results are in the git history
-(commit `d1482fa`).
+Results of the re-run with v0.8.2 (2026-11-19), mesh size
+$\ell_c = R/5$ (11 501 DOFs), AIM block GMRES with right
+preconditioning by the mass matrix, every solve converged to
+$10^{-7}$:
+
+| Material | $\|S_\text{fw,mean}\|$ error (β = 0, π/4, π/2) | Largest component error |
+| -------- | ------------------------------------------- | ----------------------- |
+| dielectric, $m_p = 1.60 + 0.01i$ | 0.05 %, 0.09 %, 0.13 % | 0.48 % (Im $S_{\text{fw},\theta}$, β = π/2) |
+| Au, $m_p = 0.17525 + 3.4830i$ | 0.004 %, 0.69 %, 1.09 % | 2.34 % (Im $S_{\text{fw},\theta}$, β = π/2) |
+
+The Au error is largest when the field is polarised along the doublet
+axis. With $\ell_c = R/6$ to $R/8$ every component of the Au doublet
+is within 0.41 % of MSTM at all three orientations. The errors at these
+levels do not decrease monotonically, so no convergence rate is quoted.
+
+The earlier results (git history, commit `d1482fa`) had errors up to
+10.5 % for Au. They were computed with the doublet mesher of v0.8.1 or
+earlier, whose centre distance was about 1 % too large at
+$\ell_c = R/5$. Block BiCGSTAB, the solver of the earlier runs, does
+not converge for the Au doublet (residual $8 \times 10^{-3}$ after 400
+iterations).
 
 **Note on MSTMforCAS truncation order.** The MSTMforCAS
 auto-truncation returns $N_\text{trunc} = 3$ at $x \approx 0.3$,
@@ -526,7 +540,8 @@ between $N = 3$ and the converged reference).  We therefore force
 $N_\text{trunc} = 15$ in `run_mstm.jl` for both materials, reaching
 rtol $\le 10^{-6}$ — see `check_trunc_convergence.jl`.
 
-The numerical conditions and the Phase A AIM-memory scaling are
+Full numerical conditions, per-orientation Re/Im-resolved tables,
+the $\ell_c$-refinement study, and the Phase A AIM-memory scaling are
 documented in
 **[docs/benchmark_results.md §7–§8](docs/benchmark_results.md#7-two-sphere-doublet-vs-mstm)**.
 

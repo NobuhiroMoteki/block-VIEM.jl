@@ -132,17 +132,20 @@ function measure_one(k::Integer)
     @printf("    ─────────────────────────────\n")
     @printf("    total tracked   %s\n", mib(mem.total))
 
-    # Solve 3 orientations via AIM block-BiCGSTAB.
+    # Solve 3 orientations with the AIM block solver VIEM_METHOD.
     euler_list = [(0.0, β, 0.0) for β in BETAS]
-    t_solve = @elapsed results = solve_cas_v2_orientations(
+    t_solve = @elapsed results, info = solve_cas_v2_orientations(
         basis, euler_list;
         wl_0 = WL_0, m_m = M_MEDIUM, m_p = ComplexF64(MAT.m_p),
-        method = :aim_bicgstab, pitch = pitch, padding = VIEM_PADDING,
+        method = VIEM_METHOD, precond = VIEM_PRECOND, pitch = pitch, padding = VIEM_PADDING,
         tol = VIEM_TOL, maxiter = VIEM_MAXITER, verbose = false,
+        return_solve_info = true,
     )
     GC.gc()
     rss_after_solve = rss_bytes()
-    @printf("  solve (3 orientations): %.2f s\n", t_solve)
+    @printf("  solve (3 orientations): %.2f s  iters=%d  converged=%s  residual=%.3e\n",
+            t_solve, info.iterations, info.converged, info.residual_norm)
+    flush(stdout)
     @printf("  RSS: before=%s MiB, after setup=%s MiB, after solve=%s MiB\n",
             mib(rss_before), mib(rss_after_setup), mib(rss_after_solve))
 
@@ -167,6 +170,11 @@ function measure_one(k::Integer)
         "pitch"         => pitch,
         "t_setup_s"     => t_setup,
         "t_solve_s"     => t_solve,
+        "solver_method"     => String(VIEM_METHOD),
+        "solver_precond"    => String(VIEM_PRECOND),
+        "solver_iterations" => info.iterations,
+        "solver_converged"  => info.converged,
+        "solver_residual"   => info.residual_norm,
         "memory_bytes"  => Dict(pairs(mem)),
         "nnz" => Dict(
             "mass"          => nnz(op.mass),

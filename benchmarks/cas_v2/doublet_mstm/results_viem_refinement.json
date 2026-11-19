@@ -1,0 +1,87 @@
+{
+    "config": {
+        "d_centre": 0.063,
+        "betas": [
+            0,
+            0.7853981633974483,
+            1.5707963267948966
+        ],
+        "lc_ratios": [
+            6
+        ],
+        "material": {
+            "name": "Au",
+            "m_p_re": 0.17525,
+            "m_p_im": 3.483
+        },
+        "R_monomer": 0.03,
+        "gap": 0.003,
+        "m_medium": 1,
+        "wl_0": 0.638
+    },
+    "results": [
+        {
+            "solver_converged": true,
+            "lc_over_R": 0.16666666666666669,
+            "lc": 0.005,
+            "material": "Au",
+            "S_fw_phi_re": 0.006489760649867788,
+            "solver_method": "aim_gmres",
+            "solve_time_s": 286.010908657,
+            "solver_residual": 9.708361795470568e-8,
+            "S_fw_theta_im": 0.00044625713899837415,
+            "solver_precond": "mass_right",
+            "S_fw_mean_re": 0.006489315701519313,
+            "S_fw_phi_im": 0.00044729922924997877,
+            "n_tets": 8895,
+            "S_fw_mean_im": 0.00044677818412417646,
+            "h_bar": 0.00647324626833867,
+            "S_fw_theta_re": 0.006488870753170838,
+            "beta": 0,
+            "solver_iterations": 166,
+            "N_dof": 18917
+        },
+        {
+            "solver_converged": true,
+            "lc_over_R": 0.16666666666666669,
+            "lc": 0.005,
+            "material": "Au",
+            "S_fw_phi_re": 0.00643946350567041,
+            "solver_method": "aim_gmres",
+            "solve_time_s": 286.010908657,
+            "solver_residual": 9.708361795470568e-8,
+            "S_fw_theta_im": 0.0013381989553757272,
+            "solver_precond": "mass_right",
+            "S_fw_mean_re": 0.008225655943526228,
+            "S_fw_phi_im": 0.0004548027891965134,
+            "n_tets": 8895,
+            "S_fw_mean_im": 0.0008965008722861202,
+            "h_bar": 0.00647324626833867,
+            "S_fw_theta_re": 0.010011848381382044,
+            "beta": 0.7853981633974483,
+            "solver_iterations": 166,
+            "N_dof": 18917
+        },
+        {
+            "solver_converged": true,
+            "lc_over_R": 0.16666666666666669,
+            "lc": 0.005,
+            "material": "Au",
+            "S_fw_phi_re": 0.006387670068092739,
+            "solver_method": "aim_gmres",
+            "solve_time_s": 286.010908657,
+            "solver_residual": 9.708361795470568e-8,
+            "S_fw_theta_im": 0.002286318920939556,
+            "solver_precond": "mass_right",
+            "S_fw_mean_re": 0.010077392875835279,
+            "S_fw_phi_im": 0.0004625335129745189,
+            "n_tets": 8895,
+            "S_fw_mean_im": 0.0013744262169570374,
+            "h_bar": 0.00647324626833867,
+            "S_fw_theta_re": 0.013767115683577818,
+            "beta": 1.5707963267948966,
+            "solver_iterations": 166,
+            "N_dof": 18917
+        }
+    ]
+}

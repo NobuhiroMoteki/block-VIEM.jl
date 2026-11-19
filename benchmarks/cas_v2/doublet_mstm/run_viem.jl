@@ -7,7 +7,7 @@
 #     results_viem.json (keyed by "<material>/beta_<β>")
 #
 # Uses `SphereAggregate` + `mesh_sphere_aggregate` to build the doublet,
-# then `solve_cas_v2_orientations(method=:aim_bicgstab)` with one Euler
+# then `solve_cas_v2_orientations(method=VIEM_METHOD)` with one Euler
 # triple per BETA.
 
 using LinearAlgebra: norm
@@ -59,19 +59,22 @@ function solve_one_material(mat)
     # and particle z-axis (= doublet axis).
     euler_list = [(0.0, β, 0.0) for β in BETAS]
 
-    t_solve = @elapsed results = solve_cas_v2_orientations(
+    t_solve = @elapsed results, info = solve_cas_v2_orientations(
         basis, euler_list;
         wl_0   = WL_0,
         m_m    = M_MEDIUM,
         m_p    = ComplexF64(mat.m_p),
-        method = :aim_bicgstab,
+        method = VIEM_METHOD,
+        precond = VIEM_PRECOND,
         pitch  = pitch,
         padding = VIEM_PADDING,
         tol     = VIEM_TOL,
         maxiter = VIEM_MAXITER,
         verbose = false,
+        return_solve_info = true,
     )
-    @printf("  solve: %.2f s\n", t_solve)
+    @printf("  solve: %.2f s  iters=%d  converged=%s  residual=%.3e\n",
+            t_solve, info.iterations, info.converged, info.residual_norm)
 
     # Store records
     recs = Dict{String,Any}[]
@@ -90,6 +93,11 @@ function solve_one_material(mat)
             "N_dof"         => N_dof,
             "n_tets"        => length(mesh.tets),
             "lc"            => lc,
+            "solver_method"     => String(VIEM_METHOD),
+            "solver_precond"    => String(VIEM_PRECOND),
+            "solver_iterations" => info.iterations,
+            "solver_converged"  => info.converged,
+            "solver_residual"   => info.residual_norm,
         ))
         @printf("  β=%.4f  |S_fw_mean|=%.4e  arg(S_fw_mean)=%+.3f rad\n",
                 β, abs(res.S_fw_mean), angle(res.S_fw_mean))
