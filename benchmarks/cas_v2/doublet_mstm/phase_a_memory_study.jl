@@ -16,8 +16,9 @@
 # Usage:
 #     julia --project=. benchmarks/cas_v2/doublet_mstm/phase_a_memory_study.jl
 #
-# Runtime (i7-1265U, 16 GB RAM, Julia 1.11):
-#   R/5  ~90 s, R/6  ~4 min, R/7  ~20 min.
+# Runtime (AMD Ryzen 5 220, 16 GB RAM, Julia 1.12.5, one Julia thread,
+# block GMRES with the mass preconditioner, 2026-11-19):
+#   setup + solve: R/5 ~5 min, R/6 ~9 min, R/7 ~15 min, R/8 ~23 min.
 # Override which refinements to run via BM_LC_RATIOS env (comma-sep).
 
 using LinearAlgebra: norm

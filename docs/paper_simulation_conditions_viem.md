@@ -5,8 +5,8 @@ sweeps.  Mirrors `block-DDA_Py/docs/paper_simulation_conditions_dda.md` for
 direct shape × material × N_DOF comparison between the two solvers.
 
 - **Repository**: `~/Julia/block-VIEM.jl`
-- **Code version**: 論文用データは v0.7.8 で生成（2026-04-28、commit `416cece`）。本文書の記述は v0.8.2（2026-11-19）まで反映
-- **Authoring date**: 2026-04-24（最終更新 2026-11-19）
+- **Code version**: 論文用データは v0.7.8 で生成（2026-04-28、commit `416cece`）。本文書の記述は v0.8.3（2026-11-20）まで反映
+- **Authoring date**: 2026-04-24（最終更新 2026-11-20）
 - **Sister project**: [block-DDA_Py](file:///home/moteki/Python/block-DDA_Py) (paper-symmetric)
 
 ---
@@ -20,7 +20,7 @@ direct shape × material × N_DOF comparison between the two solvers.
 | Package manifest | `Manifest.toml` tracked, `Pkg.update()` / `Pkg.resolve()`禁止 |
 | Threading | `julia --project=. -t auto` (matches `Sys.CPU_THREADS`) |
 | BLAS threads | default (12 on this machine; do **not** force `BLAS.set_num_threads(1)`) |
-| Test status | v0.7.8: 14,422 / 14,422 passing。v0.8.0: 14,720 / 14,720 passing |
+| Test status | v0.7.8: 14,422 / 14,422 passing。v0.8.0: 14,720 / 14,720 passing。v0.8.1: 14,749 / 14,749 passing。v0.8.2, v0.8.3: 14,780 / 14,780 passing |
 
 ---
 
@@ -444,7 +444,8 @@ DDA 側との対称項目（要同期）:
 | v0.7.8 | `a5f8c69` | 論文用スイープと診断を完了。保存済みデータ（`416cece`）はこの版で生成 |
 | **v0.8.0** | `e50a182` | shifted block GMRES による屈折率スイープ（`--shifted-ri`）、`precond = :mass_right`、`S_bk` を erratum の `(−S11+S22)/2` に訂正 |
 | v0.8.1 | `853bf28` | `run_viem.jl` の doublet の gap を `0.0595 R` → `0.1 R` に修正。AIM 経路の異方性質量項を成分ごとの重みに修正（v0.8.0 以前の異方性の AIM 結果は 5–25 % ずれる。`:dense` は正しい） |
-| **v0.8.2** | (本コミット) | `mesh_sphere_aggregate`: 離れた単量体は部分ごとに体積合わせ（中心間距離を保つ）。論文用 doublet 3 ファイルをこの版で作り直し |
+| **v0.8.2** | `fdda12c` | `mesh_sphere_aggregate`: 離れた単量体は部分ごとに体積合わせ（中心間距離を保つ）。論文用 doublet 3 ファイルをこの版で作り直し |
+| v0.8.3 | tag `v0.8.3` | `src/` は v0.8.2 と同じ。README の doublet-vs-MSTM ベンチマーク（`benchmarks/cas_v2/doublet_mstm/`）を v0.8.2 のメッシャーで取り直し、ソルバを block GMRES + 質量行列の右前処理に変更。論文用データと本番ランナーの設定は変更なし |
 
 ---
 

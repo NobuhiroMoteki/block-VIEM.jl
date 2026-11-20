@@ -1,15 +1,19 @@
 # Mesh-refinement study for the 2-sphere doublet benchmark.
 #
-# Purpose: verify that the VIEM discretisation error on the CAS-v2
-# forward observables converges at the theoretical linear-SWG rate
-# `err ~ h^p` (with p ≈ 2 expected) for the plasmonic-gold case
-# where the baseline lc = R/5 run leaves a 10.5 % error on the
-# stiffest component (Im S_fw_θ at β = π/2).
+# Purpose: measure how the VIEM discretisation error on the CAS-v2
+# forward observables changes when the mesh of the plasmonic-gold case
+# is refined from lc = R/5 to lc = R/6.  With v0.8.2 the baseline
+# lc = R/5 run has a 2.3 % error on the stiffest component
+# (Im S_fw_θ at β = π/2).
 #
 # The MSTM side is held fixed at N_trunc = 15 (the converged reference
 # from run_mstm.jl); only the VIEM mesh is refined.  Au is the only
-# material swept — PS already converges to ~1.4 % at R/5 and is not
-# the rate-limiting case.
+# material swept: PS is already within 0.5 % at R/5.
+#
+# The four-level study (R/5 to R/8) of docs/benchmark_results.md §8 is
+# run with phase_a_memory_study.jl and compute_refinement_errors.py.
+# Its errors do not decrease monotonically below R/6, so the two-point
+# exponent fitted from this script is not a convergence rate.
 #
 # Usage:
 #     julia --project=. benchmarks/cas_v2/doublet_mstm/run_viem_refinement.jl
@@ -25,12 +29,11 @@ using BlockVIEM
 include(joinpath(@__DIR__, "config.jl"))
 
 # lc ratios tested: R/k with k ∈ LC_RATIOS.  Combined with the existing
-# R/5 baseline (already in results_viem.json), this provides 2 points
-# for a log-log convergence-rate slope.  Memory footprint of the AIM
-# solver scales faster than N in practice (≈ O(N²) near-field storage
-# for this dense-aggregate geometry), so on a 15 GB RAM workstation
-# only R/6 is feasible as the finer point — R/7 (N≈30K DOFs) OOMs
-# with the block-BiCGSTAB buffer allocation of that time (April 2026).
+# R/5 baseline (already in results_viem.json), this provides 2 points.
+# Only R/6 is run here.  When this script was written (April 2026,
+# before the Phase A surface-moment AIM) R/7 did not fit in 15 GB RAM.
+# Finer levels now run with phase_a_memory_study.jl (R/8 peaks at
+# about 5 GB).
 const LC_RATIOS = (6,)
 
 # Refinement is run on Au only: it has the largest baseline error and

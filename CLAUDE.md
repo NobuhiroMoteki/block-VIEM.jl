@@ -4,6 +4,7 @@
 
 本リポジトリはソルバの実装・検証を完了している。**新規モジュールを設計する段階ではない**；論文掲載用の本番計算を `src/` の既存実装で実行するフェーズ。
 
+- 検証状況 (2026-11-20, v0.8.3): 14,780 / 14,780 テスト全パス on Julia 1.12.5（`src/` とテストは v0.8.2 と同じ）。
 - 検証状況 (2026-11-19, v0.8.2): 14,780 / 14,780 テスト全パス on Julia 1.12.5（v0.8.1 の 14,749 件 + 集合体メッシュ 31 件）。
 - 検証状況 (2026-11-19, v0.8.1): 14,749 / 14,749 テスト全パス（v0.8.0 の 14,720 件 + 異方性 AIM 29 件）。
 - 検証状況 (2026-11-19, v0.8.0): 14,720 / 14,720 テスト全パス（v0.7.9 までの 14,439 件 + shift スイープ 238 件 + `S_bk` 43 件）。
@@ -163,11 +164,11 @@ HDF5 スイープを起動する前に必ず:
 
 - `S_bk`（HDF5 の `S_bk_OCBS`）は `(−S_bk_θ + S_bk_φ)/2 = (−S11 + S22)(180°)/2`。Moteki and Adachi (2024) Eq. (28) の erratum の修正式で、block-DDA_Py v0.8.2 以降と同じ
 - v0.7.9 以前は印刷版の `1/√2` を使っており、`S_bk` は現行の √2 倍だった（位相、VIEM/参照値の比、前方散乱振幅、断面積は同じ）
-- `viem_results/paper/` の HDF5 はすべて修正式に揃えてある（2026-11-19、ユーザー指示）。`doublet_*.hdf5` は v0.8.2 で作り直し。それ以外（sphere / oblate / gre / pilot の VIEM と Mie、MSTM の `mstm_doublet_*.hdf5`、T-matrix の `tmm_oblate*.hdf5`、`convergence_*.hdf5`）は保存値に 1/√2 を掛けて変換した。再計算はしておらず、後方散乱振幅以外のデータセットは元のまま。属性 `S_definition`（無いファイルは `S_bk_definition`）と `S_bk_conversion_note` で確認できる。v0.7.8 が作った元のファイルは git 履歴の `416cece`外部にある v0.7.9 以前のファイルと比べるときは、その `S_bk` に 1/√2 を掛ける
+- `viem_results/paper/` の HDF5 はすべて修正式に揃えてある（2026-11-19、ユーザー指示）。`doublet_*.hdf5` は v0.8.2 で作り直し。それ以外（sphere / oblate / gre / pilot の VIEM と Mie、MSTM の `mstm_doublet_*.hdf5`、T-matrix の `tmm_oblate*.hdf5`、`convergence_*.hdf5`）は保存値に 1/√2 を掛けて変換した。再計算はしておらず、後方散乱振幅以外のデータセットは元のまま。属性 `S_definition`（無いファイルは `S_bk_definition`）と `S_bk_conversion_note` で確認できる。v0.7.8 が作った元のファイルは git 履歴の `416cece` にある。外部にある v0.7.9 以前のファイルと比べるときは、その `S_bk` に 1/√2 を掛ける
 - 新しく作る HDF5 の `S_definition` 属性は `.../2`。`run_viem.jl` は旧定義の結果が入ったファイルへの追記を拒否する
 - 回帰ガード: [test/test_backward_amplitude.jl](test/test_backward_amplitude.jl) は常時グリーン
 
-## 12. v0.8.1 / v0.8.2 の修正（2026-11-19）
+## 12. v0.8.1 / v0.8.2 の修正（2026-11-19）と v0.8.3（2026-11-20）
 
 - **doublet の形状**: 中心間距離 `2.1 R`、gap `0.1 R`（文書と MSTM 参照どおり）
   - v0.8.2: `mesh_sphere_aggregate` は、離れた部分からなる集合体を部分ごとに体積合わせする（`_rescale_to_monomer_volumes!`）。各球を自分の中心のまわりで公称体積に合わせるので、中心間距離はメッシュの粗さにも `overlap_factor` にも依らない。つながった集合体は従来どおり原点まわりの一様スケール
@@ -182,9 +183,10 @@ HDF5 スイープを起動する前に必ず:
     - MSTM との差（R/5）: PS は全成分 0.5 % 以内、Au は `|S_fw_mean|` が 0.004 % / 0.69 % / 1.09 %（β = 0, π/4, π/2）、最大は Im `S_fw_θ` の 2.34 %。旧結果は最大 10.5 % で、その大半は旧メッシャーの中心間距離の誤差だった
     - 細分化（Au、R/5〜R/8）: R/6 以降は全成分が 0.41 % 以内。誤差は単調に減らないので、収束次数は掲載していない。旧結果の `p ≈ 2` は中心間距離の誤差の減り方を見ていた
     - 再実行の手順: `run_viem.jl` → `run_viem_refinement.jl` → `compare.jl` / `compare_refinement.jl`、4 段階の表は `BM_LC_RATIOS=5,6,7,8` の `phase_a_memory_study.jl` → `compute_refinement_errors.py`
+    - `compare_refinement.jl` は 3 段階以上あるときだけ指数をフィットする（既定の R/5, R/6 の 2 段階では誤差の表だけ）。`compute_refinement_errors.py` は誤差が単調でない成分に印を付ける。`refinement.md` は追跡していない
     - 本番（`viem_results/run_viem.jl`）は前処理なし・最大 200 反復のまま。Au doublet の本番で `:mass_right` を使うかは未決定
 - **異方性の AIM 経路**: 質量項は `Σ_α (1/ε_α) M_α`（`AIMOperator.mass_weighted`、`assemble_weighted_mass_matrix`）。v0.8.0 までの AIM 経路は `1/ε_α` の平均を使っており、異方性粒子の観測量が 5–25 % ずれていた。`:dense` は以前から正しい。等方の結果は変わらない
   - v0.8.0 以前に `:aim_gmres` で作った異方性の結果（`ironoxide_sweep_h5.jl --form-biref` / `--biaxial` の表、`form_birefringence_probe.jl`、`biaxial_probe.jl`）は作り直しが要る
   - 回帰ガード: [test/test_anisotropic.jl](test/test_anisotropic.jl) の AIM 対 密行列の比較
 - **`run_viem.jl` の失敗時処理**: 既定モードでソルバが例外を出したとき、NaN を書いた後に止まっていた（番兵に `residual_history` が無かった）。修正済みで、NaN を埋めて次の条件へ進む
-
+- **v0.8.3**（2026-11-20）: `src/` は v0.8.2 と同じ。内容は doublet-vs-MSTM ベンチマークの取り直し（上記）、ベンチマークスクリプトのソルバ設定と収束の記録、文書の更新。v0.7.9 以来の GitHub リリース（タグ `v0.8.3`）。v0.8.0〜v0.8.2 にはタグが無い

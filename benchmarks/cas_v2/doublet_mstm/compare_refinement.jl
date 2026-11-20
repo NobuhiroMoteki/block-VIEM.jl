@@ -1,6 +1,9 @@
 # Analyse the mesh-refinement sweep: compute VIEM-vs-MSTM relative
-# errors at every (lc, β) point, then fit the convergence rate
-# `err ~ h^p` in log-log on each observable component.
+# errors at every (lc, β) point.  An exponent `err ~ h^p` is fitted in
+# log-log on each observable component only when at least
+# MIN_LEVELS_FOR_FIT refinement levels are present.  With the default
+# inputs (R/5 and R/6) only the error tables are written: an exponent
+# from two levels is not a convergence rate.
 #
 # Inputs (produced by run_mstm.jl and run_viem_refinement.jl):
 #   results_mstm.json           — MSTM reference at N=15
@@ -8,7 +11,8 @@
 #   results_viem_refinement.json — refinement VIEM at lc = R/k for k in LC_RATIOS
 #
 # Outputs:
-#   refinement.md   — human-readable convergence table + fitted exponents
+#   refinement.md   — human-readable error tables (+ fitted exponents
+#                     when enough levels are present)
 #
 # Usage:
 #   julia --project=. benchmarks/cas_v2/doublet_mstm/compare_refinement.jl
@@ -25,6 +29,9 @@ function load_records(path::AbstractString)
         return collect(doc.results)
     end
 end
+
+# Smallest number of refinement levels for which an exponent is fitted.
+const MIN_LEVELS_FOR_FIT = 3
 
 cplx(r, pre) = Complex(Float64(r[Symbol(pre * "_re")]), Float64(r[Symbol(pre * "_im")]))
 
@@ -74,22 +81,20 @@ function main()
     ratio_str = join(["R/" * string(Int(round(1/r))) for r in present_ratios], ", ")
 
     hdr = """
-# Mesh-refinement convergence: 2-sphere Au doublet
+# Mesh refinement: 2-sphere Au doublet
 
 Refines the linear-SWG discretisation at a sequence of mesh sizes
 `lc / R ∈ {$(ratio_str)}` with the MSTM reference held fixed at
 `N_trunc = 15` (converged to rtol ≤ 1e-6).  The relative errors of
 the five CAS-v2 complex components (`|S_fw_mean|`, `Re/Im S_fw_θ`,
-`Re/Im S_fw_φ`) are tabulated below for each β, followed by the
-fitted convergence exponent `p` from `err ~ (lc/R)^p` (log-log fit).
+`Re/Im S_fw_φ`) are tabulated below for each β.
 
-A first-order linear-SWG basis is expected to give `p ≈ 2` on smooth
-observables; a shallower slope indicates the error is dominated by
-something other than the bulk mesh (e.g. boundary-layer resolution
-of the plasmonic surface mode, geometric faceting).  Conversely a
-slope `p > 2` is typical when the baseline error is already dominated
-by higher-order (boundary-curvature) terms that cancel more rapidly
-than the interior O(h²) contribution.
+An exponent `p` of `err ~ (lc/R)^p` (log-log least-squares fit) is
+given only when at least $(MIN_LEVELS_FOR_FIT) refinement levels are present.
+A fitted exponent is a convergence rate only where the error decreases
+monotonically with `lc`.  Components for which it does not are marked.
+In the four-level study of docs/benchmark_results.md §8 (R/5 to R/8)
+the errors below R/6 are not monotone, and no rate is quoted there.
 """
     println(hdr);  println(buf, hdr)
 
@@ -154,28 +159,35 @@ than the interior O(h²) contribution.
             println(row);  print(buf, row, "\n")
         end
 
-        # Fit convergence exponent on each component (need ≥ 2 distinct lc).
-        if length(abs_ratios) >= 2
-            pline = "\nFitted convergence exponent `p` from `err ~ (lc/R)^p`:\n\n"
-            pline *= "| component | p | err at smallest lc |\n|-----------|---|--------------------|\n"
+        # Fit an exponent on each component.  `abs_ratios` runs from the
+        # coarsest to the finest level, so a converging error is sorted in
+        # decreasing order.
+        if length(abs_ratios) >= MIN_LEVELS_FOR_FIT
+            pline = "\nFitted exponent `p` from `err ~ (lc/R)^p`:\n\n"
+            pline *= "| component | p | err at smallest lc | monotone |\n|-----------|---|--------------------|----------|\n"
             for (_, label, comp_key) in components
                 f = loglog_fit(abs_ratios, errs[comp_key])
                 fit_results[(comp_key, β)] = f
                 i_min = argmin(abs_ratios)
                 err_min = errs[comp_key][i_min]
-                pline *= @sprintf("| %s | %.2f | %.2e |\n", label, f.p, err_min)
+                mono = issorted(errs[comp_key]; rev = true) ? "yes" : "no (not a rate)"
+                pline *= @sprintf("| %s | %.2f | %.2e | %s |\n", label, f.p, err_min, mono)
             end
             println(pline);  print(buf, pline)
+        else
+            note = @sprintf("\n%d refinement levels: no exponent is fitted (at least %d are needed).\n",
+                            length(abs_ratios), MIN_LEVELS_FOR_FIT)
+            println(note);  print(buf, note)
         end
     end
 
-    # ── Summary conclusion section ───────────────────────────────────
+    # ── Summary of the fitted exponents (only when a fit was made) ───
     concl = """
 
-## Convergence summary
+## Fitted exponents
 
 """
-    println(concl);  print(buf, concl)
+    isempty(fit_results) || (println(concl);  print(buf, concl))
     for β in BETAS
         for (_, label, comp_key) in components
             if haskey(fit_results, (comp_key, β))
