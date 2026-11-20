@@ -289,6 +289,7 @@ multi-orientation light scattering across the dielectric–metal contrast range"
 
 ## Tags and releases
 
-Git tags exist for 0.1.0 to 0.6.0 (except 0.3.1), 0.7.9 and 0.8.3 onwards. The versions
-0.7.0 to 0.7.8 and 0.8.0 to 0.8.2 have no tag. Their commits are found by the version in
-`Project.toml`. GitHub releases exist for 0.7.9 and from 0.8.3.
+Git tags exist for 0.1.0 to 0.6.0 (except 0.3.1), 0.7.9 and all versions from 0.8.0. The
+tags of 0.8.0 to 0.8.2 were added on 2026-11-20 and point to the commits of 2026-11-19
+that carry these versions. The versions 0.7.0 to 0.7.8 have no tag. Their commits are
+found by the version in `Project.toml`. GitHub releases exist for 0.7.9 and from 0.8.3.
