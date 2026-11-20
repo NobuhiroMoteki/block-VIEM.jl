@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Compute Au-doublet CAS-v2 convergence table at beta=pi/2 for all
-Phase A refinements in `phase_a_memory.json` (merged with the
-backed-up R/5/6/7 file if needed) against the MSTM N=15 reference.
+"""Compute the Au-doublet CAS-v2 error table at beta=pi/2 for all
+refinement levels in `phase_a_memory.json` against the MSTM N=15
+reference.
 
-Writes the Markdown convergence table to stdout for paste into
-README.md and docs/theory_note.tex.
+Writes the Markdown table and the log-log fitted exponents to stdout.
+They are the source of docs/benchmark_results.md sections 8.1 and 8.2.
+A fitted exponent is a convergence rate only where the error decreases
+monotonically with the mesh size. Components for which it does not are
+marked in the output.
 """
 import json
 import math
@@ -14,19 +17,8 @@ from pathlib import Path
 BASE = Path(__file__).parent
 
 def load_records():
-    """Merge phase_a_memory.json with /tmp/phase_a_memory_R567.json if
-    the current file is missing refinements R/5..R/7."""
+    """Records of phase_a_memory.json, sorted from the coarsest level."""
     current = json.loads((BASE / "phase_a_memory.json").read_text())
-    have = {r["lc_ratio"] for r in current["records"]}
-    backup_path = Path("/tmp/phase_a_memory_R567.json")
-    if backup_path.exists():
-        backup = json.loads(backup_path.read_text())
-        merged = list(current["records"])
-        for r in backup["records"]:
-            if r["lc_ratio"] not in have:
-                merged.append(r)
-        merged.sort(key=lambda r: r["lc_ratio"])
-        return merged
     return sorted(current["records"], key=lambda r: r["lc_ratio"])
 
 def load_mstm_au_beta_pi2():
@@ -102,7 +94,10 @@ def main():
             errs = [r[i] for r in rows]
             if all(e > 0 for e in errs):
                 p = fit_slope(ks, errs)
-                print(f"  {name:16s} p = {p:+.2f}")
+                # ks runs from the coarsest level: a converging error decreases.
+                monotone = all(a > b for a, b in zip(errs, errs[1:]))
+                flag = "" if monotone else "   (error not monotone: not a rate)"
+                print(f"  {name:16s} p = {p:+.2f}{flag}")
 
 if __name__ == "__main__":
     main()
