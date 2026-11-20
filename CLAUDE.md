@@ -189,5 +189,5 @@ HDF5 スイープを起動する前に必ず:
   - v0.8.0 以前に `:aim_gmres` で作った異方性の結果（`ironoxide_sweep_h5.jl --form-biref` / `--biaxial` の表、`form_birefringence_probe.jl`、`biaxial_probe.jl`）は作り直しが要る
   - 回帰ガード: [test/test_anisotropic.jl](test/test_anisotropic.jl) の AIM 対 密行列の比較
 - **`run_viem.jl` の失敗時処理**: 既定モードでソルバが例外を出したとき、NaN を書いた後に止まっていた（番兵に `residual_history` が無かった）。修正済みで、NaN を埋めて次の条件へ進む
-- **v0.8.3**（2026-11-20）: `src/` は v0.8.2 と同じ。内容は doublet-vs-MSTM ベンチマークの取り直し（上記）、ベンチマークスクリプトのソルバ設定と収束の記録、文書の更新。v0.7.9 以来の GitHub リリース（タグ `v0.8.3`）。v0.8.0〜v0.8.2 にはタグが無い
+- **v0.8.3**（2026-11-20）: `src/` は v0.8.2 と同じ。内容は doublet-vs-MSTM ベンチマークの取り直し（上記）、ベンチマークスクリプトのソルバ設定と収束の記録、文書の更新。v0.7.9 以来の GitHub リリース（タグ `v0.8.3`）。v0.8.0〜v0.8.2 のタグは 2026-11-20 に後付けした（`main` のマージコミット `c83e4b0`, `a827851`, `86ba369`。GitHub リリースは無い）
 - **v0.8.4**（2026-11-20）: 文書だけの版。[CHANGELOG.md](CHANGELOG.md) を追加（MSTMforCAS.jl と同じ形式。冒頭に「結果が変わる修正」の表）。版を上げるときは CHANGELOG.md に節を足す。v0.8.3 の文書とリリースノートにあった「旧ベンチマーク誤差は中心間距離が原因」という説明は誤りで、v0.8.4 で訂正した（上の doublet の項）
