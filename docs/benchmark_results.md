@@ -302,22 +302,31 @@ near-field, AIM, and far-field paths.
 ## 7. Two-sphere doublet vs MSTM
 
 > **Re-run with v0.8.2 (2026-11-19).** The results of §7 and §8 were
-> computed again with v0.8.2. Two things differ from the earlier results
-> (git history, commit `d1482fa`):
+> computed again with v0.8.2. The earlier results (git history, commit
+> `d1482fa`) dated from April 2026 (v0.4.2 to v0.5.0). Two things differ:
 >
-> - **Mesher.** Until v0.8.1 the whole doublet mesh was scaled uniformly
->   to the nominal volume, so the centre distance of the two spheres was
->   larger than the nominal $2.1 R$ by the scale factor (about 1 % at
->   $\ell_c = R/5$, less on finer meshes). From v0.8.2 each sphere is
->   scaled about its own centre and the centre distance is exactly
->   $2.1 R$.
+> - **Mesh volume.** In April 2026 the mesh was used as Gmsh returned
+>   it. Its nodes lie on the nominal spheres, so the centre distance
+>   ($2.1 R$) and the gap ($0.1 R$) were nominal, but the volume of the
+>   faceted spheres was below the nominal volume: by 1.40 %, 1.00 %,
+>   0.72 % and 0.53 % at $\ell_c = R/5, R/6, R/7, R/8$. From v0.7.7 the
+>   mesh is scaled to the nominal volume, and from v0.8.2 each sphere is
+>   scaled about its own centre, so the centre distance stays $2.1 R$.
 > - **Solver.** The earlier runs used AIM block BiCGSTAB. The present
 >   runs use AIM block GMRES with right preconditioning by the mass
 >   matrix (§7.2). Every solve reported here reached the tolerance
 >   $10^{-7}$.
 >
-> The errors against MSTM are several times smaller than before. Most of
-> the earlier error of the Au doublet came from the centre distance.
+> The errors against MSTM are several times smaller than before. The
+> difference comes from the mesh volume and not from the solver. This
+> was checked at $\ell_c = R/5$ by solving the mesh without the volume
+> rescale with the present solver (2026-11-20, $\beta = \pi/2$):
+>
+> | Mesh | Solver | PS $\|S_\text{fw,mean}\|$ | Au $\|S_\text{fw,mean}\|$ | Au $\operatorname{Im} S_{\text{fw},\theta}$ |
+> | ---- | ------ | ----- | ----- | ----- |
+> | no volume rescale | block BiCGSTAB (results of April 2026) | 1.6 % | 4.0 % | 10.5 % |
+> | no volume rescale | block GMRES, converged | 1.62 % | 4.36 % | 10.62 % |
+> | each sphere scaled to its nominal volume (v0.8.2) | block GMRES, converged | 0.13 % | 1.09 % | 2.34 % |
 
 Drivers under [benchmarks/cas_v2/doublet_mstm/](../benchmarks/cas_v2/doublet_mstm/):
 
@@ -441,8 +450,10 @@ for generic aggregates.
 
 All components agree with MSTM within 0.5 %: the real parts within
 0.05–0.20 % and the imaginary parts within 0.08–0.48 %. The errors of
-the earlier run (v0.8.1 mesher) were 1.4–1.7 % on the real parts and
-1.7–2.7 % on the imaginary parts.
+the earlier run (April 2026, mesh without the volume rescale) were
+1.4–1.7 % on the real parts and 1.7–2.7 % on the imaginary parts. The
+error of the real parts was close to the volume deficit of that mesh
+(1.40 %).
 
 ### 7.4 Plasmonic Au doublet — $m_p = 0.17525 + 3.4830\,i$
 
@@ -492,11 +503,16 @@ The component view is therefore the better indicator when $\ell_c$ is
 chosen for plasmonic targets. One refinement step to $\ell_c = R/6$
 brings every component within 0.4 % (§8).
 
-The earlier run (v0.8.1 mesher, block BiCGSTAB) had errors of 4.0 % on
-$|S_\text{fw,mean}|$ and 10.5 % on
-$\operatorname{Im} S_{\text{fw},\theta}$ at $\beta = \pi/2$. The
-$\theta$ channel is sensitive to the gap width, and the centre distance
-of that mesh was about 1 % too large.
+The earlier run (April 2026, mesh without the volume rescale, block
+BiCGSTAB) had errors of 4.0 % on $|S_\text{fw,mean}|$ and 10.5 % on
+$\operatorname{Im} S_{\text{fw},\theta}$ at $\beta = \pi/2$. These
+errors are reproduced with the present solver on the mesh without the
+rescale (4.36 % and 10.62 %, see the note at the top of §7). They
+exceed the volume deficit of that mesh (1.40 %) several times. A likely
+reason is that the faces of the unscaled mesh lie inside the nominal
+spheres, so the two surfaces are on average farther apart than the
+nominal gap, and the $\theta$ channel is sensitive to the gap. This
+interpretation was not tested separately.
 
 ---
 
@@ -538,8 +554,9 @@ $R/7$ for the $\theta$ channel, and the sign of the error of
 $\operatorname{Im} S_{\text{fw},\theta}$ changes between levels
 (−2.34 %, +0.03 %, +0.14 %, −0.41 %).
 
-The earlier run (v0.8.1 mesher) gave 4.4 %, 2.7 %, 1.9 % and 1.6 % on
-$|S_\text{fw,mean}|$ for the same four levels.
+The earlier run (April 2026, mesh without the volume rescale) gave
+4.4 %, 2.7 %, 1.9 % and 1.6 % on $|S_\text{fw,mean}|$ for the same four
+levels.
 
 ### 8.2 Fitted convergence rate $p$ in $\text{err} \propto (\ell_c/R)^p$
 
@@ -562,12 +579,14 @@ the scatter was not investigated. Candidates are the AIM approximation
 of the far-field interactions and the change of the unstructured mesh
 in the gap region from level to level.
 
-The earlier results (v0.8.1 mesher) gave $p = 2.1$–$2.5$ on every
-component. Those errors were dominated by the centre-distance error of
-the uniformly scaled mesh, which decreases with $\ell_c$ as the volume
-defect of the faceted spheres does. That agreement with the linear-SWG
-rate $p \approx 2$ is therefore not a measurement of the convergence
-rate of the solver.
+The earlier results (April 2026) gave $p = 2.1$–$2.5$ on every
+component. They were computed on meshes without the volume rescale,
+whose errors were dominated by the geometric error of the faceted
+spheres. That error decreases as $\ell_c^2$: the volume deficit of the
+four meshes (1.40 %, 1.00 %, 0.72 %, 0.53 %) has the exponent 2.07. The
+earlier exponents therefore measured the geometric error of the
+unscaled mesh. The volume rescale removes most of that error, and the
+remaining errors are too small and too irregular for a fit.
 
 ### 8.3 Phase A AIM-operator memory
 
@@ -601,7 +620,7 @@ over the four levels, which run in one process. The projected
 same 16 GB machine.
 
 The times of the earlier measurement (April 2026, Intel i7-1265U,
-block BiCGSTAB, v0.8.1 mesher) were 105–410 s for the
+block BiCGSTAB, mesh without the volume rescale) were 105–410 s for the
 setup and 201–925 s for the solve. The operator memory was the same
 within 0.5 %.
 

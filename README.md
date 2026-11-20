@@ -8,6 +8,8 @@ A Julia implementation of the **Volume Integral Equation Method (VIEM)** for
 electromagnetic scattering by arbitrarily shaped, high-contrast dielectric
 particles (e.g., iron-oxide aggregates, rough gold nanoparticles).
 
+**Changes and corrections:** see [CHANGELOG.md](CHANGELOG.md). Its first section lists the corrections that change numerical results, with the affected versions.
+
 block-VIEM.jl is designed as a **higher-accuracy successor** to
 [`block-DDA_Py`](https://github.com/NobuhiroMoteki/block-DDA_Py),
 targeting scattering problems where DDA does not converge or provides
@@ -525,12 +527,15 @@ axis. With $\ell_c = R/6$ to $R/8$ every component of the Au doublet
 is within 0.41 % of MSTM at all three orientations. The errors at these
 levels do not decrease monotonically, so no convergence rate is quoted.
 
-The earlier results (git history, commit `d1482fa`) had errors up to
-10.5 % for Au. They were computed with the doublet mesher of v0.8.1 or
-earlier, whose centre distance was about 1 % too large at
-$\ell_c = R/5$. Block BiCGSTAB, the solver of the earlier runs, does
-not converge for the Au doublet (residual $8 \times 10^{-3}$ after 400
-iterations).
+The earlier results (April 2026, git history, commit `d1482fa`) had
+errors up to 10.5 % for Au. They were computed before v0.7.7 on meshes
+that were not scaled to the nominal volume. The volume of the faceted
+spheres was 1.4 % too small at $\ell_c = R/5$. Solving that mesh with
+the present solver reproduces the earlier errors, so the improvement
+comes from the volume rescale. Block BiCGSTAB, the solver of the
+earlier runs, does not converge for the Au doublet (residual
+$8 \times 10^{-3}$ after 400 iterations), which changes the amplitudes
+by up to 0.5 %.
 
 **Note on MSTMforCAS truncation order.** The MSTMforCAS
 auto-truncation returns $N_\text{trunc} = 3$ at $x \approx 0.3$,
@@ -596,6 +601,8 @@ julia --project=. benchmarks/cas_v2/doublet_mstm/compare.jl
   benchmarks (Mie, MSTM, block-DDA_Py) with full numerical conditions
   and per-observable error tables
 - `docs/io_spec.md` — block-DDA_Py compatible I/O specification
+- `CHANGELOG.md` — changes by version, and the corrections that change
+  numerical results
 - Primary literature: Schaubert, Wilton and Glisson (1984); Volakis and
   Sertel, *Integral Equation Methods for Electromagnetics*; Sheng and
   Song, *Essentials of Computational Electromagnetics*; Mousavi and

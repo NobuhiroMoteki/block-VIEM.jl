@@ -18,7 +18,8 @@ for Light Scattering by Arbitrary Dielectric Particles}
 Sec.~\ref{sec:S-bk} corrected in block-VIEM.jl v0.8.0; the
 descriptions of the implementation in the other sections were brought
 in line with the code in v0.8.1 and v0.8.2; the doublet benchmark of
-Sec.~\ref{sec:doublet-mstm} was re-run for v0.8.3)}
+Sec.~\ref{sec:doublet-mstm} was re-run for v0.8.3 and its discussion
+corrected in v0.8.4)}
 
 \begin{document}
 \maketitle
@@ -1523,9 +1524,18 @@ The two converged solutions agree to eight digits.
 Results published before v0.8.2 showed larger errors for this
 benchmark, up to \SI{10.5}{\percent} on $\Im S_{\text{fw},\theta}$,
 and a fitted rate $p \approx 2$.
-The mesher of that time scaled the whole mesh uniformly, so the centre
-distance was too large by about \SI{1}{\percent} at $\ell_c = R/5$.
-That geometric error dominated the earlier numbers.
+They dated from April 2026 and were computed on meshes that were not
+scaled to the nominal volume.
+The volume of the faceted spheres was \SI{1.40}{\percent} below the
+nominal volume at $\ell_c = R/5$ and \SI{0.53}{\percent} below it at
+$\ell_c = R/8$.
+Solving the unscaled mesh at $\ell_c = R/5$ with the present solver
+reproduces the earlier errors (\SI{10.6}{\percent} on
+$\Im S_{\text{fw},\theta}$ at $\beta = \pi/2$).
+The earlier errors were therefore geometric errors of the unscaled
+mesh, and their rate $p \approx 2$ was the rate at which the faceted
+spheres approach the nominal ones.
+The volume rescale removes most of this error.
 
 Phase A (Sec.~\ref{sec:aim-surface}) brings the AIM-operator memory to
 a near-linear $\mathcal{O}(N_{\text{dof}}^{1.05})$ scaling, so the
